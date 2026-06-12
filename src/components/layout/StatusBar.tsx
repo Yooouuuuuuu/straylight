@@ -11,7 +11,7 @@ const STATE_TEXT: Record<ConnectionState, string> = {
 };
 
 export function StatusBar() {
-  const connection = useAppStore((s) => s.connection);
+  const remote = useAppStore((s) => s.remote);
   const connState = useAppStore((s) => s.connState);
   const connMessage = useAppStore((s) => s.connMessage);
   const openFile = useAppStore((s) => s.openFile);
@@ -22,8 +22,17 @@ export function StatusBar() {
   return (
     <footer className="statusbar">
       <span className="statusbar__item" title={connMessage ?? undefined}>
-        <span className={`dot dot--${connState}`} />
-        {connection ? connection.name : "—"} · {STATE_TEXT[connState]}
+        {remote ? (
+          <>
+            <span className={`dot dot--${connState}`} />
+            {remote.name} · {STATE_TEXT[connState]}
+          </>
+        ) : (
+          <>
+            <span className="dot dot--local" />
+            Local
+          </>
+        )}
       </span>
 
       {openFile && (
@@ -34,7 +43,7 @@ export function StatusBar() {
 
       <span className="statusbar__spacer" />
 
-      {connection && (
+      {remote && (
         <span
           className="statusbar__item statusbar__item--button"
           onClick={() => toggleTerminal()}

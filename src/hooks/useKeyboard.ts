@@ -18,7 +18,7 @@ export function useKeyboard() {
 
       switch (action) {
         case "toggleTerminal":
-          if (store.connection) {
+          if (store.remote) {
             store.toggleTerminal();
             event.preventDefault();
           }
@@ -39,10 +39,8 @@ export function useKeyboard() {
           }
           break;
         case "refreshTree":
-          if (store.connection) {
-            store.refreshTree();
-            event.preventDefault();
-          }
+          store.refreshTree();
+          event.preventDefault();
           break;
       }
     }

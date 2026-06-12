@@ -9,11 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Planned
 
-- **Phase 2 (multi-transport):** a `FileTransport` trait with Local (`std::fs`),
-  SSH/SFTP, and WSL backends sharing the same UI; file editing and save; tabs;
-  drag-and-drop transfers; auto-reconnect; session persistence.
+- **Editing + save** (local and remote): `write_file` on the transport, dirty
+  state, Ctrl+S, and save-conflict detection.
+- **Local terminal** (ConPTY) and a **WSL** transport.
+- Tabs, drag-and-drop transfers, auto-reconnect, and session persistence.
 - **Phase 3:** git status / blame / log / diff, Podman containers, fuzzy finder,
   search-in-files, port forwarding, Markdown preview, and auto-update.
+
+## [0.2.0] - 2026-06-12
+
+Phase 2 begins: a transport abstraction with local-filesystem support, and a
+multi-root sidebar that shows local folders and one remote at the same time.
+
+### Added
+
+- **Local filesystem support** — browse and view local files in the same UI as
+  remote, via a new `FileTransport` abstraction (SFTP and `std::fs` behind one
+  trait; transport-agnostic `fs_list_dir` / `fs_read_file` / `fs_stat`).
+- **Multi-root sidebar** — a **Local** section (pinned folders, persisted across
+  restarts) and a **Remote** section (one SSH host), shown at the same time. Pin
+  a folder with **+ / Open folder**; remove it with the × on hover.
+- **One local + one remote per window** — connecting a server attaches it as a
+  root alongside the local folders; a second server replaces the first.
+- **Edit `~/.ssh/config` in-app** — the **Edit** action opens the config in the
+  editor instead of an external program.
+
+### Changed
+
+- The title bar now identifies the attached **remote host**, or shows **Local**
+  with a neutral indicator distinct from the green "connected" state.
+- The large-file truncation banner and toast appear only when a file is opened in
+  the editor — never on the binary info card.
+- Removed the fixed "This PC" entry in favor of user-pinned folders.
+
+### Notes
+
+- Still read-only; file **editing + save** (local and remote) is the next step.
+- No local terminal yet — the terminal is bound to the remote connection.
 
 ## [0.1.0] - 2026-06-12
 
@@ -79,5 +111,6 @@ terminal, in a Dracula-themed, VS Code-style window built on Tauri v2 and React.
 - Verified with `tsc --noEmit` and `vite build` (frontend) and `cargo check` and
   `cargo test` (backend, 4 tests passing).
 
-[Unreleased]: https://github.com/straylight-app/straylight/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/straylight-app/straylight/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Yooouuuuuuu/straylight/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/Yooouuuuuuu/straylight/releases/tag/v0.1.0

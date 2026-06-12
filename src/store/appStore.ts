@@ -1,8 +1,10 @@
 /**
  * Global application state (Zustand).
  *
- * One window owns one connection in Straylight, so a single flat store models
- * the whole UI: the active connection, the open file, and panel visibility.
+ * A window always has a **local** session (the local filesystem) and may attach
+ * **one remote** SSH connection. The sidebar shows pinned local folders plus the
+ * remote host as separate roots; the editor opens files from either (each open
+ * file records the `connId` it came from).
  */
 import { create } from "zustand";
 
@@ -10,6 +12,8 @@ import type { ConnectionState, SshHostEntry } from "../lib/ipc";
 
 /** A file currently shown in the editor. */
 export interface OpenFile {
+  /** The session this file was read from (local session or an SSH connection). */
+  connId: string;
   path: string;
   name: string;
   content: string;
@@ -22,8 +26,8 @@ export interface OpenFile {
   lineEnding: "LF" | "CRLF";
 }
 
-/** Metadata for the window's active connection. */
-export interface ConnectionMeta {
+/** The window's single remote SSH connection. */
+export interface RemoteConnection {
   connId: string;
   name: string;
   host: string;
@@ -44,23 +48,47 @@ export interface Notice {
   text: string;
 }
 
+const PINNED_KEY = "straylight.pinnedFolders";
+
+function loadPinned(): string[] {
+  try {
+    const raw = localStorage.getItem(PINNED_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((x): x is string => typeof x === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePinned(folders: string[]): void {
+  try {
+    localStorage.setItem(PINNED_KEY, JSON.stringify(folders));
+  } catch {
+    /* ignore quota/availability errors */
+  }
+}
+
 interface AppState {
-  // Connection -----------------------------------------------------------
-  connection: ConnectionMeta | null;
+  // Local session (always available) ------------------------------------
+  localConnId: string | null;
+  /** Pinned local folders shown as roots; persisted to localStorage. */
+  pinnedFolders: string[];
+
+  // Remote (optional, one) ----------------------------------------------
+  remote: RemoteConnection | null;
+  remoteRootPath: string | null;
   connState: ConnectionState;
   connMessage: string | null;
 
   // UI -------------------------------------------------------------------
   dialogOpen: boolean;
-  /** When the dialog is opened from a config host, its details prefill the form. */
   dialogPrefill: SshHostEntry | null;
   sidebarVisible: boolean;
   terminalVisible: boolean;
   showHidden: boolean;
-
-  // File tree ------------------------------------------------------------
-  rootPath: string | null;
-  /** Bumped to force the tree to re-fetch (F5 / refresh). */
+  /** Bumped to force the trees to re-fetch (refresh). */
   treeRefreshToken: number;
 
   // Editor ---------------------------------------------------------------
@@ -72,9 +100,13 @@ interface AppState {
   notices: Notice[];
 
   // Actions --------------------------------------------------------------
-  setConnection: (connection: ConnectionMeta) => void;
+  setLocalConnId: (id: string) => void;
+  addPinnedFolder: (path: string) => void;
+  removePinnedFolder: (path: string) => void;
+
+  setRemote: (remote: RemoteConnection, rootPath: string) => void;
+  clearRemote: () => void;
   setConnState: (state: ConnectionState, message?: string | null) => void;
-  clearConnection: () => void;
 
   setDialogOpen: (open: boolean) => void;
   openDialog: (prefill?: SshHostEntry | null) => void;
@@ -83,8 +115,6 @@ interface AppState {
   toggleTerminal: () => void;
   setTerminalVisible: (visible: boolean) => void;
   toggleHidden: () => void;
-
-  setRootPath: (path: string | null) => void;
   refreshTree: () => void;
 
   setOpenFile: (file: OpenFile | null) => void;
@@ -98,7 +128,11 @@ interface AppState {
 let noticeId = 0;
 
 export const useAppStore = create<AppState>()((set) => ({
-  connection: null,
+  localConnId: null,
+  pinnedFolders: loadPinned(),
+
+  remote: null,
+  remoteRootPath: null,
   connState: "disconnected",
   connMessage: null,
 
@@ -107,8 +141,6 @@ export const useAppStore = create<AppState>()((set) => ({
   sidebarVisible: true,
   terminalVisible: true,
   showHidden: false,
-
-  rootPath: null,
   treeRefreshToken: 0,
 
   openFile: null,
@@ -117,22 +149,44 @@ export const useAppStore = create<AppState>()((set) => ({
 
   notices: [],
 
-  setConnection: (connection) =>
-    set({ connection, connState: "connected", connMessage: null }),
+  setLocalConnId: (localConnId) => set({ localConnId }),
+
+  addPinnedFolder: (path) =>
+    set((s) => {
+      if (s.pinnedFolders.includes(path)) return {};
+      const pinnedFolders = [...s.pinnedFolders, path];
+      savePinned(pinnedFolders);
+      return { pinnedFolders };
+    }),
+
+  removePinnedFolder: (path) =>
+    set((s) => {
+      const pinnedFolders = s.pinnedFolders.filter((p) => p !== path);
+      savePinned(pinnedFolders);
+      return { pinnedFolders };
+    }),
+
+  setRemote: (remote, rootPath) =>
+    set({
+      remote,
+      remoteRootPath: rootPath,
+      connState: "connected",
+      connMessage: null,
+    }),
+
+  clearRemote: () =>
+    set((s) => ({
+      remote: null,
+      remoteRootPath: null,
+      connState: "disconnected",
+      connMessage: null,
+      // Close the editor if it was showing a file from the remote.
+      openFile:
+        s.remote && s.openFile?.connId === s.remote.connId ? null : s.openFile,
+    })),
 
   setConnState: (state, message = null) =>
     set({ connState: state, connMessage: message }),
-
-  clearConnection: () =>
-    set({
-      connection: null,
-      connState: "disconnected",
-      connMessage: null,
-      rootPath: null,
-      openFile: null,
-      cursor: { line: 1, column: 1 },
-      busyPath: null,
-    }),
 
   setDialogOpen: (dialogOpen) =>
     set(dialogOpen ? { dialogOpen } : { dialogOpen, dialogPrefill: null }),
@@ -142,8 +196,6 @@ export const useAppStore = create<AppState>()((set) => ({
   toggleTerminal: () => set((s) => ({ terminalVisible: !s.terminalVisible })),
   setTerminalVisible: (terminalVisible) => set({ terminalVisible }),
   toggleHidden: () => set((s) => ({ showHidden: !s.showHidden })),
-
-  setRootPath: (rootPath) => set({ rootPath }),
   refreshTree: () => set((s) => ({ treeRefreshToken: s.treeRefreshToken + 1 })),
 
   setOpenFile: (openFile) =>

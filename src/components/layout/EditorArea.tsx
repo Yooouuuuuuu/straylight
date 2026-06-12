@@ -5,7 +5,7 @@ import { BinaryFileCard } from "../editor/BinaryFileCard";
 import { MonacoWrapper } from "../editor/MonacoWrapper";
 
 function EmptyState() {
-  const connection = useAppStore((s) => s.connection);
+  const remote = useAppStore((s) => s.remote);
   const busyPath = useAppStore((s) => s.busyPath);
   const openDialog = useAppStore((s) => s.openDialog);
 
@@ -33,24 +33,21 @@ function EmptyState() {
           fill="#282A36"
         />
       </svg>
-      {connection ? (
-        <>
-          <div className="empty-state__title">No file open</div>
-          <div className="empty-state__hint">
-            Select a file in the explorer to view it. Toggle the terminal with{" "}
-            <kbd>Ctrl</kbd> <kbd>`</kbd>.
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="empty-state__title">Welcome to Straylight</div>
-          <div className="empty-state__hint">
-            Connect to a server to browse files, read code, and use a terminal.
-          </div>
-          <button className="btn btn--primary" onClick={() => openDialog()}>
-            Connect to a server
-          </button>
-        </>
+      <div className="empty-state__title">Straylight</div>
+      <div className="empty-state__hint">
+        Open a local folder or connect to a server in the sidebar, then pick a
+        file to view it.
+        {remote ? (
+          <>
+            {" "}
+            Toggle the terminal with <kbd>Ctrl</kbd> <kbd>`</kbd>.
+          </>
+        ) : null}
+      </div>
+      {!remote && (
+        <button className="btn btn--primary" onClick={() => openDialog()}>
+          Connect to a server
+        </button>
       )}
     </div>
   );
@@ -72,7 +69,8 @@ export function EditorArea() {
         )}
       </div>
       <div className="editor-area__body">
-        {openFile?.truncated && (
+        {/* Only when the file is actually shown in the editor (not a card/preview). */}
+        {openFile && !openFile.isBinary && openFile.truncated && (
           <div className="editor-banner">
             ⚠ This file was truncated to 50 MB.
           </div>

@@ -192,6 +192,11 @@
   background: var(--red);
 }
 
+/* Local-only (no remote attached): neutral, distinct from the green "connected". */
+.dot--local {
+  background: var(--fg-secondary);
+}
+
 @keyframes pulse {
   0%,
   100% {
@@ -663,6 +668,92 @@
 
 .file-node__spinner {
   margin-left: auto;
+}
+
+/* ------------------------------------------------------- Sidebar roots */
+
+.sidebar__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-4) var(--space-2) var(--space-5);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-secondary);
+}
+
+.sidebar__section-head--remote {
+  margin-top: var(--space-4);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-5);
+}
+
+.root-tree {
+  margin-bottom: var(--space-1);
+}
+
+.root-tree__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 26px;
+  padding: 0 var(--space-4) 0 var(--space-3);
+  cursor: pointer;
+}
+
+.root-tree__header:hover {
+  background: var(--bg-tertiary);
+}
+
+.root-tree__header:hover .root-tree__remove {
+  opacity: 1;
+}
+
+.root-tree__twisty {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-secondary);
+  transition: transform 120ms ease;
+}
+
+.root-tree__twisty--open {
+  transform: rotate(90deg);
+}
+
+.root-tree__label {
+  flex: 1 1 auto;
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.root-tree__remove {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  display: inline-flex;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+
+.root-tree__remove:hover {
+  color: var(--red);
+  background: var(--bg-selected);
+}
+
+.root-tree__body {
+  padding-bottom: var(--space-2);
 }
 
 /* ------------------------------------------------------------------ Editor area */

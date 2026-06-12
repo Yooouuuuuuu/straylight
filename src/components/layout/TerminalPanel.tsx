@@ -5,7 +5,7 @@ import { Terminal } from "../terminal/Terminal";
 import { IconClose } from "../icons";
 
 export function TerminalPanel() {
-  const connection = useAppStore((s) => s.connection);
+  const remote = useAppStore((s) => s.remote);
   const setTerminalVisible = useAppStore((s) => s.setTerminalVisible);
 
   return (
@@ -21,8 +21,8 @@ export function TerminalPanel() {
         </button>
       </div>
       <div className="terminal-panel__body">
-        {connection ? (
-          <Terminal key={connection.connId} connId={connection.connId} />
+        {remote ? (
+          <Terminal key={remote.connId} connId={remote.connId} />
         ) : (
           <div className="terminal-message">Not connected</div>
         )}

@@ -18,7 +18,6 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::ssh::connection::get_connection;
 use crate::AppState;
 
 /// Output chunk emitted on the `pty-output` event. `data` is raw bytes (a JSON
@@ -52,7 +51,7 @@ pub async fn pty_open(
     cols: u32,
     rows: u32,
 ) -> Result<String, String> {
-    let connection = get_connection(&state, &conn_id).await?;
+    let connection = state.ssh_connection(&conn_id).await?;
 
     let mut channel = connection
         .handle

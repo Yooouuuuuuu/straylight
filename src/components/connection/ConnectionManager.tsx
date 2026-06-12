@@ -1,10 +1,11 @@
-/** Sidebar connection list: shows hosts parsed from ~/.ssh/config and a button
- *  for manual connections. Clicking a host connects (via ssh-agent, or its
- *  IdentityFile when present); hosts without a User open the dialog prefilled. */
+/** Remote-connect panel (shown in the sidebar's Remote section when no server is
+ *  attached): a Connect button plus the hosts parsed from ~/.ssh/config. The
+ *  "Edit" action opens the config in-app via the local session. */
 import { useEffect, useState } from "react";
 
 import { colorForName } from "../../lib/connectionColor";
-import { openSshConfig, sshListConfigHosts, type SshHostEntry } from "../../lib/ipc";
+import { sshConfigPath, sshListConfigHosts, type SshHostEntry } from "../../lib/ipc";
+import { openFileByPath } from "../../lib/openFile";
 import { useSSH } from "../../hooks/useSSH";
 import { useAppStore } from "../../store/appStore";
 import { IconExternal, IconPlug } from "../icons";
@@ -21,6 +22,7 @@ export function ConnectionManager() {
   const [hosts, setHosts] = useState<SshHostEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const openDialog = useAppStore((s) => s.openDialog);
+  const localConnId = useAppStore((s) => s.localConnId);
   const { connect } = useSSH();
 
   useEffect(() => {
@@ -38,7 +40,6 @@ export function ConnectionManager() {
         });
     };
     load();
-    // Re-read the config when the window regains focus (e.g. after editing it).
     const onFocus = () => load();
     window.addEventListener("focus", onFocus);
     return () => {
@@ -49,7 +50,6 @@ export function ConnectionManager() {
 
   function onHostClick(host: SshHostEntry) {
     if (!host.user) {
-      // We can't connect non-interactively without a username.
       openDialog(host);
       return;
     }
@@ -58,13 +58,27 @@ export function ConnectionManager() {
       host: host.hostName ?? host.name,
       port: host.port ?? 22,
       user: host.user,
-      // One-click: agent → IdentityFile → default keys (resolved in the backend).
       auth: { type: "auto", identityFile: host.identityFile },
       proxyJump: host.proxyJump,
       color: colorForName(host.name),
     }).catch(() => {
-      /* failure surfaced via toast */
+      /* surfaced via toast */
     });
+  }
+
+  async function editConfig() {
+    try {
+      const path = await sshConfigPath();
+      if (localConnId) {
+        await openFileByPath(localConnId, path, "config");
+      } else {
+        useAppStore.getState().pushNotice("warn", "Local session is still starting.");
+      }
+    } catch (error) {
+      useAppStore
+        .getState()
+        .pushNotice("error", `Couldn't open SSH config: ${String(error)}`);
+    }
   }
 
   return (
@@ -84,12 +98,12 @@ export function ConnectionManager() {
           justifyContent: "space-between",
         }}
       >
-        <span>SSH config hosts</span>
+        <span>From ~/.ssh/config</span>
         <button
           className="btn btn--ghost"
           style={{ padding: "2px 8px" }}
-          title="Open ~/.ssh/config in your editor"
-          onClick={() => void openSshConfig()}
+          title="Edit ~/.ssh/config in the editor"
+          onClick={() => void editConfig()}
         >
           <IconExternal size={13} /> Edit
         </button>
@@ -101,9 +115,9 @@ export function ConnectionManager() {
         </div>
       ) : hosts.length === 0 ? (
         <div className="conn-empty">
-          No hosts found in ~/.ssh/config.
+          No hosts in ~/.ssh/config.
           <br />
-          Use “New connection” to connect manually.
+          Use “Connect to a server” or “Edit”.
         </div>
       ) : (
         hosts.map((host) => (

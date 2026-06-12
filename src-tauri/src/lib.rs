@@ -1,11 +1,12 @@
 //! Straylight — Tauri v2 backend.
 //!
-//! The application is built around a single SSH connection per server,
-//! multiplexed into channels for SFTP (file operations) and PTY (terminal).
-//! All connection and PTY state lives in [`AppState`], managed by Tauri and
-//! shared across commands.
+//! A "session" is one workspace the UI is attached to. It can be a remote SSH
+//! connection or the local filesystem (WSL is planned). File operations go
+//! through the transport-agnostic [`transport::FileTransport`]; terminals are
+//! currently SSH-only.
 
 pub mod ssh;
+pub mod transport;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,26 +15,50 @@ use tokio::sync::Mutex;
 
 use ssh::connection::Connection;
 use ssh::pty::PtyHandle;
+use transport::local::LocalTransport;
+use transport::FileTransport;
+
+/// A connected workspace.
+pub enum Session {
+    /// A remote SSH connection (SFTP + PTY).
+    Ssh(Arc<Connection>),
+    /// The local filesystem.
+    Local,
+}
 
 /// Global application state, shared across all Tauri commands.
-///
-/// Both maps are guarded by async mutexes because every consumer is an async
-/// command and we hold the locks across `.await` points (opening channels,
-/// SFTP round-trips, etc.).
 pub struct AppState {
-    /// Active SSH connections, keyed by the connection id returned from
-    /// [`ssh::connection::ssh_connect`].
-    pub connections: Mutex<HashMap<String, Arc<Connection>>>,
-    /// Open PTY/terminal sessions, keyed by the id returned from
-    /// [`ssh::pty::pty_open`].
+    /// Active sessions, keyed by the connection id the frontend holds.
+    pub sessions: Mutex<HashMap<String, Session>>,
+    /// Open PTY/terminal sessions, keyed by the id from [`ssh::pty::pty_open`].
     pub ptys: Mutex<HashMap<String, PtyHandle>>,
 }
 
 impl AppState {
     fn new() -> Self {
         Self {
-            connections: Mutex::new(HashMap::new()),
+            sessions: Mutex::new(HashMap::new()),
             ptys: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Resolve a session id to a file transport (SFTP or local).
+    pub async fn transport(&self, conn_id: &str) -> Result<Box<dyn FileTransport>, String> {
+        let sessions = self.sessions.lock().await;
+        match sessions.get(conn_id) {
+            Some(Session::Ssh(conn)) => Ok(Box::new(ssh::sftp::SftpTransport(conn.clone()))),
+            Some(Session::Local) => Ok(Box::new(LocalTransport)),
+            None => Err(format!("session '{conn_id}' is not open")),
+        }
+    }
+
+    /// Resolve a session id to its SSH connection, erroring for non-SSH sessions.
+    pub async fn ssh_connection(&self, conn_id: &str) -> Result<Arc<Connection>, String> {
+        let sessions = self.sessions.lock().await;
+        match sessions.get(conn_id) {
+            Some(Session::Ssh(conn)) => Ok(conn.clone()),
+            Some(_) => Err("a terminal is only available on SSH connections".to_string()),
+            None => Err(format!("session '{conn_id}' is not open")),
         }
     }
 }
@@ -58,13 +83,14 @@ pub fn run() {
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             ssh::config::ssh_list_config_hosts,
-            ssh::config::open_ssh_config,
+            ssh::config::ssh_config_path,
             ssh::connection::ssh_connect,
             ssh::connection::ssh_disconnect,
             ssh::connection::ssh_get_status,
-            ssh::sftp::sftp_list_dir,
-            ssh::sftp::sftp_read_file,
-            ssh::sftp::sftp_stat,
+            transport::local_connect,
+            transport::fs_list_dir,
+            transport::fs_read_file,
+            transport::fs_stat,
             ssh::pty::pty_open,
             ssh::pty::pty_write,
             ssh::pty::pty_resize,

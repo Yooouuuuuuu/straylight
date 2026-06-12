@@ -90,9 +90,9 @@ export function sshListConfigHosts(): Promise<SshHostEntry[]> {
   return invoke("ssh_list_config_hosts");
 }
 
-/** Open ~/.ssh/config in the OS default editor (creates it if missing). */
-export function openSshConfig(): Promise<void> {
-  return invoke("open_ssh_config");
+/** Ensure ~/.ssh/config exists and return its absolute path (to open in-app). */
+export function sshConfigPath(): Promise<string> {
+  return invoke("ssh_config_path");
 }
 
 export interface ConnectArgs {
@@ -122,19 +122,24 @@ export function sshGetStatus(connId: string): Promise<ConnectionStatus> {
 }
 
 // ---------------------------------------------------------------------------
-// SFTP
+// Filesystem (transport-agnostic: SFTP for SSH sessions, std::fs for local)
 // ---------------------------------------------------------------------------
 
-export function sftpListDir(connId: string, path: string): Promise<DirListing> {
-  return invoke("sftp_list_dir", { connId, path });
+/** Open a local-filesystem session; returns its connection id. */
+export function localConnect(): Promise<string> {
+  return invoke("local_connect");
 }
 
-export function sftpReadFile(connId: string, path: string): Promise<FileContent> {
-  return invoke("sftp_read_file", { connId, path });
+export function fsListDir(connId: string, path: string): Promise<DirListing> {
+  return invoke("fs_list_dir", { connId, path });
 }
 
-export function sftpStat(connId: string, path: string): Promise<FileStat> {
-  return invoke("sftp_stat", { connId, path });
+export function fsReadFile(connId: string, path: string): Promise<FileContent> {
+  return invoke("fs_read_file", { connId, path });
+}
+
+export function fsStat(connId: string, path: string): Promise<FileStat> {
+  return invoke("fs_stat", { connId, path });
 }
 
 // ---------------------------------------------------------------------------

@@ -32,11 +32,11 @@ const STATE_LABELS: Record<ConnectionState, string> = {
 };
 
 export function TitleBar() {
-  const connection = useAppStore((s) => s.connection);
+  const remote = useAppStore((s) => s.remote);
   const connState = useAppStore((s) => s.connState);
 
   const appWindow = getCurrentWindow();
-  const accent = connection?.color ?? "transparent";
+  const accent = remote?.color ?? "transparent";
 
   return (
     <header className="titlebar" style={{ borderLeftColor: accent }}>
@@ -46,17 +46,22 @@ export function TitleBar() {
           <span className="titlebar__title">Straylight</span>
         </div>
         <div className="titlebar__status" data-tauri-drag-region>
-          <span className={`dot dot--${connState}`} />
-          {connection ? (
-            <span>
-              {connection.name}{" "}
-              <span className="mono">
-                ({connection.user}@{connection.host})
-              </span>{" "}
-              · {STATE_LABELS[connState]}
-            </span>
+          {remote ? (
+            <>
+              <span className={`dot dot--${connState}`} />
+              <span>
+                {remote.name}{" "}
+                <span className="mono">
+                  ({remote.user}@{remote.host})
+                </span>{" "}
+                · {STATE_LABELS[connState]}
+              </span>
+            </>
           ) : (
-            <span>Not connected</span>
+            <>
+              <span className="dot dot--local" />
+              <span>Local</span>
+            </>
           )}
         </div>
       </div>

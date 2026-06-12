@@ -1,8 +1,8 @@
 /** Application shell: title bar, the resizable sidebar / editor / terminal
  *  layout, the status bar, and global overlays (connection dialog, toasts).
  *
- *  Panels are collapsible rather than conditionally mounted, so toggling the
- *  sidebar or terminal never tears down the terminal's PTY. */
+ *  A window always has a local session (opened at startup) and may attach one
+ *  remote SSH connection; the terminal belongs to the remote. */
 import { useEffect, useRef } from "react";
 import {
   Panel,
@@ -11,7 +11,7 @@ import {
   type ImperativePanelHandle,
 } from "react-resizable-panels";
 
-import { onSshStatus } from "./lib/ipc";
+import { localConnect, onSshStatus } from "./lib/ipc";
 import { useAppStore } from "./store/appStore";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { TitleBar } from "./components/layout/TitleBar";
@@ -26,7 +26,9 @@ export default function App() {
   const dialogOpen = useAppStore((s) => s.dialogOpen);
   const sidebarVisible = useAppStore((s) => s.sidebarVisible);
   const terminalVisible = useAppStore((s) => s.terminalVisible);
-  const connection = useAppStore((s) => s.connection);
+  const remote = useAppStore((s) => s.remote);
+  const localConnId = useAppStore((s) => s.localConnId);
+  const setLocalConnId = useAppStore((s) => s.setLocalConnId);
   const setConnState = useAppStore((s) => s.setConnState);
   const setSidebarVisible = useAppStore((s) => s.setSidebarVisible);
   const setTerminalVisible = useAppStore((s) => s.setTerminalVisible);
@@ -36,10 +38,28 @@ export default function App() {
 
   useKeyboard();
 
-  // Reflect backend-driven connection status (drops, errors) in the store.
+  // Open the always-present local session once.
+  useEffect(() => {
+    if (localConnId) return;
+    let active = true;
+    localConnect()
+      .then((id) => {
+        if (active) setLocalConnId(id);
+      })
+      .catch((error) =>
+        useAppStore
+          .getState()
+          .pushNotice("error", `Local filesystem unavailable: ${String(error)}`),
+      );
+    return () => {
+      active = false;
+    };
+  }, [localConnId, setLocalConnId]);
+
+  // Reflect backend-driven remote status (drops, errors) in the store.
   useEffect(() => {
     const unlistenPromise = onSshStatus((status) => {
-      const current = useAppStore.getState().connection;
+      const current = useAppStore.getState().remote;
       if (current && status.connId === current.connId) {
         setConnState(status.state, status.message);
       }
@@ -57,8 +77,7 @@ export default function App() {
     else if (!sidebarVisible && !panel.isCollapsed()) panel.collapse();
   }, [sidebarVisible]);
 
-  // Drive the terminal panel's collapse state; blur it when hidden so keystrokes
-  // don't keep going to an invisible terminal.
+  // Drive the terminal panel's collapse state; blur it when hidden.
   useEffect(() => {
     const panel = terminalPanel.current;
     if (!panel) return;
@@ -71,7 +90,7 @@ export default function App() {
         active.blur();
       }
     }
-  }, [terminalVisible, connection]);
+  }, [terminalVisible, remote]);
 
   return (
     <div className="app">
@@ -84,9 +103,9 @@ export default function App() {
             ref={sidebarPanel}
             collapsible
             collapsedSize={0}
-            defaultSize={22}
-            minSize={12}
-            maxSize={45}
+            defaultSize={24}
+            minSize={14}
+            maxSize={50}
             onCollapse={() => setSidebarVisible(false)}
             onExpand={() => setSidebarVisible(true)}
           >
@@ -94,16 +113,11 @@ export default function App() {
           </Panel>
           <PanelResizeHandle className="resize-handle" />
           <Panel id="main" order={2} minSize={30}>
-            {/* Remounts only when the connection itself changes — never on a
-                sidebar/terminal toggle — so the PTY is preserved. */}
-            <PanelGroup
-              key={connection ? "connected" : "idle"}
-              direction="vertical"
-            >
+            <PanelGroup key={remote?.connId ?? "idle"} direction="vertical">
               <Panel id="editor" order={1} minSize={20}>
                 <EditorArea />
               </Panel>
-              {connection && (
+              {remote && (
                 <>
                   <PanelResizeHandle className="resize-handle" />
                   <Panel

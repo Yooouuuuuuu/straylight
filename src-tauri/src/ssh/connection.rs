@@ -125,17 +125,6 @@ impl client::Handler for ClientHandler {
     }
 }
 
-/// Look up an active connection by id.
-pub async fn get_connection(state: &AppState, conn_id: &str) -> Result<Arc<Connection>, String> {
-    state
-        .connections
-        .lock()
-        .await
-        .get(conn_id)
-        .cloned()
-        .ok_or_else(|| format!("connection '{conn_id}' is not open"))
-}
-
 fn client_config() -> Arc<client::Config> {
     Arc::new(client::Config {
         // Keep interactive sessions alive; we never want the library to drop an
@@ -318,10 +307,10 @@ pub async fn ssh_connect(
     });
 
     state
-        .connections
+        .sessions
         .lock()
         .await
-        .insert(conn_id.clone(), connection);
+        .insert(conn_id.clone(), crate::Session::Ssh(connection));
     emit_status(&app, &conn_id, ConnectionState::Connected, None);
     log::info!("ssh connection {conn_id} established");
     Ok(conn_id)
@@ -334,15 +323,15 @@ pub async fn ssh_disconnect(
     app: AppHandle,
     conn_id: String,
 ) -> Result<(), String> {
-    let connection = state.connections.lock().await.remove(&conn_id);
-    if let Some(connection) = connection {
+    let session = state.sessions.lock().await.remove(&conn_id);
+    if let Some(crate::Session::Ssh(connection)) = session {
         let _ = connection
             .handle
             .disconnect(russh::Disconnect::ByApplication, "", "en")
             .await;
     }
     emit_status(&app, &conn_id, ConnectionState::Disconnected, None);
-    log::info!("ssh connection {conn_id} closed");
+    log::info!("session {conn_id} closed");
     Ok(())
 }
 
@@ -352,9 +341,10 @@ pub async fn ssh_get_status(
     state: State<'_, AppState>,
     conn_id: String,
 ) -> Result<ConnectionStatus, String> {
-    let connections = state.connections.lock().await;
-    let current = match connections.get(&conn_id) {
-        Some(conn) => *conn.state.lock().await,
+    let sessions = state.sessions.lock().await;
+    let current = match sessions.get(&conn_id) {
+        Some(crate::Session::Ssh(conn)) => *conn.state.lock().await,
+        Some(crate::Session::Local) => ConnectionState::Connected,
         None => ConnectionState::Disconnected,
     };
     Ok(ConnectionStatus {

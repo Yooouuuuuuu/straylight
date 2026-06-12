@@ -23,7 +23,7 @@ pub struct SshHostEntry {
     pub proxy_jump: Option<String>,
 }
 
-fn ssh_config_path() -> Option<PathBuf> {
+fn config_file_path() -> Option<PathBuf> {
     directories::UserDirs::new().map(|dirs| dirs.home_dir().join(".ssh").join("config"))
 }
 
@@ -36,7 +36,7 @@ fn home_dir() -> Option<PathBuf> {
 /// start regardless.
 #[tauri::command]
 pub async fn ssh_list_config_hosts() -> Result<Vec<SshHostEntry>, String> {
-    let Some(path) = ssh_config_path() else {
+    let Some(path) = config_file_path() else {
         return Ok(Vec::new());
     };
     let content = match std::fs::read_to_string(&path) {
@@ -46,11 +46,13 @@ pub async fn ssh_list_config_hosts() -> Result<Vec<SshHostEntry>, String> {
     Ok(parse_ssh_config(&content))
 }
 
-/// Open `~/.ssh/config` in the user's default editor so they can add hosts. The
-/// file (and `~/.ssh`) is created with a small template if it doesn't exist.
+/// Ensure `~/.ssh/config` exists (creating it from a template if missing) and
+/// return its absolute path, so the frontend can open it in the editor as a
+/// local file.
 #[tauri::command]
-pub async fn open_ssh_config() -> Result<(), String> {
-    let path = ssh_config_path().ok_or_else(|| "could not determine your home directory".to_string())?;
+pub async fn ssh_config_path() -> Result<String, String> {
+    let path =
+        config_file_path().ok_or_else(|| "could not determine your home directory".to_string())?;
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -63,30 +65,7 @@ pub async fn open_ssh_config() -> Result<(), String> {
         std::fs::write(&path, template)
             .map_err(|e| format!("could not create {}: {e}", path.display()))?;
     }
-    open_in_editor(&path)
-}
-
-#[cfg(windows)]
-fn open_in_editor(path: &std::path::Path) -> Result<(), String> {
-    std::process::Command::new("notepad")
-        .arg(path)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("could not open an editor: {e}"))
-}
-
-#[cfg(not(windows))]
-fn open_in_editor(path: &std::path::Path) -> Result<(), String> {
-    let opener = if cfg!(target_os = "macos") {
-        "open"
-    } else {
-        "xdg-open"
-    };
-    std::process::Command::new(opener)
-        .arg(path)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("could not open an editor: {e}"))
+    Ok(path.to_string_lossy().into_owned())
 }
 
 /// Split an SSH config line into `(key, value)`. Supports both

@@ -1,14 +1,10 @@
-/** Connection actions: establish/tear down the window's SSH connection and load
- *  the remote home directory as the file-tree root. */
+/** Remote connection actions: attach/detach the window's single SSH connection
+ *  and load its home directory as the remote root. The local session is always
+ *  present (created at startup) and managed separately. */
 import { useCallback } from "react";
 
-import {
-  sftpListDir,
-  sshConnect,
-  sshDisconnect,
-  type AuthMethod,
-} from "../lib/ipc";
-import { useAppStore, type ConnectionMeta } from "../store/appStore";
+import { fsListDir, sshConnect, sshDisconnect, type AuthMethod } from "../lib/ipc";
+import { useAppStore } from "../store/appStore";
 
 export interface ConnectProfile {
   name: string;
@@ -21,20 +17,20 @@ export interface ConnectProfile {
 }
 
 export function useSSH() {
-  const connection = useAppStore((s) => s.connection);
+  const remote = useAppStore((s) => s.remote);
   const connState = useAppStore((s) => s.connState);
 
   const connect = useCallback(async (profile: ConnectProfile) => {
     const store = useAppStore.getState();
 
-    // One connection per window: drop any existing one first.
-    if (store.connection) {
+    // One remote per window: drop any existing one first.
+    if (store.remote) {
       try {
-        await sshDisconnect(store.connection.connId);
+        await sshDisconnect(store.remote.connId);
       } catch {
         /* ignore */
       }
-      store.clearConnection();
+      store.clearRemote();
     }
 
     store.setDialogOpen(false);
@@ -49,19 +45,18 @@ export function useSSH() {
         proxyJump: profile.proxyJump ?? null,
       });
 
-      const meta: ConnectionMeta = {
-        connId,
-        name: profile.name,
-        host: profile.host,
-        user: profile.user,
-        port: profile.port,
-        color: profile.color,
-      };
-      store.setConnection(meta);
-
-      // Resolve the home directory and use it as the tree root.
-      const listing = await sftpListDir(connId, "");
-      store.setRootPath(listing.path);
+      const listing = await fsListDir(connId, "");
+      store.setRemote(
+        {
+          connId,
+          name: profile.name,
+          host: profile.host,
+          user: profile.user,
+          port: profile.port,
+          color: profile.color,
+        },
+        listing.path,
+      );
     } catch (error) {
       store.setConnState("disconnected", String(error));
       store.pushNotice("error", `Connection failed: ${String(error)}`);
@@ -71,15 +66,15 @@ export function useSSH() {
 
   const disconnect = useCallback(async () => {
     const store = useAppStore.getState();
-    if (store.connection) {
+    if (store.remote) {
       try {
-        await sshDisconnect(store.connection.connId);
+        await sshDisconnect(store.remote.connId);
       } catch {
         /* ignore */
       }
     }
-    store.clearConnection();
+    store.clearRemote();
   }, []);
 
-  return { connection, connState, connect, disconnect };
+  return { remote, connState, connect, disconnect };
 }
