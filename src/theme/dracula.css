@@ -1,0 +1,38 @@
+/* Dracula palette as CSS custom properties. Every color in the app references
+   one of these variables so a future theme swap is a single-file change. */
+
+:root {
+  /* Dracula core */
+  --bg-primary: #282a36; /* Background */
+  --bg-secondary: #21222c; /* Darker background */
+  --bg-tertiary: #343746; /* Current line / hover */
+  --bg-selected: #44475a; /* Selection */
+  --fg-primary: #f8f8f2; /* Foreground */
+  --fg-secondary: #6272a4; /* Comment / muted text */
+
+  /* Dracula accent colors */
+  --cyan: #8be9fd;
+  --green: #50fa7b;
+  --orange: #ffb86c;
+  --pink: #ff79c6;
+  --purple: #bd93f9;
+  --red: #ff5555;
+  --yellow: #f1fa8c;
+
+  /* Semantic mapping */
+  --border: #44475a;
+  --border-focus: #6272a4;
+  --scrollbar: #44475a;
+  --scrollbar-hover: #6272a4;
+  --success: #50fa7b;
+  --warning: #ffb86c;
+  --error: #ff5555;
+  --info: #8be9fd;
+  --accent: #bd93f9;
+
+  /* Typography */
+  --font-code: "Fira Code", "Cascadia Code", "JetBrains Mono", "SF Mono",
+    Consolas, "Liberation Mono", Menlo, monospace;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+}

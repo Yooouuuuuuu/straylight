@@ -1,0 +1,51 @@
+[package]
+name = "straylight"
+version = "0.1.0"
+description = "Lightweight SSH file manager, terminal, and code viewer"
+authors = ["Straylight contributors"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/straylight-app/straylight"
+default-run = "straylight"
+
+[lib]
+name = "straylight_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# In Tauri v2, `dialog` and `fs` are separate plugin crates (not `tauri` features).
+# `tray-icon` remains a `tauri` feature.
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+
+# SSH / SFTP. russh 0.46.x uses the `KeyPair` / `russh_keys::key` API.
+# (~/.ssh/config is parsed manually in ssh/config.rs — the russh-config crate can
+# only resolve a single named host, not enumerate every Host block, so it isn't
+# used here.)
+russh = "0.46"
+russh-sftp = "2"
+russh-keys = "0.46"
+
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-trait = "0.1"
+
+keyring = "3"
+directories = "5"
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+log = "0.4"
+env_logger = "0.11"
+
+[profile.release]
+# Optimize for a small installer, matching Straylight's goals.
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

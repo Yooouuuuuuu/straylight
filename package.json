@@ -1,0 +1,37 @@
+{
+  "name": "straylight",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Lightweight SSH file manager, terminal, and code viewer",
+  "license": "MIT OR Apache-2.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-fs": "^2",
+    "@xterm/addon-fit": "^0.10",
+    "@xterm/addon-webgl": "^0.18",
+    "@xterm/xterm": "^5",
+    "fuse.js": "^7",
+    "monaco-editor": "^0.50",
+    "react": "^18",
+    "react-dom": "^18",
+    "react-resizable-panels": "^2",
+    "zustand": "^4"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@vitejs/plugin-react": "^4",
+    "typescript": "^5",
+    "vite": "^7"
+  }
+}
