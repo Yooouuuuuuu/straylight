@@ -1,47 +1,60 @@
 # Straylight
 
 A lightweight, open-source desktop app that replaces VS Code for remote server
-work: an SSH **file manager + terminal + code viewer** built with Tauri v2 (Rust
+work: an SSH **file manager + terminal + code editor** built with Tauri v2 (Rust
 backend) and React (frontend). The goal is the VS Code Remote-SSH experience at
 ~30–50 MB of memory instead of ~500 MB, in a ~10 MB installer.
 
-**Status: Phase 1 — walking skeleton.** You can connect to a server, browse the
-remote file system, read code with syntax highlighting, and use a full terminal,
-all in one Dracula-themed window.
+**Status:** connect to a server (or work locally), browse files, **edit and save**
+in a tabbed Monaco editor, manage files, and use a terminal — all in one
+Dracula-themed window that shows a **local** folder and **one remote** at the same
+time.
 
 **License:** MIT OR Apache-2.0 (dual). See [LICENSE-MIT](LICENSE-MIT) and
 [LICENSE-APACHE](LICENSE-APACHE).
 
 ---
 
-## What works in Phase 1
+## What works
 
-- **Dracula theme everywhere** — CSS custom properties, embedded Fira Code with
-  ligatures, themed Monaco editor and xterm.js terminal.
-- **VS Code-style layout** — custom title bar with window controls + workspace
-  color accent, resizable sidebar / editor / terminal panels
-  (`react-resizable-panels`), and a status bar.
-- **SSH config parsing** — `~/.ssh/config` is parsed on demand; every `Host`
-  entry shows up in the connection list.
-- **Connect dialog** — pick a config host or fill in a manual connection
-  (host / port / user, optional jump host, and ssh-agent / key file / password
-  auth).
-- **SSH connection** (russh) — ssh-agent first, then key file, then password;
-  `ProxyJump` bastions supported.
-- **SFTP file tree** — lazy-loaded directories, file-type icons, permissions /
-  owner / mtime in tooltips, symlink indicators (resolved so symlinked
+- **Dracula theme everywhere** — embedded Fira Code with ligatures, themed Monaco
+  editor and xterm.js terminal.
+- **Local + remote in one window** — a multi-root sidebar with pinned local
+  folders and one attached SSH host, both browsable at once.
+- **Connections** — `~/.ssh/config` hosts are listed and connect in one click
+  (key auth via `IdentityFile`, then the default `~/.ssh/id_*`); the dialog adds
+  manual password connections. `ProxyJump` bastions and a 10 s connect timeout.
+  No ssh-agent dependency.
+- **File tree (SFTP + local)** — lazy-loaded directories, file-type icons,
+  permissions / owner / mtime tooltips, symlink indicators (resolved so symlinked
   directories expand), and a hidden-files toggle.
-- **Monaco editor** — click a file to view it with language-detected
-  highlighting. Binary files (NUL byte in the first 8 KB) show an info card
-  instead. Files ≥ 50 MB open in lightweight mode; large files raise a toast.
-- **Terminal** — a real PTY over SSH, rendered by xterm.js (WebGL when
-  available), with resize wired through to the remote shell.
+- **File operations** — F2 inline rename and a right-click menu: New File, New
+  Folder, Rename, Delete, Copy Path.
+- **Editing** — a tabbed Monaco editor; edit and **save** (`Ctrl+S`) local *and*
+  remote files, with per-tab dirty state and save-conflict detection. Binary files
+  show an info card; very large files open in a lightweight mode.
+- **Terminal** — see [Terminal](#terminal) below.
 - **Status bar** — connection state, file path, language, encoding, line ending,
   and cursor position.
 
-> Phase 1 is **read-only** for files (viewing code). Editing/saving, tabs,
-> drag-and-drop transfer, auto-reconnect, git, containers, and search arrive in
-> Phases 2–3.
+### Terminal
+
+A real PTY rendered by xterm.js (WebGL when available), with resize, focus-aware
+`Ctrl+C` (SIGINT), and right-click copy / paste. The terminal **targets the remote
+shell when you're connected to a server, and a local shell otherwise** — the
+header reads `Terminal · <host>` or `Terminal · local`. It opens in your home
+directory.
+
+The local shell it launches:
+
+- **Windows** — **PowerShell 7 (`pwsh.exe`) when installed**, otherwise the
+  built-in Windows PowerShell 5.1 (`powershell.exe`). Install 7 with
+  `winget install Microsoft.PowerShell` and Straylight picks it up automatically.
+- **macOS / Linux** — your `$SHELL` (falling back to `/bin/bash`).
+- **Remote** — the server's login shell, exactly as `ssh` would start it.
+
+> A per-terminal shell picker (cmd / git-bash / a chosen shell) will arrive with
+> multi-terminal support.
 
 ---
 
@@ -51,6 +64,7 @@ all in one Dracula-themed window.
 |------|-------|
 | **Node.js** ≥ 18 | Frontend build (tested with Node 24). |
 | **Rust** (stable, via [rustup](https://rustup.rs)) | Backend. `cargo`/`rustc` must be on PATH. |
+| **C++ build tools** (Windows) | Rust's `msvc` toolchain links with `link.exe`. Install the **Visual Studio Build Tools** → "Desktop development with C++" (no full IDE needed) — e.g. `winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`. Without it you'll see `linker 'link.exe' not found`. |
 | **Tauri v2 system deps** | Windows: WebView2 (preinstalled on Win 10/11). Linux: WebKitGTK 4.1, `libssl`, `librsvg`, build-essential — see the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/). |
 
 The Tauri CLI is included as a dev dependency (`@tauri-apps/cli`), so you don't
@@ -103,18 +117,22 @@ If the fonts are missing the UI falls back to the system monospace stack.
 
 ---
 
-## Keyboard shortcuts (Phase 1)
+## Keyboard shortcuts
 
 | Shortcut | Action |
 |----------|--------|
+| <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save the current file |
+| <kbd>Ctrl</kbd>+<kbd>W</kbd> | Close the current tab |
+| <kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd> | Next / previous tab |
 | <kbd>Ctrl</kbd>+<kbd>`</kbd> | Toggle the terminal panel |
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> | Toggle the sidebar |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd> | Focus the file explorer |
-| <kbd>Ctrl</kbd>+<kbd>W</kbd> | Close the current file (not while the terminal is focused) |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> | Refresh the file tree |
+| <kbd>F2</kbd> | Rename the selected file / folder |
+| <kbd>Del</kbd> | Delete the selected file / folder |
 
-The full VS Code shortcut set lands with the features it drives (fuzzy finder,
-tabs, etc.) in later phases.
+When the terminal is focused, <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>S</kbd>
+keep their shell meaning (SIGINT / flow control) and aren't intercepted.
 
 ---
 
@@ -123,22 +141,26 @@ tabs, etc.) in later phases.
 ```
 Tauri v2 shell (native window, custom title bar)
 ├── React + Vite frontend (src/)
-│   ├── Monaco editor      — code viewing
+│   ├── Monaco editor      — tabbed code editor
 │   ├── xterm.js           — terminal
 │   ├── Zustand            — global state (store/appStore.ts)
 │   └── Typed IPC wrappers — lib/ipc.ts
 └── Rust backend (src-tauri/src/)
+    ├── transport/         — FileTransport trait (list/read/write/rename/remove)
+    │   ├── mod.rs         — shared types + transport-agnostic fs_* commands
+    │   └── local.rs       — local filesystem (std::fs / tokio::fs)
     └── ssh/
         ├── connection.rs  — connect, auth, ProxyJump, status events
         ├── config.rs      — ~/.ssh/config parser
-        ├── sftp.rs        — list / read / stat (read-only in Phase 1)
-        └── pty.rs         — PTY shell, streamed over the `pty-output` event
+        ├── sftp.rs        — SFTP as a FileTransport (read + write)
+        └── pty.rs         — PTY shell: SSH channel, or local ConPTY
 ```
 
-One SSH connection per server is multiplexed into channels: an SFTP subsystem
-channel for file operations and one session channel per terminal. PTY output is
-streamed to the frontend via Tauri events; input, resize, and close go back
-through `pty_*` commands.
+File operations go through a transport-agnostic `FileTransport` (SFTP for SSH
+sessions, `std::fs` for local). A connection is one SSH link multiplexed into
+channels — an SFTP subsystem channel plus one session channel per terminal — or
+a local session backed by the filesystem and a ConPTY shell. PTY output streams
+to the frontend via Tauri events; input/resize/close go back through `pty_*`.
 
 **IPC contract.** Rust structs serialize with `camelCase`; the typed wrappers in
 `src/lib/ipc.ts` mirror them exactly. Command arguments are written in camelCase
@@ -148,25 +170,17 @@ on the JS side and Tauri maps them to the snake_case Rust parameters.
 
 ## Notes & behavior
 
-Phase 1 is compile-verified end to end: the frontend (`tsc` + `vite build`), the
-Rust backend (`cargo check`), and the Rust unit tests (`cargo test`) all pass.
-A few behaviors worth knowing:
-
-- **ssh-agent** is the default auth path and is platform-aware: the Unix socket
-  (`$SSH_AUTH_SOCK`) on Linux/macOS, and the OpenSSH named pipe
-  (`\\.\pipe\openssh-ssh-agent`) with a Pageant fallback on Windows. Run
-  `ssh-add` if your key isn't loaded.
-- **ProxyJump** connects through the bastion via a direct-tcpip channel; the jump
-  host is authenticated with ssh-agent (the common bastion setup), and only the
-  first hop of a chained `ProxyJump` is used in Phase 1.
+- **Authentication** is key-based or password — there is **no ssh-agent**
+  integration. Config hosts use the host's `IdentityFile`, then the default
+  `~/.ssh/id_*` keys; the dialog offers a password. Passphrase-protected keys
+  aren't prompted for yet — load an unencrypted key or use a password.
+- **ProxyJump** connects through the bastion via a direct-tcpip channel
+  (authenticated with the same on-disk key chain); only the first hop of a
+  chained `ProxyJump` is used.
 - **Host keys** are currently trusted on first use (`check_server_key` returns
-  `Ok(true)`). `known_hosts` verification is a Phase 2 item — see the comment in
-  `connection.rs`.
-- **Files are read-only** in Phase 1 (the editor is in view mode). Editing/saving
-  is Phase 2.
-
-The Monaco bundle is large (it ships every language). Trimming it to a language
-subset is a deliberate later optimization, not required for Phase 1.
+  `Ok(true)`); `known_hosts` verification is planned.
+- The Monaco bundle is large (it ships every language). Trimming it to a language
+  subset is a deliberate later optimization.
 
 ---
 

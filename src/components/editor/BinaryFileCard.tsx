@@ -2,7 +2,7 @@
  *  download / open-with-default actions arrive with the transfer queue in
  *  Phase 2. */
 import { formatSize, formatTimestamp } from "../../lib/format";
-import type { OpenFile } from "../../store/appStore";
+import type { EditorTab } from "../../store/appStore";
 import { IconBinaryFile } from "../icons";
 
 function extensionOf(name: string): string {
@@ -10,7 +10,7 @@ function extensionOf(name: string): string {
   return dot >= 0 ? name.slice(dot + 1).toUpperCase() : "Unknown";
 }
 
-export function BinaryFileCard({ file }: { file: OpenFile }) {
+export function BinaryFileCard({ file }: { file: EditorTab }) {
   return (
     <div className="binary-card">
       <div className="binary-card__icon">

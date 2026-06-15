@@ -3,6 +3,7 @@
  *  don't interfere with typing. */
 import { useEffect } from "react";
 
+import { saveActiveFile } from "../lib/saveFile";
 import { matchShortcut } from "../lib/shortcuts";
 import { useAppStore } from "../store/appStore";
 
@@ -14,11 +15,45 @@ export function useKeyboard() {
 
       const target = event.target as HTMLElement | null;
       const inTerminal = !!target?.closest(".terminal-host");
+      const inEditable = !!target?.closest(
+        "input, textarea, [contenteditable=true], .monaco-host, .terminal-host",
+      );
       const store = useAppStore.getState();
 
       switch (action) {
+        case "saveFile":
+          // Ctrl+S is XOFF in a terminal — let xterm have it there.
+          if (!inTerminal) {
+            void saveActiveFile();
+            event.preventDefault();
+          }
+          break;
+        case "nextTab":
+          if (store.tabs.length > 1) {
+            store.cycleTab(1);
+            event.preventDefault();
+          }
+          break;
+        case "prevTab":
+          if (store.tabs.length > 1) {
+            store.cycleTab(-1);
+            event.preventDefault();
+          }
+          break;
+        case "renameSelected":
+          if (!inEditable && store.selected) {
+            store.startRename(store.selected.connId, store.selected.path);
+            event.preventDefault();
+          }
+          break;
+        case "deleteSelected":
+          if (!inEditable && store.selected) {
+            store.openConfirmDelete(store.selected);
+            event.preventDefault();
+          }
+          break;
         case "toggleTerminal":
-          if (store.remote) {
+          if (store.remote || store.localConnId) {
             store.toggleTerminal();
             event.preventDefault();
           }
@@ -33,8 +68,8 @@ export function useKeyboard() {
           break;
         case "closeFile":
           // Ctrl+W must not close a tab while the terminal is focused.
-          if (!inTerminal && store.openFile) {
-            store.setOpenFile(null);
+          if (!inTerminal && store.activeTabId) {
+            store.closeTab(store.activeTabId);
             event.preventDefault();
           }
           break;

@@ -1,13 +1,15 @@
-/** Center editor region: the header (file name + path), and the body which
- *  shows the Monaco editor, a binary info card, or an empty state. */
+/** Center editor region: the tab bar, and the body which shows the Monaco
+ *  editor (for the active text tab), a binary info card, or an empty state.
+ *  The editor stays mounted so per-tab models survive switching. */
 import { useAppStore } from "../../store/appStore";
 import { BinaryFileCard } from "../editor/BinaryFileCard";
+import { EditorTabs } from "../editor/EditorTabs";
 import { MonacoWrapper } from "../editor/MonacoWrapper";
 
 function EmptyState() {
-  const remote = useAppStore((s) => s.remote);
   const busyPath = useAppStore((s) => s.busyPath);
   const openDialog = useAppStore((s) => s.openDialog);
+  const remote = useAppStore((s) => s.remote);
 
   if (busyPath) {
     return (
@@ -54,34 +56,27 @@ function EmptyState() {
 }
 
 export function EditorArea() {
-  const openFile = useAppStore((s) => s.openFile);
+  const tabs = useAppStore((s) => s.tabs);
+  const activeTabId = useAppStore((s) => s.activeTabId);
+  const active = tabs.find((t) => t.id === activeTabId) ?? null;
 
   return (
     <div className="editor-area">
-      <div className="editor-area__header">
-        {openFile ? (
-          <>
-            <span className="editor-area__name">{openFile.name}</span>
-            <span className="editor-area__path">{openFile.path}</span>
-          </>
-        ) : (
-          <span className="editor-area__path">No file open</span>
-        )}
-      </div>
+      <EditorTabs />
       <div className="editor-area__body">
-        {/* Only when the file is actually shown in the editor (not a card/preview). */}
-        {openFile && !openFile.isBinary && openFile.truncated && (
+        {active && !active.isBinary && active.truncated && (
           <div className="editor-banner">
             ⚠ This file was truncated to 50 MB.
           </div>
         )}
         <div className="editor-area__content">
-          {!openFile ? (
+          {tabs.length === 0 ? (
             <EmptyState />
-          ) : openFile.isBinary ? (
-            <BinaryFileCard file={openFile} />
           ) : (
-            <MonacoWrapper file={openFile} />
+            <>
+              <MonacoWrapper />
+              {active?.isBinary && <BinaryFileCard file={active} />}
+            </>
           )}
         </div>
       </div>

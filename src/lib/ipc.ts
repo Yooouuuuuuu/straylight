@@ -142,6 +142,51 @@ export function fsStat(connId: string, path: string): Promise<FileStat> {
   return invoke("fs_stat", { connId, path });
 }
 
+export interface WriteResult {
+  /** True if the file changed on disk since `expectedModified`; not written. */
+  conflict: boolean;
+  /** New mtime after a write, or the current (newer) mtime on conflict. */
+  modified: number;
+}
+
+export function fsWriteFile(
+  connId: string,
+  path: string,
+  content: string,
+  expectedModified?: number | null,
+): Promise<WriteResult> {
+  return invoke("fs_write_file", {
+    connId,
+    path,
+    content,
+    expectedModified: expectedModified ?? null,
+  });
+}
+
+/** Rename an entry within its directory; returns the new absolute path. */
+export function fsRename(
+  connId: string,
+  path: string,
+  newName: string,
+): Promise<string> {
+  return invoke("fs_rename", { connId, path, newName });
+}
+
+/** Create a file or directory; returns the new absolute path. */
+export function fsCreate(
+  connId: string,
+  parent: string,
+  name: string,
+  isDir: boolean,
+): Promise<string> {
+  return invoke("fs_create", { connId, parent, name, isDir });
+}
+
+/** Remove a path (recursively for directories). */
+export function fsRemove(connId: string, path: string): Promise<void> {
+  return invoke("fs_remove", { connId, path });
+}
+
 // ---------------------------------------------------------------------------
 // PTY / terminal
 // ---------------------------------------------------------------------------

@@ -20,6 +20,11 @@ import { EditorArea } from "./components/layout/EditorArea";
 import { TerminalPanel } from "./components/layout/TerminalPanel";
 import { StatusBar } from "./components/layout/StatusBar";
 import { ConnectionDialog } from "./components/connection/ConnectionDialog";
+import { ConflictDialog } from "./components/editor/ConflictDialog";
+import { CloseConfirmDialog } from "./components/editor/CloseConfirmDialog";
+import { ContextMenu } from "./components/filetree/ContextMenu";
+import { NewEntryDialog } from "./components/filetree/NewEntryDialog";
+import { DeleteConfirmDialog } from "./components/filetree/DeleteConfirmDialog";
 import { ToastStack } from "./components/Toast";
 
 export default function App() {
@@ -32,6 +37,9 @@ export default function App() {
   const setConnState = useAppStore((s) => s.setConnState);
   const setSidebarVisible = useAppStore((s) => s.setSidebarVisible);
   const setTerminalVisible = useAppStore((s) => s.setTerminalVisible);
+
+  // The terminal targets the remote when connected, otherwise the local shell.
+  const terminalConnId = remote?.connId ?? localConnId;
 
   const sidebarPanel = useRef<ImperativePanelHandle>(null);
   const terminalPanel = useRef<ImperativePanelHandle>(null);
@@ -90,7 +98,7 @@ export default function App() {
         active.blur();
       }
     }
-  }, [terminalVisible, remote]);
+  }, [terminalVisible, terminalConnId]);
 
   return (
     <div className="app">
@@ -113,11 +121,14 @@ export default function App() {
           </Panel>
           <PanelResizeHandle className="resize-handle" />
           <Panel id="main" order={2} minSize={30}>
-            <PanelGroup key={remote?.connId ?? "idle"} direction="vertical">
+            <PanelGroup
+              key={terminalConnId ? "with-terminal" : "no-terminal"}
+              direction="vertical"
+            >
               <Panel id="editor" order={1} minSize={20}>
                 <EditorArea />
               </Panel>
-              {remote && (
+              {terminalConnId && (
                 <>
                   <PanelResizeHandle className="resize-handle" />
                   <Panel
@@ -141,6 +152,11 @@ export default function App() {
       </div>
       <StatusBar />
       {dialogOpen && <ConnectionDialog />}
+      <ConflictDialog />
+      <CloseConfirmDialog />
+      <NewEntryDialog />
+      <DeleteConfirmDialog />
+      <ContextMenu />
       <ToastStack />
     </div>
   );

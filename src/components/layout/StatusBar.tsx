@@ -1,5 +1,5 @@
 /** Bottom status bar: connection state, current file path, language, encoding,
- *  line ending, and cursor position. */
+ *  line ending, and cursor position (for the active tab). */
 import { useAppStore } from "../../store/appStore";
 import type { ConnectionState } from "../../lib/ipc";
 
@@ -10,14 +10,24 @@ const STATE_TEXT: Record<ConnectionState, string> = {
   disconnected: "Disconnected",
 };
 
+function prettyLanguage(language: string): string {
+  if (language === "plaintext") return "Plain Text";
+  if (language === "cpp") return "C++";
+  if (language === "csharp") return "C#";
+  return language.charAt(0).toUpperCase() + language.slice(1);
+}
+
 export function StatusBar() {
   const remote = useAppStore((s) => s.remote);
+  const localConnId = useAppStore((s) => s.localConnId);
   const connState = useAppStore((s) => s.connState);
   const connMessage = useAppStore((s) => s.connMessage);
-  const openFile = useAppStore((s) => s.openFile);
-  const cursor = useAppStore((s) => s.cursor);
+  const tabs = useAppStore((s) => s.tabs);
+  const activeTabId = useAppStore((s) => s.activeTabId);
   const terminalVisible = useAppStore((s) => s.terminalVisible);
   const toggleTerminal = useAppStore((s) => s.toggleTerminal);
+
+  const active = tabs.find((t) => t.id === activeTabId) ?? null;
 
   return (
     <footer className="statusbar">
@@ -35,15 +45,15 @@ export function StatusBar() {
         )}
       </span>
 
-      {openFile && (
-        <span className="statusbar__item statusbar__path" title={openFile.path}>
-          {openFile.path}
+      {active && (
+        <span className="statusbar__item statusbar__path" title={active.path}>
+          {active.path}
         </span>
       )}
 
       <span className="statusbar__spacer" />
 
-      {remote && (
+      {(remote || localConnId) && (
         <span
           className="statusbar__item statusbar__item--button"
           onClick={() => toggleTerminal()}
@@ -53,27 +63,20 @@ export function StatusBar() {
         </span>
       )}
 
-      {openFile && (
+      {active && (
         <>
           <span className="statusbar__item">
-            Ln {cursor.line}, Col {cursor.column}
+            Ln {active.cursor.line}, Col {active.cursor.column}
           </span>
-          <span className="statusbar__item">{openFile.lineEnding}</span>
+          <span className="statusbar__item">{active.lineEnding}</span>
           <span className="statusbar__item">
-            {openFile.encoding.toUpperCase()}
+            {active.encoding.toUpperCase()}
           </span>
           <span className="statusbar__item">
-            {openFile.isBinary ? "Binary" : prettyLanguage(openFile.language)}
+            {active.isBinary ? "Binary" : prettyLanguage(active.language)}
           </span>
         </>
       )}
     </footer>
   );
-}
-
-function prettyLanguage(language: string): string {
-  if (language === "plaintext") return "Plain Text";
-  if (language === "cpp") return "C++";
-  if (language === "csharp") return "C#";
-  return language.charAt(0).toUpperCase() + language.slice(1);
 }

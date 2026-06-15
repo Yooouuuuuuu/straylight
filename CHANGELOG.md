@@ -9,12 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Planned
 
-- **Editing + save** (local and remote): `write_file` on the transport, dirty
-  state, Ctrl+S, and save-conflict detection.
-- **Local terminal** (ConPTY) and a **WSL** transport.
-- Tabs, drag-and-drop transfers, auto-reconnect, and session persistence.
+- **Drag-and-drop transfers** between the local and remote trees (and from the OS).
+- **Multiple terminals** with a shell picker (cmd / pwsh / git-bash / remote), and
+  tab reordering.
+- **Auto-reconnect** on dropped SSH connections; **session persistence** (restore
+  open tabs, the last connection, and panel sizes).
+- **WSL** transport.
 - **Phase 3:** git status / blame / log / diff, Podman containers, fuzzy finder,
   search-in-files, port forwarding, Markdown preview, and auto-update.
+
+## [0.3.0] - 2026-06-15
+
+Editing comes online: edit and save files (local and remote), a tabbed editor,
+file-tree operations, and a local terminal.
+
+### Added
+
+- **File editing & save** — the Monaco editor is editable; save with `Ctrl+S` to
+  local or remote files. Per-tab dirty state (which clears when you undo back to
+  the saved content), and **save-conflict detection** — Overwrite / Reload /
+  Cancel if the file changed on disk since you opened it.
+- **Editor tabs** — open multiple files, each with its own content, undo history,
+  cursor, and scroll. Middle-click or `Ctrl+W` to close (with an unsaved-changes
+  prompt); `Ctrl+Tab` / `Ctrl+Shift+Tab` to cycle; clicking an open file focuses
+  its tab.
+- **File operations** — **F2** inline rename and a right-click menu: New File, New
+  Folder, Rename, Delete (recursive, with confirmation), Copy Path. The **Delete**
+  key acts on the selection. Open tabs follow renames and close on delete.
+- **Local terminal** — the terminal now works without a remote, via a local PTY
+  (ConPTY on Windows). It targets the remote shell when connected, otherwise a
+  local shell: **PowerShell 7 (`pwsh`) when installed, else Windows PowerShell 5.1**
+  on Windows, and `$SHELL` elsewhere.
+
+### Changed
+
+- README refreshed: current feature set, terminal / shell behavior, keyboard
+  shortcuts, architecture, and a Windows **C++ build tools** prerequisite.
 
 ## [0.2.0] - 2026-06-12
 
@@ -111,6 +141,7 @@ terminal, in a Dracula-themed, VS Code-style window built on Tauri v2 and React.
 - Verified with `tsc --noEmit` and `vite build` (frontend) and `cargo check` and
   `cargo test` (backend, 4 tests passing).
 
-[Unreleased]: https://github.com/Yooouuuuuuu/straylight/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Yooouuuuuuu/straylight/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Yooouuuuuuu/straylight/releases/tag/v0.1.0

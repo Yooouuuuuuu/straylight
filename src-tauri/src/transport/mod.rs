@@ -69,6 +69,15 @@ pub struct FileStat {
     pub permissions: String,
 }
 
+/// Result of a write. On conflict the write is NOT performed and `modified`
+/// holds the file's current (newer) mtime; otherwise it holds the new mtime.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteResult {
+    pub conflict: bool,
+    pub modified: i64,
+}
+
 /// Read-only file operations. Phase 2 adds `write_file` here.
 #[async_trait::async_trait]
 pub trait FileTransport: Send + Sync {
@@ -77,6 +86,32 @@ pub trait FileTransport: Send + Sync {
     async fn list_dir(&self, path: &str) -> Result<DirListing, String>;
     async fn read_file(&self, path: &str) -> Result<FileContent, String>;
     async fn stat(&self, path: &str) -> Result<FileStat, String>;
+
+    /// Write `content` to `path`. When `expected_modified` is `Some(t)` and `t`
+    /// is non-zero, the write is refused (conflict) if the file's current mtime
+    /// is newer than `t` — i.e. it changed since the caller last read it.
+    async fn write_file(
+        &self,
+        path: &str,
+        content: &str,
+        expected_modified: Option<i64>,
+    ) -> Result<WriteResult, String>;
+
+    /// Rename the entry at `path` to `new_name` within the same directory.
+    /// Returns the new absolute path.
+    async fn rename(&self, path: &str, new_name: &str) -> Result<String, String>;
+
+    /// Create an empty file or a directory named `name` inside `parent`. Fails
+    /// if it already exists. Returns the new absolute path.
+    async fn create_entry(
+        &self,
+        parent: &str,
+        name: &str,
+        is_dir: bool,
+    ) -> Result<String, String>;
+
+    /// Remove `path` (recursively for directories).
+    async fn remove(&self, path: &str) -> Result<(), String>;
 }
 
 /// Convert the low 9 permission bits of a Unix mode into `rwxr-xr-x`.
@@ -149,6 +184,55 @@ pub async fn fs_stat(
     path: String,
 ) -> Result<FileStat, String> {
     state.transport(&conn_id).await?.stat(&path).await
+}
+
+#[tauri::command]
+pub async fn fs_write_file(
+    state: State<'_, AppState>,
+    conn_id: String,
+    path: String,
+    content: String,
+    expected_modified: Option<i64>,
+) -> Result<WriteResult, String> {
+    state
+        .transport(&conn_id)
+        .await?
+        .write_file(&path, &content, expected_modified)
+        .await
+}
+
+#[tauri::command]
+pub async fn fs_rename(
+    state: State<'_, AppState>,
+    conn_id: String,
+    path: String,
+    new_name: String,
+) -> Result<String, String> {
+    state.transport(&conn_id).await?.rename(&path, &new_name).await
+}
+
+#[tauri::command]
+pub async fn fs_create(
+    state: State<'_, AppState>,
+    conn_id: String,
+    parent: String,
+    name: String,
+    is_dir: bool,
+) -> Result<String, String> {
+    state
+        .transport(&conn_id)
+        .await?
+        .create_entry(&parent, &name, is_dir)
+        .await
+}
+
+#[tauri::command]
+pub async fn fs_remove(
+    state: State<'_, AppState>,
+    conn_id: String,
+    path: String,
+) -> Result<(), String> {
+    state.transport(&conn_id).await?.remove(&path).await
 }
 
 /// Open a local-filesystem session and return its connection id.

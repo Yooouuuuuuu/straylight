@@ -1,28 +1,30 @@
-//! PTY terminal sessions.
+//! PTY terminal sessions, for both remote (SSH channel) and local (ConPTY)
+//! connections.
 //!
-//! Each terminal is one SSH session channel with a PTY + shell request. A
-//! dedicated task owns the channel and multiplexes two directions over a
-//! [`tokio::select!`]:
+//! A terminal is driven through a transport-agnostic [`PtyHandle`] (an mpsc of
+//! [`PtyCommand`]s for input/resize/close); output is streamed to the frontend
+//! on the `pty-output` event. The owning task differs by transport:
 //!
-//! * **server → UI**: [`russh::ChannelMsg::Data`] is forwarded to the frontend
-//!   on the `pty-output` event.
-//! * **UI → server**: keystrokes, resizes, and close requests arrive on an mpsc
-//!   channel and are written to the SSH channel.
-//!
-//! `tokio::select!` drops the not-yet-ready branch futures before running the
-//! winning branch's body, so the `&mut self` borrow from `channel.wait()` is
-//! released before the input branch calls `channel.data(..)` / `window_change`.
+//! * **SSH**: a [`tokio::select!`] over the channel and the command queue. The
+//!   macro drops the not-ready branch before running the winner, so the
+//!   `&mut self` borrow from `channel.wait()` is released before `channel.data`.
+//! * **Local**: a blocking reader thread plus a task that writes/resizes the
+//!   ConPTY.
+
+use std::io::{Read, Write};
+use std::sync::Arc;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+use crate::ssh::connection::Connection;
 use crate::AppState;
 
 /// Output chunk emitted on the `pty-output` event. `data` is raw bytes (a JSON
 /// number array over IPC) so partial UTF-8 sequences survive — xterm.js
-/// reassembles them.
+/// reassembles them. An empty chunk signals the PTY closed.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PtyOutput {
@@ -42,7 +44,12 @@ pub struct PtyHandle {
     pub tx: mpsc::UnboundedSender<PtyCommand>,
 }
 
-/// Open a PTY-backed shell on a connection and start streaming output.
+enum PtyTarget {
+    Local,
+    Ssh(Arc<Connection>),
+}
+
+/// Open a PTY-backed shell on a connection (SSH or local) and stream output.
 #[tauri::command]
 pub async fn pty_open(
     state: State<'_, AppState>,
@@ -51,8 +58,39 @@ pub async fn pty_open(
     cols: u32,
     rows: u32,
 ) -> Result<String, String> {
-    let connection = state.ssh_connection(&conn_id).await?;
+    let target = {
+        let sessions = state.sessions.lock().await;
+        match sessions.get(&conn_id) {
+            Some(crate::Session::Local) => PtyTarget::Local,
+            Some(crate::Session::Ssh(conn)) => PtyTarget::Ssh(conn.clone()),
+            None => return Err(format!("session '{conn_id}' is not open")),
+        }
+    };
 
+    let pty_id = Uuid::new_v4().to_string();
+    let (tx, rx) = mpsc::unbounded_channel::<PtyCommand>();
+
+    match target {
+        PtyTarget::Local => open_local_pty(app, pty_id.clone(), cols, rows, rx)?,
+        PtyTarget::Ssh(conn) => open_ssh_pty(app, conn, pty_id.clone(), cols, rows, rx).await?,
+    }
+
+    state
+        .ptys
+        .lock()
+        .await
+        .insert(pty_id.clone(), PtyHandle { tx });
+    Ok(pty_id)
+}
+
+async fn open_ssh_pty(
+    app: AppHandle,
+    connection: Arc<Connection>,
+    pty_id: String,
+    cols: u32,
+    rows: u32,
+    mut rx: mpsc::UnboundedReceiver<PtyCommand>,
+) -> Result<(), String> {
     let mut channel = connection
         .handle
         .channel_open_session()
@@ -67,13 +105,8 @@ pub async fn pty_open(
         .await
         .map_err(|e| format!("could not start the remote shell: {e}"))?;
 
-    let pty_id = Uuid::new_v4().to_string();
-    let (tx, mut rx) = mpsc::unbounded_channel::<PtyCommand>();
-
     let task_app = app.clone();
     let task_id = pty_id.clone();
-    // Hold an Arc to the connection so it isn't torn down while this terminal is
-    // alive.
     let keepalive = connection.clone();
 
     tokio::spawn(async move {
@@ -118,7 +151,6 @@ pub async fn pty_open(
                 }
             }
         }
-        // Signal the frontend that this PTY has ended (empty chunk = closed).
         let _ = task_app.emit(
             "pty-output",
             PtyOutput { pty_id: task_id.clone(), data: Vec::new() },
@@ -126,12 +158,135 @@ pub async fn pty_open(
         log::info!("pty {task_id} closed");
     });
 
-    state
-        .ptys
-        .lock()
-        .await
-        .insert(pty_id.clone(), PtyHandle { tx });
-    Ok(pty_id)
+    Ok(())
+}
+
+/// True if `name` is found in any PATH directory.
+fn on_path(name: &str) -> bool {
+    std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join(name).is_file()))
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn default_shell() -> String {
+    // Prefer modern PowerShell 7 (pwsh) when installed; otherwise the built-in
+    // Windows PowerShell 5.1.
+    if on_path("pwsh.exe") {
+        "pwsh.exe".to_string()
+    } else {
+        "powershell.exe".to_string()
+    }
+}
+
+#[cfg(not(windows))]
+fn default_shell() -> String {
+    std::env::var("SHELL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "/bin/bash".to_string())
+}
+
+fn open_local_pty(
+    app: AppHandle,
+    pty_id: String,
+    cols: u32,
+    rows: u32,
+    mut rx: mpsc::UnboundedReceiver<PtyCommand>,
+) -> Result<(), String> {
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+
+    let size = PtySize {
+        rows: rows as u16,
+        cols: cols as u16,
+        pixel_width: 0,
+        pixel_height: 0,
+    };
+    let pair = native_pty_system()
+        .openpty(size)
+        .map_err(|e| format!("could not open a local terminal: {e}"))?;
+
+    let mut cmd = CommandBuilder::new(default_shell());
+    if let Some(dirs) = directories::UserDirs::new() {
+        cmd.cwd(dirs.home_dir());
+    }
+    let mut child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| format!("could not start the shell: {e}"))?;
+    // Close the parent's slave handle so the reader sees EOF when the shell exits.
+    drop(pair.slave);
+
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| format!("terminal reader: {e}"))?;
+    let mut writer = pair
+        .master
+        .take_writer()
+        .map_err(|e| format!("terminal writer: {e}"))?;
+    let master = pair.master;
+
+    // Blocking reader thread → stream output to the frontend.
+    let reader_app = app.clone();
+    let reader_id = pty_id.clone();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if reader_app
+                        .emit(
+                            "pty-output",
+                            PtyOutput {
+                                pty_id: reader_id.clone(),
+                                data: buf[..n].to_vec(),
+                            },
+                        )
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+        let _ = reader_app.emit(
+            "pty-output",
+            PtyOutput { pty_id: reader_id.clone(), data: Vec::new() },
+        );
+    });
+
+    // Input / resize / close. Writes to a PTY are small and non-blocking in
+    // practice, so handling them on the async task is fine.
+    tokio::spawn(async move {
+        let master = master;
+        while let Some(command) = rx.recv().await {
+            match command {
+                PtyCommand::Data(bytes) => {
+                    if writer.write_all(&bytes).is_err() {
+                        break;
+                    }
+                    let _ = writer.flush();
+                }
+                PtyCommand::Resize { cols, rows } => {
+                    let _ = master.resize(PtySize {
+                        rows: rows as u16,
+                        cols: cols as u16,
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    });
+                }
+                PtyCommand::Close => {
+                    let _ = child.kill();
+                    break;
+                }
+            }
+        }
+        log::info!("pty {pty_id} closed");
+    });
+
+    Ok(())
 }
 
 /// Send keystrokes / raw input to a PTY.

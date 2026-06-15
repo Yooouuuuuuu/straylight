@@ -1,5 +1,8 @@
-/** A single row in the file tree: twisty, icon, name, symlink marker, and a
- *  trailing size (or spinner while a directory loads). */
+/** A single row in the file tree: twisty, icon, name (or rename input), symlink
+ *  marker, and a trailing size. Handles selection, right-click, and inline
+ *  rename. */
+import { useEffect, useRef, useState } from "react";
+
 import { formatSize, formatTimestamp } from "../../lib/format";
 import type { FileEntry } from "../../lib/ipc";
 import { IconChevron } from "../icons";
@@ -16,24 +19,86 @@ function tooltip(entry: FileEntry): string {
   return parts.join("   ");
 }
 
+function RenameInput({
+  initial,
+  onCommit,
+  onCancel,
+}: {
+  initial: string;
+  onCommit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const ref = useRef<HTMLInputElement>(null);
+  const doneRef = useRef(false);
+
+  useEffect(() => {
+    const input = ref.current;
+    if (!input) return;
+    input.focus();
+    // Select the basename without the extension, like VS Code.
+    const dot = initial.lastIndexOf(".");
+    if (dot > 0) input.setSelectionRange(0, dot);
+    else input.select();
+  }, [initial]);
+
+  const commit = () => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    onCommit(value);
+  };
+  const cancel = () => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    onCancel();
+  };
+
+  return (
+    <input
+      ref={ref}
+      className="file-node__rename input--mono"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") commit();
+        else if (e.key === "Escape") cancel();
+      }}
+      onBlur={commit}
+    />
+  );
+}
+
 export function FileNode({
   entry,
   depth,
   expanded,
   loading,
   active,
+  renaming,
   onToggle,
   onOpen,
+  onSelect,
+  onContextMenu,
+  onCommitRename,
+  onCancelRename,
 }: {
   entry: FileEntry;
   depth: number;
   expanded: boolean;
   loading: boolean;
   active: boolean;
+  renaming: boolean;
   onToggle: () => void;
   onOpen: () => void;
+  onSelect: () => void;
+  onContextMenu: (x: number, y: number) => void;
+  onCommitRename: (name: string) => void;
+  onCancelRename: () => void;
 }) {
   const handleClick = () => {
+    onSelect();
     if (entry.isDir) onToggle();
     else onOpen();
   };
@@ -46,8 +111,12 @@ export function FileNode({
     <div
       className={`file-node ${active ? "file-node--active" : ""}`}
       style={{ paddingLeft: 6 + depth * 14 }}
-      onClick={handleClick}
-      title={tooltip(entry)}
+      onClick={renaming ? undefined : handleClick}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onContextMenu(event.clientX, event.clientY);
+      }}
+      title={renaming ? undefined : tooltip(entry)}
     >
       <span className={twistyClass}>
         {entry.isDir ? <IconChevron size={14} /> : null}
@@ -55,27 +124,37 @@ export function FileNode({
       <span className="file-node__icon">
         <FileIcon name={entry.name} isDir={entry.isDir} isOpen={expanded} />
       </span>
-      <span
-        className={`file-node__name ${entry.isDir ? "file-node__name--dir" : ""}`}
-      >
-        {entry.name}
-      </span>
-      {entry.isSymlink && (
-        <span
-          className="file-node__symlink"
-          title={entry.symlinkTarget ?? undefined}
-        >
-          ↪
-        </span>
-      )}
-      {loading ? (
-        <span className="file-node__spinner">
-          <span className="spinner spinner--sm" />
-        </span>
+      {renaming ? (
+        <RenameInput
+          initial={entry.name}
+          onCommit={onCommitRename}
+          onCancel={onCancelRename}
+        />
       ) : (
-        !entry.isDir && (
-          <span className="file-node__meta">{formatSize(entry.size)}</span>
-        )
+        <>
+          <span
+            className={`file-node__name ${entry.isDir ? "file-node__name--dir" : ""}`}
+          >
+            {entry.name}
+          </span>
+          {entry.isSymlink && (
+            <span
+              className="file-node__symlink"
+              title={entry.symlinkTarget ?? undefined}
+            >
+              ↪
+            </span>
+          )}
+          {loading ? (
+            <span className="file-node__spinner">
+              <span className="spinner spinner--sm" />
+            </span>
+          ) : (
+            !entry.isDir && (
+              <span className="file-node__meta">{formatSize(entry.size)}</span>
+            )
+          )}
+        </>
       )}
     </div>
   );

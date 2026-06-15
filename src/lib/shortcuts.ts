@@ -5,6 +5,11 @@
  */
 
 export type ShortcutAction =
+  | "saveFile"
+  | "nextTab"
+  | "prevTab"
+  | "renameSelected"
+  | "deleteSelected"
   | "toggleTerminal"
   | "toggleSidebar"
   | "focusFileExplorer"
@@ -23,6 +28,40 @@ export interface Shortcut {
 }
 
 export const SHORTCUTS: Shortcut[] = [
+  {
+    action: "saveFile",
+    key: "s",
+    ctrl: true,
+    description: "Save the current file",
+    label: "Ctrl+S",
+  },
+  {
+    action: "nextTab",
+    key: "Tab",
+    ctrl: true,
+    description: "Next tab",
+    label: "Ctrl+Tab",
+  },
+  {
+    action: "prevTab",
+    key: "Tab",
+    ctrl: true,
+    shift: true,
+    description: "Previous tab",
+    label: "Ctrl+Shift+Tab",
+  },
+  {
+    action: "renameSelected",
+    key: "F2",
+    description: "Rename the selected item",
+    label: "F2",
+  },
+  {
+    action: "deleteSelected",
+    key: "Delete",
+    description: "Delete the selected item",
+    label: "Del",
+  },
   {
     action: "toggleTerminal",
     key: "`",

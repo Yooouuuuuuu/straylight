@@ -6,7 +6,7 @@ use tokio::io::AsyncReadExt;
 
 use crate::transport::{
     looks_binary, sort_entries, DirListing, FileContent, FileEntry, FileStat, FileTransport,
-    BINARY_SNIFF, MAX_READ_BYTES,
+    WriteResult, BINARY_SNIFF, MAX_READ_BYTES,
 };
 
 pub struct LocalTransport;
@@ -189,5 +189,90 @@ impl FileTransport for LocalTransport {
             modified: mtime_secs(&meta),
             permissions: perms_string(&meta),
         })
+    }
+
+    async fn write_file(
+        &self,
+        path: &str,
+        content: &str,
+        expected_modified: Option<i64>,
+    ) -> Result<WriteResult, String> {
+        let target = PathBuf::from(path);
+
+        if let Some(expected) = expected_modified {
+            if expected > 0 {
+                if let Ok(meta) = tokio::fs::metadata(&target).await {
+                    let current = mtime_secs(&meta);
+                    if current > expected {
+                        return Ok(WriteResult { conflict: true, modified: current });
+                    }
+                }
+            }
+        }
+
+        tokio::fs::write(&target, content.as_bytes())
+            .await
+            .map_err(|e| format!("could not write {path}: {e}"))?;
+
+        let modified = tokio::fs::metadata(&target)
+            .await
+            .ok()
+            .map(|m| mtime_secs(&m))
+            .unwrap_or(0);
+        Ok(WriteResult {
+            conflict: false,
+            modified,
+        })
+    }
+
+    async fn rename(&self, path: &str, new_name: &str) -> Result<String, String> {
+        let from = PathBuf::from(path);
+        let new_path = from
+            .parent()
+            .map(|p| p.join(new_name))
+            .unwrap_or_else(|| PathBuf::from(new_name));
+        tokio::fs::rename(&from, &new_path)
+            .await
+            .map_err(|e| format!("could not rename {path}: {e}"))?;
+        Ok(new_path.to_string_lossy().into_owned())
+    }
+
+    async fn create_entry(
+        &self,
+        parent: &str,
+        name: &str,
+        is_dir: bool,
+    ) -> Result<String, String> {
+        let path = PathBuf::from(parent).join(name);
+        if is_dir {
+            tokio::fs::create_dir(&path)
+                .await
+                .map_err(|e| format!("could not create folder: {e}"))?;
+        } else {
+            tokio::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .await
+                .map_err(|e| format!("could not create file: {e}"))?;
+        }
+        Ok(path.to_string_lossy().into_owned())
+    }
+
+    async fn remove(&self, path: &str) -> Result<(), String> {
+        let target = PathBuf::from(path);
+        let meta = tokio::fs::symlink_metadata(&target)
+            .await
+            .map_err(|e| format!("could not stat {path}: {e}"))?;
+        if meta.is_dir() {
+            tokio::fs::remove_dir_all(&target)
+                .await
+                .map_err(|e| format!("could not remove folder: {e}"))?;
+        } else {
+            tokio::fs::remove_file(&target)
+                .await
+                .map_err(|e| format!("could not remove file: {e}"))?;
+        }
+        Ok(())
     }
 }

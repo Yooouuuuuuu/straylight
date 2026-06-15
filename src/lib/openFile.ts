@@ -1,9 +1,10 @@
-/** Read a file (remote SFTP or local) and load it into the editor store,
- *  applying language detection and large/binary-file handling. */
+/** Read a file (remote SFTP or local) and open it as an editor tab, applying
+ *  language detection and large/binary-file handling. An already-open file is
+ *  just focused. */
 import { fsReadFile, type FileEntry } from "./ipc";
 import { languageForFile } from "./language";
 import { basename } from "./format";
-import { useAppStore } from "../store/appStore";
+import { useAppStore, type NewTab } from "../store/appStore";
 
 const LARGE_FILE_BYTES = 10 * 1024 * 1024;
 const LIGHTWEIGHT_BYTES = 50 * 1024 * 1024;
@@ -15,6 +16,16 @@ export async function openRemoteFile(
   if (entry.isDir) return;
 
   const store = useAppStore.getState();
+
+  // Already open → focus its tab.
+  const existing = store.tabs.find(
+    (t) => t.connId === connId && t.path === entry.path,
+  );
+  if (existing) {
+    store.setActiveTab(existing.id);
+    return;
+  }
+
   store.setBusyPath(entry.path);
   try {
     const file = await fsReadFile(connId, entry.path);
@@ -22,41 +33,28 @@ export async function openRemoteFile(
       ? "CRLF"
       : "LF";
 
-    const language = file.isBinary
-      ? "plaintext"
-      : languageForFile(entry.name);
-
-    store.setOpenFile({
+    const tab: NewTab = {
       connId,
       path: file.path,
       name: entry.name,
       content: file.content,
-      language,
+      language: file.isBinary ? "plaintext" : languageForFile(entry.name),
       isBinary: file.isBinary,
       encoding: file.encoding,
       size: file.size,
       modified: file.modified,
       truncated: file.truncated,
       lineEnding,
-    });
+    };
+    store.openTab(tab);
 
-    // Only warn for files actually opened in the editor (not shown as a card).
     if (!file.isBinary) {
       if (file.truncated) {
-        store.pushNotice(
-          "warn",
-          `${entry.name} exceeds 50 MB and was opened truncated.`,
-        );
+        store.pushNotice("warn", `${entry.name} exceeds 50 MB and was opened truncated.`);
       } else if (file.size >= LIGHTWEIGHT_BYTES) {
-        store.pushNotice(
-          "warn",
-          `${entry.name} is very large — opened in lightweight mode.`,
-        );
+        store.pushNotice("warn", `${entry.name} is very large — opened in lightweight mode.`);
       } else if (file.size >= LARGE_FILE_BYTES) {
-        store.pushNotice(
-          "warn",
-          `${entry.name} is large — some editor features are disabled.`,
-        );
+        store.pushNotice("warn", `${entry.name} is large — some editor features are disabled.`);
       }
     }
   } catch (error) {

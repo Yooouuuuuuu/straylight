@@ -3,6 +3,7 @@
  *  form the multi-root explorer. */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 
+import { commitRename } from "../../lib/fileOps";
 import { fsListDir, type FileEntry } from "../../lib/ipc";
 import { openRemoteFile } from "../../lib/openFile";
 import { useAppStore } from "../../store/appStore";
@@ -32,8 +33,11 @@ export function RootTree({
 }) {
   const showHidden = useAppStore((s) => s.showHidden);
   const refreshToken = useAppStore((s) => s.treeRefreshToken);
-  const openFilePath = useAppStore((s) => s.openFile?.path ?? null);
-  const openFileConnId = useAppStore((s) => s.openFile?.connId ?? null);
+  const selected = useAppStore((s) => s.selected);
+  const renaming = useAppStore((s) => s.renaming);
+  const setSelected = useAppStore((s) => s.setSelected);
+  const openContextMenu = useAppStore((s) => s.openContextMenu);
+  const cancelRename = useAppStore((s) => s.cancelRename);
 
   const [collapsed, setCollapsed] = useState(false);
   const [dirs, setDirs] = useState<Record<string, DirState>>({});
@@ -108,9 +112,34 @@ export function RootTree({
           depth={depth}
           expanded={isExpanded}
           loading={dirs[entry.path]?.loading ?? false}
-          active={openFileConnId === connId && openFilePath === entry.path}
+          active={selected?.connId === connId && selected?.path === entry.path}
+          renaming={
+            renaming?.connId === connId && renaming?.path === entry.path
+          }
           onToggle={() => toggleDir(entry.path)}
           onOpen={() => void openRemoteFile(connId, entry)}
+          onSelect={() =>
+            setSelected({
+              connId,
+              path: entry.path,
+              name: entry.name,
+              isDir: entry.isDir,
+            })
+          }
+          onContextMenu={(x, y) =>
+            openContextMenu(
+              {
+                connId,
+                path: entry.path,
+                name: entry.name,
+                isDir: entry.isDir,
+              },
+              x,
+              y,
+            )
+          }
+          onCommitRename={(name) => void commitRename(connId, entry.path, name)}
+          onCancelRename={() => cancelRename()}
         />,
       );
       if (entry.isDir && isExpanded) {

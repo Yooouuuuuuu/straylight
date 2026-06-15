@@ -27,17 +27,17 @@ export function formatTimestamp(unixSeconds: number): string {
   });
 }
 
-/** The final path segment of a POSIX path. */
+/** The final path segment (handles both `/` and `\` separators). */
 export function basename(path: string): string {
-  const trimmed = path.replace(/\/+$/, "");
-  const idx = trimmed.lastIndexOf("/");
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const idx = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
   return idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
 }
 
-/** The parent directory of a POSIX path (`/a/b/c` → `/a/b`). */
+/** The parent directory (handles `/` and `\`; `/a/b/c` → `/a/b`). */
 export function dirname(path: string): string {
-  const trimmed = path.replace(/\/+$/, "");
-  const idx = trimmed.lastIndexOf("/");
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const idx = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
   if (idx < 0) return "";
   if (idx === 0) return "/";
   return trimmed.slice(0, idx);

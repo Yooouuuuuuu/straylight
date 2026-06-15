@@ -756,6 +756,71 @@
   padding-bottom: var(--space-2);
 }
 
+.file-node__rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 20px;
+  padding: 0 var(--space-2);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-focus);
+  border-radius: var(--radius-sm);
+  color: var(--fg-primary);
+  outline: none;
+  font-size: var(--font-size-md);
+}
+
+/* ------------------------------------------------------------ Context menu */
+
+.context-menu {
+  position: fixed;
+  z-index: 1200;
+  min-width: 184px;
+  padding: var(--space-2);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.context-menu__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: var(--space-3) var(--space-4);
+  border: none;
+  background: transparent;
+  color: var(--fg-primary);
+  font-size: var(--font-size-md);
+  text-align: left;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.context-menu__item:hover {
+  background: var(--bg-selected);
+}
+
+.context-menu__item--danger:hover {
+  background: rgba(255, 85, 85, 0.18);
+  color: var(--red);
+}
+
+.context-menu__key {
+  color: var(--fg-secondary);
+  font-family: var(--font-code);
+  font-size: var(--font-size-xs);
+}
+
+.context-menu__sep {
+  height: 1px;
+  background: var(--border);
+  margin: var(--space-2) 0;
+}
+
 /* ------------------------------------------------------------------ Editor area */
 
 .editor-area {
@@ -779,6 +844,14 @@
 
 .editor-area__name {
   font-weight: 500;
+}
+
+.editor-area__dirty {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fg-primary);
+  flex: 0 0 auto;
 }
 
 .editor-area__path {
@@ -806,6 +879,112 @@
 .monaco-host {
   position: absolute;
   inset: 0;
+}
+
+/* ------------------------------------------------------------- Editor tabs */
+
+.editor-tabs {
+  height: var(--panel-header-height);
+  flex: 0 0 var(--panel-header-height);
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.editor-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-3) 0 var(--space-5);
+  max-width: 200px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.editor-tab:hover {
+  background: var(--bg-tertiary);
+}
+
+.editor-tab--active {
+  background: var(--bg-primary);
+  color: var(--fg-primary);
+  box-shadow: inset 0 2px 0 var(--purple);
+}
+
+.editor-tab__icon {
+  display: inline-flex;
+  flex: 0 0 16px;
+}
+
+.editor-tab__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--font-size-sm);
+}
+
+.editor-tab__close {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.editor-tab__close:hover {
+  background: var(--bg-selected);
+}
+
+.editor-tab__dot {
+  display: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fg-primary);
+}
+
+.editor-tab__x {
+  display: inline-flex;
+  opacity: 0;
+}
+
+.editor-tab:hover .editor-tab__x,
+.editor-tab--active .editor-tab__x {
+  opacity: 0.8;
+}
+
+.editor-tab__close:hover .editor-tab__x {
+  opacity: 1;
+}
+
+.editor-tab--dirty .editor-tab__dot {
+  display: block;
+}
+
+.editor-tab--dirty .editor-tab__x {
+  display: none;
+}
+
+.editor-tab--dirty:hover .editor-tab__dot {
+  display: none;
+}
+
+.editor-tab--dirty:hover .editor-tab__x {
+  display: inline-flex;
+  opacity: 0.8;
 }
 
 .editor-banner {
@@ -871,6 +1050,7 @@
   gap: var(--space-5);
   padding: var(--space-8);
   text-align: center;
+  background: var(--bg-primary);
 }
 
 .binary-card__icon {

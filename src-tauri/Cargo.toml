@@ -1,6 +1,6 @@
 [package]
 name = "straylight"
-version = "0.2.0"
+version = "0.3.0"
 description = "Lightweight SSH file manager, terminal, and code viewer"
 authors = ["Straylight contributors"]
 edition = "2021"
@@ -29,6 +29,9 @@ tauri-plugin-fs = "2"
 russh = "0.46"
 russh-sftp = "2"
 russh-keys = "0.46"
+
+# Local PTY (ConPTY on Windows) for the local terminal.
+portable-pty = "0.8"
 
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }

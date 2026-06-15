@@ -4,12 +4,15 @@
 
 use std::sync::Arc;
 
-use tokio::io::AsyncReadExt;
+use std::future::Future;
+use std::pin::Pin;
+
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::ssh::connection::Connection;
 use crate::transport::{
     join_path, looks_binary, mode_to_rwx, sort_entries, DirListing, FileContent, FileEntry,
-    FileStat, FileTransport, BINARY_SNIFF, MAX_READ_BYTES,
+    FileStat, FileTransport, WriteResult, BINARY_SNIFF, MAX_READ_BYTES,
 };
 
 /// A [`FileTransport`] backed by an SSH connection's SFTP subsystem.
@@ -162,4 +165,134 @@ impl FileTransport for SftpTransport {
             permissions: mode_to_rwx(meta.permissions.unwrap_or(0)),
         })
     }
+
+    async fn write_file(
+        &self,
+        path: &str,
+        content: &str,
+        expected_modified: Option<i64>,
+    ) -> Result<WriteResult, String> {
+        let guard = self.0.sftp().await?;
+        let sftp = guard.as_ref().expect("sftp session initialized above");
+
+        if let Some(expected) = expected_modified {
+            if expected > 0 {
+                if let Ok(meta) = sftp.metadata(path.to_string()).await {
+                    let current = meta.mtime.map(|m| m as i64).unwrap_or(0);
+                    if current > expected {
+                        return Ok(WriteResult { conflict: true, modified: current });
+                    }
+                }
+            }
+        }
+
+        // `create` opens write + create + truncate.
+        let mut file = sftp
+            .create(path.to_string())
+            .await
+            .map_err(|e| format!("could not open {path} for writing: {e}"))?;
+        file.write_all(content.as_bytes())
+            .await
+            .map_err(|e| format!("could not write {path}: {e}"))?;
+        file.flush()
+            .await
+            .map_err(|e| format!("could not flush {path}: {e}"))?;
+        file.shutdown().await.ok();
+
+        let modified = sftp
+            .metadata(path.to_string())
+            .await
+            .ok()
+            .and_then(|m| m.mtime)
+            .map(|m| m as i64)
+            .unwrap_or(0);
+        Ok(WriteResult {
+            conflict: false,
+            modified,
+        })
+    }
+
+    async fn rename(&self, path: &str, new_name: &str) -> Result<String, String> {
+        let guard = self.0.sftp().await?;
+        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let new_path = posix_sibling(path, new_name);
+        sftp.rename(path.to_string(), new_path.clone())
+            .await
+            .map_err(|e| format!("could not rename {path}: {e}"))?;
+        Ok(new_path)
+    }
+
+    async fn create_entry(
+        &self,
+        parent: &str,
+        name: &str,
+        is_dir: bool,
+    ) -> Result<String, String> {
+        let guard = self.0.sftp().await?;
+        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let path = join_path(parent, name);
+        if sftp.metadata(path.clone()).await.is_ok() {
+            return Err(format!("{path} already exists"));
+        }
+        if is_dir {
+            sftp.create_dir(path.clone())
+                .await
+                .map_err(|e| format!("could not create folder {path}: {e}"))?;
+        } else {
+            sftp.create(path.clone())
+                .await
+                .map_err(|e| format!("could not create file {path}: {e}"))?;
+        }
+        Ok(path)
+    }
+
+    async fn remove(&self, path: &str) -> Result<(), String> {
+        let guard = self.0.sftp().await?;
+        let sftp = guard.as_ref().expect("sftp session initialized above");
+        remove_recursive(sftp, path.to_string()).await
+    }
+}
+
+fn posix_sibling(path: &str, new_name: &str) -> String {
+    match path.rsplit_once('/') {
+        Some(("", _)) => format!("/{new_name}"),
+        Some((parent, _)) => format!("{parent}/{new_name}"),
+        None => new_name.to_string(),
+    }
+}
+
+/// Recursively delete a remote path (depth-first), removing the symlink itself
+/// rather than following it.
+fn remove_recursive(
+    sftp: &russh_sftp::client::SftpSession,
+    path: String,
+) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+    Box::pin(async move {
+        let meta = sftp
+            .symlink_metadata(path.clone())
+            .await
+            .map_err(|e| format!("could not stat {path}: {e}"))?;
+        if meta.is_dir() && !meta.is_symlink() {
+            let entries = sftp
+                .read_dir(path.clone())
+                .await
+                .map_err(|e| format!("could not list {path}: {e}"))?;
+            for entry in entries {
+                let name = entry.file_name();
+                if name == "." || name == ".." {
+                    continue;
+                }
+                let child = join_path(&path, &name);
+                remove_recursive(sftp, child).await?;
+            }
+            sftp.remove_dir(path.clone())
+                .await
+                .map_err(|e| format!("could not remove folder {path}: {e}"))?;
+        } else {
+            sftp.remove_file(path.clone())
+                .await
+                .map_err(|e| format!("could not remove {path}: {e}"))?;
+        }
+        Ok(())
+    })
 }
