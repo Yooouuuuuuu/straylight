@@ -117,6 +117,11 @@ export function sshDisconnect(connId: string): Promise<void> {
   return invoke("ssh_disconnect", { connId });
 }
 
+/** Manually re-establish a dropped connection, keeping the same connId. */
+export function sshReconnect(connId: string): Promise<void> {
+  return invoke("ssh_reconnect", { connId });
+}
+
 export function sshGetStatus(connId: string): Promise<ConnectionStatus> {
   return invoke("ssh_get_status", { connId });
 }

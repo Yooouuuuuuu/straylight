@@ -53,6 +53,12 @@ export interface RemoteConnection {
   user: string;
   port: number;
   color: string;
+  /** Auth method used — a key-based host can be silently auto-reconnected on
+   *  restart; a password host cannot (we never persist the password). */
+  authType: "auto" | "password";
+  /** IdentityFile for key auth, if any (null for password / default keys). */
+  identityFile: string | null;
+  proxyJump: string | null;
 }
 
 export interface Notice {
@@ -101,6 +107,8 @@ interface AppState {
   terminalVisible: boolean;
   showHidden: boolean;
   treeRefreshToken: number;
+  /** Bumped to force the terminal to restart (e.g. after a reconnect). */
+  terminalEpoch: number;
 
   // Editor tabs ----------------------------------------------------------
   tabs: EditorTab[];
@@ -138,6 +146,7 @@ interface AppState {
   setTerminalVisible: (visible: boolean) => void;
   toggleHidden: () => void;
   refreshTree: () => void;
+  bumpTerminalEpoch: () => void;
 
   openTab: (tab: NewTab) => void;
   setActiveTab: (id: string) => void;
@@ -187,6 +196,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   terminalVisible: true,
   showHidden: false,
   treeRefreshToken: 0,
+  terminalEpoch: 0,
 
   tabs: [],
   activeTabId: null,
@@ -253,6 +263,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setTerminalVisible: (terminalVisible) => set({ terminalVisible }),
   toggleHidden: () => set((s) => ({ showHidden: !s.showHidden })),
   refreshTree: () => set((s) => ({ treeRefreshToken: s.treeRefreshToken + 1 })),
+  bumpTerminalEpoch: () => set((s) => ({ terminalEpoch: s.terminalEpoch + 1 })),
 
   openTab: (tab) =>
     set((s) => {

@@ -20,8 +20,8 @@ dist-ssr
 src-tauri/target
 src-tauri/gen/schemas
 
-# Claude Code (local, machine-specific settings)
-.claude/settings.local.json
+# Claude Code (local session data, scheduled-task locks, machine settings)
+.claude/
 
 # Logs
 *.log

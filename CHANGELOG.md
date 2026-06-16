@@ -12,11 +12,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Drag-and-drop transfers** between the local and remote trees (and from the OS).
 - **Multiple terminals** with a shell picker (cmd / pwsh / git-bash / remote), and
   tab reordering.
-- **Auto-reconnect** on dropped SSH connections; **session persistence** (restore
-  open tabs, the last connection, and panel sizes).
 - **WSL** transport.
 - **Phase 3:** git status / blame / log / diff, Podman containers, fuzzy finder,
   search-in-files, port forwarding, Markdown preview, and auto-update.
+
+## [0.4.0] - 2026-06-16
+
+Connections survive drops, and your workspace survives restarts: auto-reconnect
+and session persistence.
+
+### Added
+
+- **Auto-reconnect** — a dropped SSH connection (sleep, Wi-Fi change, server
+  blip) now recovers on its own. A per-connection supervisor detects the drop,
+  shows **Reconnecting…**, and retries with backoff, swapping the transport in
+  place so open tabs, the file tree, and the terminal stay attached. Key hosts
+  re-authenticate silently; a password is reused from memory for the session and
+  is never written to disk. After repeated failures the status bar offers a
+  manual **Reconnect**.
+- **Session persistence** — on relaunch Straylight restores your panel layout
+  (sizes + sidebar/terminal visibility), reopens the files you had open, and
+  brings back the last server: **key-based hosts reconnect automatically** and
+  their tabs reopen; a **password host pre-fills the connect dialog** (its tabs
+  reopen once you connect). Files are reloaded from disk — an explicit disconnect
+  is remembered, so it won't reconnect next launch.
+
+### Changed
+
+- The terminal restarts cleanly after a reconnect, and the file tree refreshes
+  to reflect any changes made while disconnected.
 
 ## [0.3.0] - 2026-06-15
 
@@ -141,7 +165,8 @@ terminal, in a Dracula-themed, VS Code-style window built on Tauri v2 and React.
 - Verified with `tsc --noEmit` and `vite build` (frontend) and `cargo check` and
   `cargo test` (backend, 4 tests passing).
 
-[Unreleased]: https://github.com/Yooouuuuuuu/straylight/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Yooouuuuuuu/straylight/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Yooouuuuuuu/straylight/releases/tag/v0.1.0

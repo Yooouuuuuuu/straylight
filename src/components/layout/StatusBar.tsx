@@ -1,6 +1,7 @@
 /** Bottom status bar: connection state, current file path, language, encoding,
  *  line ending, and cursor position (for the active tab). */
 import { useAppStore } from "../../store/appStore";
+import { useSSH } from "../../hooks/useSSH";
 import type { ConnectionState } from "../../lib/ipc";
 
 const STATE_TEXT: Record<ConnectionState, string> = {
@@ -26,6 +27,7 @@ export function StatusBar() {
   const activeTabId = useAppStore((s) => s.activeTabId);
   const terminalVisible = useAppStore((s) => s.terminalVisible);
   const toggleTerminal = useAppStore((s) => s.toggleTerminal);
+  const { reconnect } = useSSH();
 
   const active = tabs.find((t) => t.id === activeTabId) ?? null;
 
@@ -44,6 +46,16 @@ export function StatusBar() {
           </>
         )}
       </span>
+
+      {remote && connState === "disconnected" && (
+        <span
+          className="statusbar__item statusbar__item--button"
+          onClick={() => void reconnect()}
+          title="Reconnect to the server"
+        >
+          Reconnect
+        </span>
+      )}
 
       {active && (
         <span className="statusbar__item statusbar__path" title={active.path}>

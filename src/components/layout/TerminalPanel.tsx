@@ -7,6 +7,7 @@ import { IconClose } from "../icons";
 export function TerminalPanel() {
   const remote = useAppStore((s) => s.remote);
   const localConnId = useAppStore((s) => s.localConnId);
+  const terminalEpoch = useAppStore((s) => s.terminalEpoch);
   const setTerminalVisible = useAppStore((s) => s.setTerminalVisible);
 
   const connId = remote?.connId ?? localConnId;
@@ -26,7 +27,7 @@ export function TerminalPanel() {
       </div>
       <div className="terminal-panel__body">
         {connId ? (
-          <Terminal key={connId} connId={connId} />
+          <Terminal key={`${connId}:${terminalEpoch}`} connId={connId} />
         ) : (
           <div className="terminal-message">Starting…</div>
         )}

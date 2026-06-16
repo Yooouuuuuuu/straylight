@@ -86,6 +86,7 @@ pub fn run() {
             ssh::config::ssh_config_path,
             ssh::connection::ssh_connect,
             ssh::connection::ssh_disconnect,
+            ssh::connection::ssh_reconnect,
             ssh::connection::ssh_get_status,
             transport::local_connect,
             transport::fs_list_dir,

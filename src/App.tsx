@@ -13,7 +13,9 @@ import {
 
 import { localConnect, onSshStatus } from "./lib/ipc";
 import { useAppStore } from "./store/appStore";
+import { initSessionPersistence, restoreSession } from "./lib/session";
 import { useKeyboard } from "./hooks/useKeyboard";
+import { useSSH } from "./hooks/useSSH";
 import { TitleBar } from "./components/layout/TitleBar";
 import { Sidebar } from "./components/layout/Sidebar";
 import { EditorArea } from "./components/layout/EditorArea";
@@ -34,7 +36,6 @@ export default function App() {
   const remote = useAppStore((s) => s.remote);
   const localConnId = useAppStore((s) => s.localConnId);
   const setLocalConnId = useAppStore((s) => s.setLocalConnId);
-  const setConnState = useAppStore((s) => s.setConnState);
   const setSidebarVisible = useAppStore((s) => s.setSidebarVisible);
   const setTerminalVisible = useAppStore((s) => s.setTerminalVisible);
 
@@ -43,6 +44,9 @@ export default function App() {
 
   const sidebarPanel = useRef<ImperativePanelHandle>(null);
   const terminalPanel = useRef<ImperativePanelHandle>(null);
+  const restored = useRef(false);
+
+  const { connect } = useSSH();
 
   useKeyboard();
 
@@ -64,18 +68,39 @@ export default function App() {
     };
   }, [localConnId, setLocalConnId]);
 
-  // Reflect backend-driven remote status (drops, errors) in the store.
+  // Persist the session (open tabs, last remote, panel visibility) on change.
+  useEffect(() => initSessionPersistence(), []);
+
+  // Once the local session is up, restore the previous session exactly once:
+  // panel visibility, local tabs, and the last remote (auto-reconnect for key
+  // hosts; pre-filled dialog for password hosts).
+  useEffect(() => {
+    if (!localConnId || restored.current) return;
+    restored.current = true;
+    void restoreSession(localConnId, connect);
+  }, [localConnId, connect]);
+
+  // Reflect backend-driven remote status (drops, reconnects, errors) in the
+  // store. The connId is preserved across a reconnect, so tabs and the file tree
+  // stay valid — but the old SFTP/PTY channels are dead, so on recovery we
+  // refresh the tree and restart the terminal.
   useEffect(() => {
     const unlistenPromise = onSshStatus((status) => {
-      const current = useAppStore.getState().remote;
-      if (current && status.connId === current.connId) {
-        setConnState(status.state, status.message);
+      const store = useAppStore.getState();
+      const current = store.remote;
+      if (!current || status.connId !== current.connId) return;
+      const wasReconnecting = store.connState === "reconnecting";
+      store.setConnState(status.state, status.message);
+      if (status.state === "connected" && wasReconnecting) {
+        store.refreshTree();
+        store.bumpTerminalEpoch();
+        store.pushNotice("info", "Reconnected.");
       }
     });
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [setConnState]);
+  }, []);
 
   // Drive the sidebar panel's collapse state from the store.
   useEffect(() => {
@@ -104,7 +129,7 @@ export default function App() {
     <div className="app">
       <TitleBar />
       <div className="app-body">
-        <PanelGroup direction="horizontal">
+        <PanelGroup direction="horizontal" autoSaveId="straylight.layout.h">
           <Panel
             id="sidebar"
             order={1}
@@ -123,6 +148,7 @@ export default function App() {
           <Panel id="main" order={2} minSize={30}>
             <PanelGroup
               key={terminalConnId ? "with-terminal" : "no-terminal"}
+              autoSaveId="straylight.layout.v"
               direction="vertical"
             >
               <Panel id="editor" order={1} minSize={20}>

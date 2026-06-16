@@ -2,13 +2,16 @@
 //! `ProxyJump` bastions, and the shared [`Connection`] handle that the SFTP and
 //! PTY layers build channels on top of.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use russh::client;
+use russh::Channel;
 use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::{Mutex, MutexGuard};
+use tokio::sync::{Mutex, MutexGuard, RwLock};
 use uuid::Uuid;
 
 use crate::AppState;
@@ -52,11 +55,21 @@ pub struct ConnectionStatus {
     pub message: Option<String>,
 }
 
-/// Static details about a connection, retained for reconnect logic (Phase 2).
+/// Static details about a connection, used to re-establish it on reconnect.
 pub struct ConnectionInfo {
     pub host: String,
     pub port: u16,
     pub user: String,
+}
+
+/// The live transport for a connection: the authenticated handle plus, when
+/// jumped, the bastion handle kept alive so the tunnel stays open. Replaced
+/// wholesale on reconnect, which is why it sits behind a lock.
+struct Live {
+    /// Behind an `Arc` so `open_channel` can clone it and release the `live`
+    /// read lock before the network round-trip (russh's `Handle` isn't `Clone`).
+    handle: Arc<client::Handle<ClientHandler>>,
+    _jump: Option<client::Handle<ClientHandler>>,
 }
 
 /// A live SSH connection. One per server; channels (SFTP, PTY, exec) are
@@ -64,17 +77,24 @@ pub struct ConnectionInfo {
 pub struct Connection {
     pub id: String,
     pub info: ConnectionInfo,
-    /// The authenticated russh client handle. All channel-opening methods take
-    /// `&self`, so this is shared behind an [`Arc<Connection>`].
-    pub handle: client::Handle<ClientHandler>,
+    /// The live handle (and bastion tunnel), behind an `RwLock` so the reconnect
+    /// supervisor can swap it in place — the connection id, and every tab,
+    /// terminal, and tree root that references it, survives a reconnect.
+    live: RwLock<Live>,
     /// Lazily-opened SFTP session, reused across file operations. Guarded by an
     /// async mutex because SFTP requests are serialized over a single channel.
     pub sftp: Mutex<Option<SftpSession>>,
     /// Current coarse state.
     pub state: Mutex<ConnectionState>,
-    /// When connecting through a bastion, the jump host's handle is kept alive
-    /// here for the lifetime of the connection so the tunnel stays open.
-    _jump: Option<client::Handle<ClientHandler>>,
+    /// Retained so the supervisor can re-authenticate silently after a drop:
+    /// key auth re-reads the on-disk key; a password is reused from memory only
+    /// (it is never written to disk).
+    auth: AuthMethod,
+    proxy_jump: Option<String>,
+    /// Set when the user explicitly disconnects, so the supervisor stops.
+    stop: AtomicBool,
+    /// Guards against running more than one supervisor task per connection.
+    supervising: AtomicBool,
 }
 
 impl Connection {
@@ -85,11 +105,7 @@ impl Connection {
     pub async fn sftp(&self) -> Result<MutexGuard<'_, Option<SftpSession>>, String> {
         let mut guard = self.sftp.lock().await;
         if guard.is_none() {
-            let channel = self
-                .handle
-                .channel_open_session()
-                .await
-                .map_err(|e| format!("failed to open SFTP channel: {e}"))?;
+            let channel = self.open_channel().await?;
             channel
                 .request_subsystem(true, "sftp")
                 .await
@@ -102,10 +118,32 @@ impl Connection {
         Ok(guard)
     }
 
+    /// Open a fresh session channel on the live handle. Used by SFTP, the PTY
+    /// layer, and the supervisor's health probe; reading the lock means a
+    /// reconnect (which write-locks) is briefly serialized against new channels.
+    pub async fn open_channel(&self) -> Result<Channel<client::Msg>, String> {
+        // Clone the (cheap) handle and drop the read guard before the network
+        // round-trip, so an in-flight channel open never blocks a reconnect
+        // (which needs the write lock).
+        let handle = self.live.read().await.handle.clone();
+        handle
+            .channel_open_session()
+            .await
+            .map_err(|e| format!("could not open SSH channel: {e}"))
+    }
+
     /// Drop the cached SFTP session so the next operation re-opens it. Used when
-    /// an SFTP call fails (e.g. the channel died).
+    /// an SFTP call fails (e.g. the channel died) and after a reconnect.
     pub async fn reset_sftp(&self) {
         *self.sftp.lock().await = None;
+    }
+
+    fn mark_stopped(&self) {
+        self.stop.store(true, Ordering::SeqCst);
+    }
+
+    fn is_stopped(&self) -> bool {
+        self.stop.load(Ordering::SeqCst)
     }
 }
 
@@ -130,6 +168,10 @@ fn client_config() -> Arc<client::Config> {
         // Keep interactive sessions alive; we never want the library to drop an
         // idle terminal out from under the user.
         inactivity_timeout: None,
+        // Probe the peer so a silently-dropped TCP (sleep, Wi-Fi change) surfaces
+        // as a dead handle instead of hanging — the supervisor reconnects.
+        keepalive_interval: Some(Duration::from_secs(15)),
+        keepalive_max: 3,
         ..Default::default()
     })
 }
@@ -300,18 +342,22 @@ pub async fn ssh_connect(
     let connection = Arc::new(Connection {
         id: conn_id.clone(),
         info: ConnectionInfo { host, port, user },
-        handle,
+        live: RwLock::new(Live { handle: Arc::new(handle), _jump: jump }),
         sftp: Mutex::new(None),
         state: Mutex::new(ConnectionState::Connected),
-        _jump: jump,
+        auth,
+        proxy_jump,
+        stop: AtomicBool::new(false),
+        supervising: AtomicBool::new(false),
     });
 
     state
         .sessions
         .lock()
         .await
-        .insert(conn_id.clone(), crate::Session::Ssh(connection));
+        .insert(conn_id.clone(), crate::Session::Ssh(connection.clone()));
     emit_status(&app, &conn_id, ConnectionState::Connected, None);
+    ensure_supervisor(app.clone(), connection);
     log::info!("ssh connection {conn_id} established");
     Ok(conn_id)
 }
@@ -325,13 +371,208 @@ pub async fn ssh_disconnect(
 ) -> Result<(), String> {
     let session = state.sessions.lock().await.remove(&conn_id);
     if let Some(crate::Session::Ssh(connection)) = session {
+        // Stop the supervisor before dropping the transport, so it doesn't see
+        // the close as a drop and try to reconnect.
+        connection.mark_stopped();
         let _ = connection
+            .live
+            .read()
+            .await
             .handle
             .disconnect(russh::Disconnect::ByApplication, "", "en")
             .await;
     }
     emit_status(&app, &conn_id, ConnectionState::Disconnected, None);
     log::info!("session {conn_id} closed");
+    Ok(())
+}
+
+/// Manually re-establish a connection — used by the UI's "Reconnect" action
+/// after the supervisor has given up. Reuses the stored credentials and keeps
+/// the same connection id, so open tabs and the terminal reattach.
+#[tauri::command]
+pub async fn ssh_reconnect(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    conn_id: String,
+) -> Result<(), String> {
+    let conn = state.ssh_connection(&conn_id).await?;
+    conn.stop.store(false, Ordering::SeqCst);
+    *conn.state.lock().await = ConnectionState::Reconnecting;
+    emit_status(&app, &conn_id, ConnectionState::Reconnecting, None);
+    match reestablish(&conn).await {
+        Ok(()) => {
+            conn.reset_sftp().await;
+            *conn.state.lock().await = ConnectionState::Connected;
+            emit_status(&app, &conn_id, ConnectionState::Connected, None);
+            ensure_supervisor(app, conn);
+            log::info!("connection {conn_id} reconnected (manual)");
+            Ok(())
+        }
+        Err(e) => {
+            *conn.state.lock().await = ConnectionState::Disconnected;
+            emit_status(&app, &conn_id, ConnectionState::Disconnected, Some(e.clone()));
+            Err(e)
+        }
+    }
+}
+
+/// How often the supervisor probes a connection's health (seconds).
+const PROBE_INTERVAL_SECS: u64 = 12;
+/// A live connection answers a channel-open quickly; bound the probe so a
+/// half-open socket (sleep, Wi-Fi roam) is treated as dead rather than hanging.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+/// Give up automatic reconnection after this many consecutive failures (the UI
+/// then offers a manual Reconnect).
+const MAX_RECONNECT_ATTEMPTS: u32 = 8;
+
+/// Spawn the reconnect supervisor for a connection, unless one is already
+/// running for it.
+fn ensure_supervisor(app: AppHandle, conn: Arc<Connection>) {
+    if conn.supervising.swap(true, Ordering::SeqCst) {
+        return; // a supervisor is already watching this connection
+    }
+    tokio::spawn(async move {
+        supervise(app, conn.clone()).await;
+        conn.supervising.store(false, Ordering::SeqCst);
+    });
+}
+
+/// Watch a connection's health; on a dropped transport, transition to
+/// `Reconnecting` and retry with backoff until it recovers, the user
+/// disconnects, or we exhaust the attempt budget.
+async fn supervise(app: AppHandle, conn: Arc<Connection>) {
+    loop {
+        if sleep_or_stopped(&conn, PROBE_INTERVAL_SECS).await {
+            return;
+        }
+
+        let alive = match tokio::time::timeout(PROBE_TIMEOUT, conn.open_channel()).await {
+            Ok(Ok(channel)) => {
+                // Close the probe channel so an idle connection doesn't leak one
+                // channel per interval — but never block the loop on a half-open
+                // socket waiting for the close handshake.
+                let _ = tokio::time::timeout(Duration::from_secs(3), channel.close()).await;
+                true
+            }
+            _ => false,
+        };
+        if alive {
+            continue;
+        }
+        if conn.is_stopped() {
+            return;
+        }
+
+        *conn.state.lock().await = ConnectionState::Reconnecting;
+        emit_status(
+            &app,
+            &conn.id,
+            ConnectionState::Reconnecting,
+            Some("connection lost — reconnecting…".to_string()),
+        );
+        log::warn!("connection {} dropped; reconnecting", conn.id);
+
+        let mut delay = 1u64;
+        let mut attempt = 0u32;
+        loop {
+            if conn.is_stopped() {
+                return;
+            }
+            attempt += 1;
+            match reestablish(&conn).await {
+                Ok(()) => {
+                    conn.reset_sftp().await;
+                    *conn.state.lock().await = ConnectionState::Connected;
+                    emit_status(&app, &conn.id, ConnectionState::Connected, None);
+                    log::info!("connection {} reconnected", conn.id);
+                    break;
+                }
+                Err(e) => {
+                    if attempt >= MAX_RECONNECT_ATTEMPTS {
+                        *conn.state.lock().await = ConnectionState::Disconnected;
+                        emit_status(
+                            &app,
+                            &conn.id,
+                            ConnectionState::Disconnected,
+                            Some(format!("could not reconnect after {attempt} attempts: {e}")),
+                        );
+                        log::warn!("connection {} gave up reconnecting: {e}", conn.id);
+                        return;
+                    }
+                    emit_status(
+                        &app,
+                        &conn.id,
+                        ConnectionState::Reconnecting,
+                        Some(format!("reconnect attempt {attempt} failed: {e}")),
+                    );
+                    if sleep_or_stopped(&conn, delay).await {
+                        return;
+                    }
+                    delay = (delay * 2).min(30);
+                }
+            }
+        }
+    }
+}
+
+/// Sleep up to `secs`, waking early (returning `true`) if the connection has
+/// been stopped — so an explicit disconnect or shutdown isn't held up by a long
+/// backoff or the idle probe interval.
+async fn sleep_or_stopped(conn: &Connection, secs: u64) -> bool {
+    let mut remaining_ms = secs.saturating_mul(1000);
+    while remaining_ms > 0 {
+        if conn.is_stopped() {
+            return true;
+        }
+        let step = remaining_ms.min(250);
+        tokio::time::sleep(Duration::from_millis(step)).await;
+        remaining_ms -= step;
+    }
+    conn.is_stopped()
+}
+
+/// Re-open and re-authenticate the transport, swapping the live handle in place
+/// so the connection id and all channels opened afterwards target the new link.
+async fn reestablish(conn: &Connection) -> Result<(), String> {
+    let connect = open_handle(
+        client_config(),
+        &conn.info.host,
+        conn.info.port,
+        &conn.info.user,
+        conn.proxy_jump.as_deref(),
+    );
+    let (mut handle, jump) = match tokio::time::timeout(Duration::from_secs(10), connect).await {
+        Ok(Ok(pair)) => pair,
+        Ok(Err(e)) => return Err(e),
+        Err(_) => {
+            return Err(format!(
+                "connection to {}:{} timed out",
+                conn.info.host, conn.info.port
+            ))
+        }
+    };
+    authenticate(&mut handle, &conn.info.user, &conn.auth).await?;
+    let old = {
+        let mut live = conn.live.write().await;
+        std::mem::replace(&mut *live, Live { handle: Arc::new(handle), _jump: jump })
+    };
+    // Tear the old transport down off the critical path, time-bounded so a dead
+    // socket can't hang us and a still-live bastion tunnel isn't leaked.
+    tokio::spawn(async move {
+        let _ = tokio::time::timeout(Duration::from_secs(5), async move {
+            if let Some(jump) = old._jump {
+                let _ = jump
+                    .disconnect(russh::Disconnect::ByApplication, "", "en")
+                    .await;
+            }
+            let _ = old
+                .handle
+                .disconnect(russh::Disconnect::ByApplication, "", "en")
+                .await;
+        })
+        .await;
+    });
     Ok(())
 }
 

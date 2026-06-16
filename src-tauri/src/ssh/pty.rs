@@ -91,11 +91,7 @@ async fn open_ssh_pty(
     rows: u32,
     mut rx: mpsc::UnboundedReceiver<PtyCommand>,
 ) -> Result<(), String> {
-    let mut channel = connection
-        .handle
-        .channel_open_session()
-        .await
-        .map_err(|e| format!("could not open terminal channel: {e}"))?;
+    let mut channel = connection.open_channel().await?;
     channel
         .request_pty(false, "xterm-256color", cols, rows, 0, 0, &[])
         .await
