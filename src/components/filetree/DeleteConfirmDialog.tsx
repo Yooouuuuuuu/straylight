@@ -1,10 +1,25 @@
 /** Confirm before deleting a file or folder. */
+import { useEffect } from "react";
+
 import { deleteEntry } from "../../lib/fileOps";
 import { useAppStore } from "../../store/appStore";
 
 export function DeleteConfirmDialog() {
   const confirmDelete = useAppStore((s) => s.confirmDelete);
   const closeConfirmDelete = useAppStore((s) => s.closeConfirmDelete);
+
+  // Esc dismisses the dialog without deleting (same as Cancel).
+  useEffect(() => {
+    if (!confirmDelete) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeConfirmDelete();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirmDelete, closeConfirmDelete]);
 
   if (!confirmDelete) return null;
   const node = confirmDelete;

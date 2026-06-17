@@ -250,6 +250,13 @@
   overflow: auto;
 }
 
+/* The explorer is one focusable region; the selection highlight is the focus
+   indicator, so suppress the default ring on the container itself. */
+.sidebar__content:focus,
+.sidebar__content:focus-visible {
+  outline: none;
+}
+
 .icon-btn {
   width: 24px;
   height: 24px;
@@ -271,6 +278,16 @@
 
 .icon-btn--active {
   color: var(--cyan);
+}
+
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.icon-btn:disabled:hover {
+  background: transparent;
+  color: var(--fg-secondary);
 }
 
 .icon-btn--danger:hover {
@@ -455,6 +472,17 @@
   font-family: var(--font-code);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Informational note at the top of the connect dialog (e.g. why it opened). */
+.modal__note {
+  margin-bottom: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: rgba(139, 233, 253, 0.1);
+  border: 1px solid var(--info);
+  color: var(--info);
+  font-size: var(--font-size-sm);
 }
 
 /* Connection picker inside the dialog */
@@ -675,12 +703,38 @@
 .sidebar__section-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--space-1);
   padding: var(--space-4) var(--space-4) var(--space-2) var(--space-5);
   font-size: var(--font-size-xs);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--fg-secondary);
+}
+
+.sidebar__section-head .icon-btn {
+  flex: 0 0 auto;
+}
+
+.sidebar__section-label {
+  flex: 0 0 auto;
+}
+
+/* "5s ago" — plain (not uppercased) and allowed to shrink/ellipsis first. */
+.sidebar__section-ago {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--fg-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The section's right-edge action (+ open folder, or disconnect). */
+.sidebar__section-action {
+  margin-left: auto;
 }
 
 .sidebar__section-head--remote {
@@ -704,6 +758,11 @@
 
 .root-tree__header:hover {
   background: var(--bg-tertiary);
+}
+
+.root-tree__header--active,
+.root-tree__header--active:hover {
+  background: var(--bg-selected);
 }
 
 .root-tree__header:hover .root-tree__remove {
@@ -802,6 +861,15 @@
 
 .context-menu__item:hover {
   background: var(--bg-selected);
+}
+
+.context-menu__item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.context-menu__item:disabled:hover {
+  background: transparent;
 }
 
 .context-menu__item--danger:hover {

@@ -9,14 +9,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Planned
 
-- **Explorer & connection UX:** file-tree keyboard navigation, a refresh
-  confirmation + auto-refresh, local roots collapsed by default, and a smoother
-  no-`~/.ssh/config` password connect flow.
+- **Revisit where password entry lives** — the current centered connect modal vs.
+  an inline field (e.g. on the "Connect to a server" button).
+- **Auto-refresh** (optional): a filesystem watch for the local tree; SSH would
+  poll (opt-in).
+- **Re-evaluate the explorer / sidebar UX once git status lands** — fitting git
+  state into the tree and the section bars may force a sizable rework.
 - **Drag-and-drop transfers** between the local and remote trees (and from the OS).
 - **WSL filesystem** access (the WSL *terminal* already ships via the shell picker).
 - Terminal tab reordering.
 - **Phase 3:** git status / blame / log / diff, Podman containers, fuzzy finder,
   search-in-files, port forwarding, Markdown preview, and auto-update.
+
+## [0.5.1] - 2026-06-17
+
+A keyboard-driven explorer — full tree navigation, per-section toolbars, and
+cut/copy/paste — plus a smoother no-key connect fallback.
+
+### Added
+
+- **File-tree keyboard navigation** — when the explorer has focus, arrow keys
+  drive it: ↑/↓ move the selection (across roots), → expands a folder or steps
+  into it, ← collapses it or jumps to the parent, **Enter** opens a file or
+  toggles a folder, and **Home/End** jump to the first/last row. **PageUp /
+  PageDown** hop to the previous / next root (each server's top). **Ctrl+Shift+E**
+  focuses the tree.
+- **New File / New Folder** buttons in each section's toolbar — they create in
+  the selected folder (or the selected file's parent), falling back to the
+  section root.
+- **Cut / copy / paste** in the explorer — right-click or `Ctrl+X` / `Ctrl+C` /
+  `Ctrl+V` while the tree has focus. Paste lands in the selected (or right-
+  clicked) folder and auto-renames on a collision (`name copy`, `name copy 2`);
+  same-connection for now. Backed by new recursive `fs_copy` / `fs_move`
+  transport commands.
+- **Per-section "last refreshed" stamp** (e.g. `5s ago`) beside each refresh
+  button, coarsening on its own from seconds through minutes, hours, and days.
+
+### Changed
+
+- **Explorer controls are now per-section.** The hidden-files toggle and refresh
+  live in the **Local** and **Remote** bars and act on only that section
+  (`Ctrl+Shift+R` still refreshes both). The transient "Refreshed" toast is gone
+  in favour of the per-section timestamp.
+- **Local roots start collapsed** and load lazily — a collapsed root does no I/O
+  until you open it (matters for slow network / WSL paths).
+- **Single-click selects; double-click opens.** Clicking a file now only selects
+  it (so you can set the keyboard cursor without opening a tab); it opens on
+  double-click, Enter, or →. Folders still expand/collapse on single-click.
+- The **password connect dialog auto-focuses** the field you need next — Host for
+  a fresh connection, User for a config host that's missing one, Password when
+  host and user are already known.
+- **A config host with no usable key now falls back to password entry** — clicking
+  it opens the connect dialog prefilled (with the password field focused and a
+  short note) instead of dead-ending on a "no usable key" error.
+
+### Fixed
+
+- **Esc dismisses the delete confirmation** without deleting (same as Cancel).
 
 ## [0.5.0] - 2026-06-17
 
@@ -202,7 +251,8 @@ terminal, in a Dracula-themed, VS Code-style window built on Tauri v2 and React.
 - Verified with `tsc --noEmit` and `vite build` (frontend) and `cargo check` and
   `cargo test` (backend, 4 tests passing).
 
-[Unreleased]: https://github.com/Yooouuuuuuu/straylight/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Yooouuuuuuu/straylight/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Yooouuuuuuu/straylight/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.2.0...v0.3.0

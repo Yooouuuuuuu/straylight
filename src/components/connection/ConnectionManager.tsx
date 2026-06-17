@@ -53,16 +53,27 @@ export function ConnectionManager() {
       openDialog(host);
       return;
     }
-    void connect({
-      name: host.name,
-      host: host.hostName ?? host.name,
-      port: host.port ?? 22,
-      user: host.user,
-      auth: { type: "auto", identityFile: host.identityFile },
-      proxyJump: host.proxyJump,
-      color: colorForName(host.name),
-    }).catch(() => {
-      /* surfaced via toast */
+    void connect(
+      {
+        name: host.name,
+        host: host.hostName ?? host.name,
+        port: host.port ?? 22,
+        user: host.user,
+        auth: { type: "auto", identityFile: host.identityFile },
+        proxyJump: host.proxyJump,
+        color: colorForName(host.name),
+      },
+      {
+        // No usable key for this host → open the password dialog prefilled with
+        // it instead of failing, focus on the password field.
+        onKeyAuthFail: () =>
+          openDialog(
+            host,
+            "Key authentication didn't work for this host — enter a password to connect.",
+          ),
+      },
+    ).catch(() => {
+      /* key-auth failure opens the password dialog; others surface via toast */
     });
   }
 

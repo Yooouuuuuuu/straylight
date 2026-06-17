@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { saveActiveFile } from "../lib/saveFile";
 import { matchShortcut } from "../lib/shortcuts";
 import { focusTerminal } from "../lib/terminalFocus";
+import { focusExplorer } from "../lib/treeNav";
 import { useAppStore } from "../store/appStore";
 
 export function useKeyboard() {
@@ -95,6 +96,7 @@ export function useKeyboard() {
           break;
         case "focusFileExplorer":
           store.setSidebarVisible(true);
+          focusExplorer();
           event.preventDefault();
           break;
         case "closeFile":
@@ -105,7 +107,9 @@ export function useKeyboard() {
           }
           break;
         case "refreshTree":
-          store.refreshTree();
+          // Ctrl+Shift+R is a global "refresh everything" — both sections.
+          store.refreshLocal();
+          store.refreshRemote();
           event.preventDefault();
           break;
       }

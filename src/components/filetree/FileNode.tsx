@@ -97,10 +97,21 @@ export function FileNode({
   onCommitRename: (name: string) => void;
   onCancelRename: () => void;
 }) {
+  const rowRef = useRef<HTMLDivElement>(null);
+
+  // Keep the selected row visible when the selection moves by keyboard.
+  useEffect(() => {
+    if (active) rowRef.current?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+
+  // Single click selects (and toggles a folder); a file opens only on
+  // double-click (or Enter / →), so clicking to set the nav cursor is cheap.
   const handleClick = () => {
     onSelect();
     if (entry.isDir) onToggle();
-    else onOpen();
+  };
+  const handleDoubleClick = () => {
+    if (!entry.isDir) onOpen();
   };
 
   const twistyClass = entry.isDir
@@ -109,9 +120,11 @@ export function FileNode({
 
   return (
     <div
+      ref={rowRef}
       className={`file-node ${active ? "file-node--active" : ""}`}
       style={{ paddingLeft: 6 + depth * 14 }}
       onClick={renaming ? undefined : handleClick}
+      onDoubleClick={renaming ? undefined : handleDoubleClick}
       onContextMenu={(event) => {
         event.preventDefault();
         onContextMenu(event.clientX, event.clientY);

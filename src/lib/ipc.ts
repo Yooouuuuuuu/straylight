@@ -192,6 +192,24 @@ export function fsRemove(connId: string, path: string): Promise<void> {
   return invoke("fs_remove", { connId, path });
 }
 
+/** Move an entry into `destDir` (same connection); returns the new path. */
+export function fsMove(
+  connId: string,
+  path: string,
+  destDir: string,
+): Promise<string> {
+  return invoke("fs_move", { connId, path, destDir });
+}
+
+/** Copy an entry into `destDir` (recursive; auto-renames on collision). */
+export function fsCopy(
+  connId: string,
+  path: string,
+  destDir: string,
+): Promise<string> {
+  return invoke("fs_copy", { connId, path, destDir });
+}
+
 // ---------------------------------------------------------------------------
 // PTY / terminal
 // ---------------------------------------------------------------------------

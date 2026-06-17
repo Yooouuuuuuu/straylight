@@ -116,10 +116,18 @@ interface AppState {
   // UI -------------------------------------------------------------------
   dialogOpen: boolean;
   dialogPrefill: SshHostEntry | null;
+  /** Optional note shown atop the connect dialog (e.g. why it opened). */
+  dialogNote: string | null;
   sidebarVisible: boolean;
   terminalVisible: boolean;
-  showHidden: boolean;
-  treeRefreshToken: number;
+  // Explorer controls are per-section: Local and Remote each keep their own
+  // hidden-files toggle, refresh token, and "last refreshed" timestamp.
+  showHiddenLocal: boolean;
+  showHiddenRemote: boolean;
+  refreshTokenLocal: number;
+  refreshTokenRemote: number;
+  lastRefreshLocal: number | null;
+  lastRefreshRemote: number | null;
 
   // Terminals ------------------------------------------------------------
   terminals: TerminalSession[];
@@ -140,6 +148,8 @@ interface AppState {
   renaming: { connId: string; path: string } | null;
   newEntry: { connId: string; parent: string; isDir: boolean } | null;
   confirmDelete: TreeNode | null;
+  /** Cut/copy buffer for the explorer; paste drops it into a folder. */
+  clipboard: { mode: "cut" | "copy"; node: TreeNode } | null;
 
   // Notifications --------------------------------------------------------
   notices: Notice[];
@@ -154,13 +164,19 @@ interface AppState {
   setConnState: (state: ConnectionState, message?: string | null) => void;
 
   setDialogOpen: (open: boolean) => void;
-  openDialog: (prefill?: SshHostEntry | null) => void;
+  openDialog: (prefill?: SshHostEntry | null, note?: string | null) => void;
   toggleSidebar: () => void;
   setSidebarVisible: (visible: boolean) => void;
   toggleTerminal: () => void;
   setTerminalVisible: (visible: boolean) => void;
-  toggleHidden: () => void;
-  refreshTree: () => void;
+  toggleHiddenLocal: () => void;
+  toggleHiddenRemote: () => void;
+  refreshLocal: () => void;
+  refreshRemote: () => void;
+  /** Refresh whichever section owns this connection (used after file ops). */
+  refreshConn: (connId: string) => void;
+  /** Stamp a section's "last refreshed" time once its tree has actually loaded. */
+  markRefreshed: (connId: string) => void;
 
   openTerminal: (connId: string, label: string, command?: string[] | null) => void;
   closeTerminal: (id: string) => void;
@@ -196,6 +212,8 @@ interface AppState {
   closeConfirmDelete: () => void;
   applyRename: (connId: string, oldPath: string, newPath: string) => void;
   applyDelete: (connId: string, path: string) => void;
+  setClipboard: (mode: "cut" | "copy", node: TreeNode) => void;
+  clearClipboard: () => void;
 
   pushNotice: (kind: Notice["kind"], text: string) => void;
   dismissNotice: (id: number) => void;
@@ -216,10 +234,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   dialogOpen: false,
   dialogPrefill: null,
+  dialogNote: null,
   sidebarVisible: true,
   terminalVisible: true,
-  showHidden: false,
-  treeRefreshToken: 0,
+  showHiddenLocal: false,
+  showHiddenRemote: false,
+  refreshTokenLocal: 0,
+  refreshTokenRemote: 0,
+  lastRefreshLocal: null,
+  lastRefreshRemote: null,
 
   terminals: [],
   activeTerminalId: null,
@@ -235,6 +258,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   renaming: null,
   newEntry: null,
   confirmDelete: null,
+  clipboard: null,
 
   notices: [],
 
@@ -289,14 +313,38 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setConnState: (state, message = null) => set({ connState: state, connMessage: message }),
 
   setDialogOpen: (dialogOpen) =>
-    set(dialogOpen ? { dialogOpen } : { dialogOpen, dialogPrefill: null }),
-  openDialog: (prefill = null) => set({ dialogOpen: true, dialogPrefill: prefill }),
+    set(
+      dialogOpen
+        ? { dialogOpen }
+        : { dialogOpen, dialogPrefill: null, dialogNote: null },
+    ),
+  openDialog: (prefill = null, note = null) =>
+    set({ dialogOpen: true, dialogPrefill: prefill, dialogNote: note }),
   toggleSidebar: () => set((s) => ({ sidebarVisible: !s.sidebarVisible })),
   setSidebarVisible: (sidebarVisible) => set({ sidebarVisible }),
   toggleTerminal: () => set((s) => ({ terminalVisible: !s.terminalVisible })),
   setTerminalVisible: (terminalVisible) => set({ terminalVisible }),
-  toggleHidden: () => set((s) => ({ showHidden: !s.showHidden })),
-  refreshTree: () => set((s) => ({ treeRefreshToken: s.treeRefreshToken + 1 })),
+  toggleHiddenLocal: () => set((s) => ({ showHiddenLocal: !s.showHiddenLocal })),
+  toggleHiddenRemote: () =>
+    set((s) => ({ showHiddenRemote: !s.showHiddenRemote })),
+  refreshLocal: () =>
+    set((s) => ({ refreshTokenLocal: s.refreshTokenLocal + 1 })),
+  refreshRemote: () =>
+    set((s) => ({ refreshTokenRemote: s.refreshTokenRemote + 1 })),
+  refreshConn: (connId) =>
+    set((s) =>
+      connId === s.localConnId
+        ? { refreshTokenLocal: s.refreshTokenLocal + 1 }
+        : { refreshTokenRemote: s.refreshTokenRemote + 1 },
+    ),
+  markRefreshed: (connId) =>
+    set((s) =>
+      connId === s.localConnId
+        ? { lastRefreshLocal: Date.now() }
+        : connId === s.remote?.connId
+          ? { lastRefreshRemote: Date.now() }
+          : {},
+    ),
 
   openTerminal: (connId, label, command = null) =>
     set((s) => {
@@ -470,6 +518,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
         : (tabs[tabs.length - 1]?.id ?? null);
       return { tabs, activeTabId };
     }),
+  setClipboard: (mode, node) => set({ clipboard: { mode, node } }),
+  clearClipboard: () => set({ clipboard: null }),
 
   pushNotice: (kind, text) =>
     set((s) => ({ notices: [...s.notices, { id: (noticeId += 1), kind, text }] })),

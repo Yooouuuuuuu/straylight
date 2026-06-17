@@ -112,6 +112,15 @@ pub trait FileTransport: Send + Sync {
 
     /// Remove `path` (recursively for directories).
     async fn remove(&self, path: &str) -> Result<(), String>;
+
+    /// Move `path` into `dest_dir` (same connection), keeping its basename.
+    /// A no-op if it's already there; errors if the target name is taken.
+    /// Returns the new absolute path.
+    async fn move_to(&self, path: &str, dest_dir: &str) -> Result<String, String>;
+
+    /// Copy `path` into `dest_dir` (recursively for directories), auto-renaming
+    /// (`name copy`, `name copy 2`, …) on a name collision. Returns the new path.
+    async fn copy_to(&self, path: &str, dest_dir: &str) -> Result<String, String>;
 }
 
 /// Convert the low 9 permission bits of a Unix mode into `rwxr-xr-x`.
@@ -138,6 +147,34 @@ pub fn join_path(parent: &str, name: &str) -> String {
         format!("{parent}{name}")
     } else {
         format!("{parent}/{name}")
+    }
+}
+
+/// Split a filename into `(stem, extension)` where the extension includes the
+/// leading dot (empty if none). A leading dot (a dotfile) stays in the stem.
+pub fn split_ext(name: &str) -> (&str, &str) {
+    match name.rfind('.') {
+        Some(i) if i > 0 => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    }
+}
+
+/// The Nth "copy" variant of a filename: `a.txt` → `a copy.txt` / `a copy 2.txt`.
+pub fn copy_variant(name: &str, n: usize) -> String {
+    let (stem, ext) = split_ext(name);
+    if n <= 1 {
+        format!("{stem} copy{ext}")
+    } else {
+        format!("{stem} copy {n}{ext}")
+    }
+}
+
+/// POSIX basename — the final path component (for `/`-separated SFTP paths).
+pub fn posix_basename(path: &str) -> String {
+    let trimmed = path.trim_end_matches('/');
+    match trimmed.rsplit_once('/') {
+        Some((_, name)) => name.to_string(),
+        None => trimmed.to_string(),
     }
 }
 
@@ -235,6 +272,34 @@ pub async fn fs_remove(
     state.transport(&conn_id).await?.remove(&path).await
 }
 
+#[tauri::command]
+pub async fn fs_move(
+    state: State<'_, AppState>,
+    conn_id: String,
+    path: String,
+    dest_dir: String,
+) -> Result<String, String> {
+    state
+        .transport(&conn_id)
+        .await?
+        .move_to(&path, &dest_dir)
+        .await
+}
+
+#[tauri::command]
+pub async fn fs_copy(
+    state: State<'_, AppState>,
+    conn_id: String,
+    path: String,
+    dest_dir: String,
+) -> Result<String, String> {
+    state
+        .transport(&conn_id)
+        .await?
+        .copy_to(&path, &dest_dir)
+        .await
+}
+
 /// Open a local-filesystem session and return its connection id.
 #[tauri::command]
 pub async fn local_connect(state: State<'_, AppState>) -> Result<String, String> {
@@ -272,5 +337,22 @@ mod tests {
     fn binary_sniffing() {
         assert!(looks_binary(b"abc\0def"));
         assert!(!looks_binary(b"plain text"));
+    }
+
+    #[test]
+    fn copy_naming() {
+        assert_eq!(split_ext("a.txt"), ("a", ".txt"));
+        assert_eq!(split_ext("Makefile"), ("Makefile", ""));
+        assert_eq!(split_ext(".gitignore"), (".gitignore", ""));
+        assert_eq!(copy_variant("a.txt", 1), "a copy.txt");
+        assert_eq!(copy_variant("a.txt", 3), "a copy 3.txt");
+        assert_eq!(copy_variant("src", 1), "src copy");
+    }
+
+    #[test]
+    fn posix_basenames() {
+        assert_eq!(posix_basename("/home/me/file.txt"), "file.txt");
+        assert_eq!(posix_basename("/home/me/dir/"), "dir");
+        assert_eq!(posix_basename("solo"), "solo");
     }
 }

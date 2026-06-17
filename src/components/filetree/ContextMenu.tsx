@@ -1,7 +1,7 @@
 /** Right-click menu for a file-tree node. Closes on outside click / Escape. */
 import { useEffect, useRef } from "react";
 
-import { copyPath } from "../../lib/fileOps";
+import { copyPath, pasteInto } from "../../lib/fileOps";
 import { dirname } from "../../lib/format";
 import { useAppStore } from "../../store/appStore";
 
@@ -11,6 +11,8 @@ export function ContextMenu() {
   const startRename = useAppStore((s) => s.startRename);
   const openNewEntry = useAppStore((s) => s.openNewEntry);
   const openConfirmDelete = useAppStore((s) => s.openConfirmDelete);
+  const setClipboard = useAppStore((s) => s.setClipboard);
+  const clipboard = useAppStore((s) => s.clipboard);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -64,6 +66,35 @@ export function ContextMenu() {
         onClick={() => openNewEntry(menu.connId, parent, true)}
       >
         New Folder
+      </button>
+      <div className="context-menu__sep" />
+      <button
+        className="context-menu__item"
+        onClick={() => {
+          setClipboard("cut", node);
+          closeContextMenu();
+        }}
+      >
+        Cut<span className="context-menu__key">Ctrl+X</span>
+      </button>
+      <button
+        className="context-menu__item"
+        onClick={() => {
+          setClipboard("copy", node);
+          closeContextMenu();
+        }}
+      >
+        Copy<span className="context-menu__key">Ctrl+C</span>
+      </button>
+      <button
+        className="context-menu__item"
+        disabled={!clipboard || clipboard.node.connId !== menu.connId}
+        onClick={() => {
+          closeContextMenu();
+          void pasteInto(menu.connId, parent);
+        }}
+      >
+        Paste<span className="context-menu__key">Ctrl+V</span>
       </button>
       <div className="context-menu__sep" />
       <button

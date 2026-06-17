@@ -1,12 +1,14 @@
 //! Local filesystem transport (`std::fs` via `tokio::fs`).
 
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 
 use tokio::io::AsyncReadExt;
 
 use crate::transport::{
-    looks_binary, sort_entries, DirListing, FileContent, FileEntry, FileStat, FileTransport,
-    WriteResult, BINARY_SNIFF, MAX_READ_BYTES,
+    copy_variant, looks_binary, sort_entries, DirListing, FileContent, FileEntry, FileStat,
+    FileTransport, WriteResult, BINARY_SNIFF, MAX_READ_BYTES,
 };
 
 pub struct LocalTransport;
@@ -260,19 +262,95 @@ impl FileTransport for LocalTransport {
     }
 
     async fn remove(&self, path: &str) -> Result<(), String> {
-        let target = PathBuf::from(path);
-        let meta = tokio::fs::symlink_metadata(&target)
+        remove_path(&PathBuf::from(path)).await
+    }
+
+    async fn move_to(&self, path: &str, dest_dir: &str) -> Result<String, String> {
+        let src = PathBuf::from(path);
+        let name = src
+            .file_name()
+            .ok_or_else(|| format!("invalid path {path}"))?
+            .to_os_string();
+        let dest = PathBuf::from(dest_dir).join(&name);
+        if dest == src {
+            return Ok(dest.to_string_lossy().into_owned()); // already here
+        }
+        if tokio::fs::symlink_metadata(&dest).await.is_ok() {
+            return Err(format!("{} already exists", dest.display()));
+        }
+        // A plain rename works within a filesystem; fall back to copy+remove
+        // across devices (where rename errors with EXDEV).
+        if tokio::fs::rename(&src, &dest).await.is_err() {
+            copy_recursive(src.clone(), dest.clone()).await?;
+            remove_path(&src).await?;
+        }
+        Ok(dest.to_string_lossy().into_owned())
+    }
+
+    async fn copy_to(&self, path: &str, dest_dir: &str) -> Result<String, String> {
+        let src = PathBuf::from(path);
+        let name = src
+            .file_name()
+            .ok_or_else(|| format!("invalid path {path}"))?
+            .to_string_lossy()
+            .into_owned();
+        let dir = PathBuf::from(dest_dir);
+        let mut dest = dir.join(&name);
+        let mut n = 1;
+        while tokio::fs::symlink_metadata(&dest).await.is_ok() {
+            dest = dir.join(copy_variant(&name, n));
+            n += 1;
+        }
+        copy_recursive(src, dest.clone()).await?;
+        Ok(dest.to_string_lossy().into_owned())
+    }
+}
+
+async fn remove_path(target: &PathBuf) -> Result<(), String> {
+    let meta = tokio::fs::symlink_metadata(target)
+        .await
+        .map_err(|e| format!("could not stat {}: {e}", target.display()))?;
+    if meta.is_dir() {
+        tokio::fs::remove_dir_all(target)
             .await
-            .map_err(|e| format!("could not stat {path}: {e}"))?;
+            .map_err(|e| format!("could not remove folder: {e}"))?;
+    } else {
+        tokio::fs::remove_file(target)
+            .await
+            .map_err(|e| format!("could not remove file: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Recursively copy a local path (depth-first). Symlinks are followed and
+/// copied as regular files.
+fn copy_recursive(
+    src: PathBuf,
+    dst: PathBuf,
+) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
+    Box::pin(async move {
+        let meta = tokio::fs::symlink_metadata(&src)
+            .await
+            .map_err(|e| format!("could not stat {}: {e}", src.display()))?;
         if meta.is_dir() {
-            tokio::fs::remove_dir_all(&target)
+            tokio::fs::create_dir(&dst)
                 .await
-                .map_err(|e| format!("could not remove folder: {e}"))?;
+                .map_err(|e| format!("could not create folder {}: {e}", dst.display()))?;
+            let mut rd = tokio::fs::read_dir(&src)
+                .await
+                .map_err(|e| format!("could not list {}: {e}", src.display()))?;
+            while let Some(entry) = rd
+                .next_entry()
+                .await
+                .map_err(|e| format!("could not read {}: {e}", src.display()))?
+            {
+                copy_recursive(entry.path(), dst.join(entry.file_name())).await?;
+            }
         } else {
-            tokio::fs::remove_file(&target)
+            tokio::fs::copy(&src, &dst)
                 .await
-                .map_err(|e| format!("could not remove file: {e}"))?;
+                .map_err(|e| format!("could not copy {}: {e}", src.display()))?;
         }
         Ok(())
-    }
+    })
 }

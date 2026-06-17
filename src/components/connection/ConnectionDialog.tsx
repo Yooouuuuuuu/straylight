@@ -1,7 +1,7 @@
 /** Modal for a manual, password-based connection: host / port / user / password
  *  (+ optional jump host). Key-based connections are added to ~/.ssh/config and
  *  launched from the sidebar list instead. */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { colorForName } from "../../lib/connectionColor";
 import { useSSH } from "../../hooks/useSSH";
@@ -10,6 +10,7 @@ import { IconClose } from "../icons";
 
 export function ConnectionDialog() {
   const prefill = useAppStore((s) => s.dialogPrefill);
+  const note = useAppStore((s) => s.dialogNote);
   const setDialogOpen = useAppStore((s) => s.setDialogOpen);
   const { connect } = useSSH();
 
@@ -21,6 +22,23 @@ export function ConnectionDialog() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const hostRef = useRef<HTMLInputElement>(null);
+  const userRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+
+  // Focus the first field that still needs input when the dialog opens: Host for
+  // a fresh connection, User for a config host missing its username, Password
+  // when host+user are already known (a restored password host).
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      if (!prefill) hostRef.current?.focus();
+      else if (!prefill.user) userRef.current?.focus();
+      else passwordRef.current?.focus();
+    }, 0);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Prefill from a config host (opened when the host is missing a username).
   useEffect(() => {
@@ -99,6 +117,7 @@ export function ConnectionDialog() {
         </div>
 
         <div className="modal__body">
+          {note && <div className="modal__note">{note}</div>}
           <div className="modal__section">
             <div className="field">
               <label className="field__label">Name (optional)</label>
@@ -113,6 +132,7 @@ export function ConnectionDialog() {
               <div className="field">
                 <label className="field__label">Host</label>
                 <input
+                  ref={hostRef}
                   className="input input--mono"
                   value={host}
                   placeholder="10.0.0.5 or example.com"
@@ -134,6 +154,7 @@ export function ConnectionDialog() {
             <div className="field">
               <label className="field__label">User</label>
               <input
+                ref={userRef}
                 className="input input--mono"
                 value={user}
                 placeholder="root"
@@ -143,6 +164,7 @@ export function ConnectionDialog() {
             <div className="field">
               <label className="field__label">Password</label>
               <input
+                ref={passwordRef}
                 className="input"
                 type="password"
                 value={password}

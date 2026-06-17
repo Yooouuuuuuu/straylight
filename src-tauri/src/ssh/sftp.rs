@@ -11,8 +11,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::ssh::connection::Connection;
 use crate::transport::{
-    join_path, looks_binary, mode_to_rwx, sort_entries, DirListing, FileContent, FileEntry,
-    FileStat, FileTransport, WriteResult, BINARY_SNIFF, MAX_READ_BYTES,
+    copy_variant, join_path, looks_binary, mode_to_rwx, posix_basename, sort_entries, DirListing,
+    FileContent, FileEntry, FileStat, FileTransport, WriteResult, BINARY_SNIFF, MAX_READ_BYTES,
 };
 
 /// A [`FileTransport`] backed by an SSH connection's SFTP subsystem.
@@ -251,6 +251,36 @@ impl FileTransport for SftpTransport {
         let sftp = guard.as_ref().expect("sftp session initialized above");
         remove_recursive(sftp, path.to_string()).await
     }
+
+    async fn move_to(&self, path: &str, dest_dir: &str) -> Result<String, String> {
+        let guard = self.0.sftp().await?;
+        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let dest = join_path(dest_dir, &posix_basename(path));
+        if dest == path {
+            return Ok(dest); // already in this directory
+        }
+        if sftp.metadata(dest.clone()).await.is_ok() {
+            return Err(format!("{dest} already exists"));
+        }
+        sftp.rename(path.to_string(), dest.clone())
+            .await
+            .map_err(|e| format!("could not move {path}: {e}"))?;
+        Ok(dest)
+    }
+
+    async fn copy_to(&self, path: &str, dest_dir: &str) -> Result<String, String> {
+        let guard = self.0.sftp().await?;
+        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let name = posix_basename(path);
+        let mut dest = join_path(dest_dir, &name);
+        let mut n = 1;
+        while sftp.metadata(dest.clone()).await.is_ok() {
+            dest = join_path(dest_dir, &copy_variant(&name, n));
+            n += 1;
+        }
+        copy_recursive(sftp, path.to_string(), dest.clone()).await?;
+        Ok(dest)
+    }
 }
 
 fn posix_sibling(path: &str, new_name: &str) -> String {
@@ -292,6 +322,55 @@ fn remove_recursive(
             sftp.remove_file(path.clone())
                 .await
                 .map_err(|e| format!("could not remove {path}: {e}"))?;
+        }
+        Ok(())
+    })
+}
+
+/// Recursively copy a remote path (depth-first). Symlinks are followed and
+/// copied as regular files (the common case for a code tree).
+fn copy_recursive(
+    sftp: &russh_sftp::client::SftpSession,
+    src: String,
+    dst: String,
+) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+    Box::pin(async move {
+        let meta = sftp
+            .symlink_metadata(src.clone())
+            .await
+            .map_err(|e| format!("could not stat {src}: {e}"))?;
+        if meta.is_dir() && !meta.is_symlink() {
+            sftp.create_dir(dst.clone())
+                .await
+                .map_err(|e| format!("could not create folder {dst}: {e}"))?;
+            let entries = sftp
+                .read_dir(src.clone())
+                .await
+                .map_err(|e| format!("could not list {src}: {e}"))?;
+            for entry in entries {
+                let name = entry.file_name();
+                if name == "." || name == ".." {
+                    continue;
+                }
+                copy_recursive(sftp, join_path(&src, &name), join_path(&dst, &name)).await?;
+            }
+        } else {
+            let mut reader = sftp
+                .open(src.clone())
+                .await
+                .map_err(|e| format!("could not open {src}: {e}"))?;
+            let mut writer = sftp
+                .create(dst.clone())
+                .await
+                .map_err(|e| format!("could not create {dst}: {e}"))?;
+            tokio::io::copy(&mut reader, &mut writer)
+                .await
+                .map_err(|e| format!("could not copy to {dst}: {e}"))?;
+            writer
+                .flush()
+                .await
+                .map_err(|e| format!("could not flush {dst}: {e}"))?;
+            writer.shutdown().await.ok();
         }
         Ok(())
     })

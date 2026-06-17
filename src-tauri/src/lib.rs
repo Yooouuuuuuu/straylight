@@ -96,6 +96,8 @@ pub fn run() {
             transport::fs_rename,
             transport::fs_create,
             transport::fs_remove,
+            transport::fs_move,
+            transport::fs_copy,
             ssh::pty::pty_open,
             ssh::pty::pty_write,
             ssh::pty::pty_resize,

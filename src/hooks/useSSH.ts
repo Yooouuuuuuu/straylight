@@ -31,57 +31,72 @@ export function useSSH() {
   const remote = useAppStore((s) => s.remote);
   const connState = useAppStore((s) => s.connState);
 
-  const connect = useCallback(async (profile: ConnectProfile) => {
-    const store = useAppStore.getState();
+  const connect = useCallback(
+    async (profile: ConnectProfile, opts?: { onKeyAuthFail?: () => void }) => {
+      const store = useAppStore.getState();
 
-    // One remote per window: drop any existing one first.
-    if (store.remote) {
-      try {
-        await sshDisconnect(store.remote.connId);
-      } catch {
-        /* ignore */
+      // One remote per window: drop any existing one first.
+      if (store.remote) {
+        try {
+          await sshDisconnect(store.remote.connId);
+        } catch {
+          /* ignore */
+        }
+        store.clearRemote();
       }
-      store.clearRemote();
-    }
 
-    store.setDialogOpen(false);
-    store.setConnState("connecting");
+      store.setDialogOpen(false);
+      store.setConnState("connecting");
 
-    try {
-      const connId = await sshConnect({
-        host: profile.host,
-        port: profile.port,
-        user: profile.user,
-        auth: profile.auth,
-        proxyJump: profile.proxyJump ?? null,
-      });
+      try {
+        const connId = await sshConnect({
+          host: profile.host,
+          port: profile.port,
+          user: profile.user,
+          auth: profile.auth,
+          proxyJump: profile.proxyJump ?? null,
+        });
 
-      const listing = await fsListDir(connId, "");
-      const remote: RemoteConnection = {
-        connId,
-        name: profile.name,
-        host: profile.host,
-        user: profile.user,
-        port: profile.port,
-        color: profile.color,
-        authType: profile.auth.type,
-        identityFile:
-          profile.auth.type === "auto" ? (profile.auth.identityFile ?? null) : null,
-        proxyJump: profile.proxyJump ?? null,
-      };
-      store.setRemote(remote, listing.path);
-      // Remember this server for restore-on-next-launch, and reopen any tabs
-      // that were waiting for it (session restore).
-      setDesiredRemote(remote);
-      await consumePendingRemoteTabs(remote);
-      // Give the new connection a ready-to-use remote shell.
-      store.openTerminal(remote.connId, remote.name);
-    } catch (error) {
-      store.setConnState("disconnected", String(error));
-      store.pushNotice("error", `Connection failed: ${String(error)}`);
-      throw error;
-    }
-  }, []);
+        const listing = await fsListDir(connId, "");
+        const remote: RemoteConnection = {
+          connId,
+          name: profile.name,
+          host: profile.host,
+          user: profile.user,
+          port: profile.port,
+          color: profile.color,
+          authType: profile.auth.type,
+          identityFile:
+            profile.auth.type === "auto"
+              ? (profile.auth.identityFile ?? null)
+              : null,
+          proxyJump: profile.proxyJump ?? null,
+        };
+        store.setRemote(remote, listing.path);
+        // Remember this server for restore-on-next-launch, and reopen any tabs
+        // that were waiting for it (session restore).
+        setDesiredRemote(remote);
+        await consumePendingRemoteTabs(remote);
+        // Give the new connection a ready-to-use remote shell.
+        store.openTerminal(remote.connId, remote.name);
+      } catch (error) {
+        const message = String(error);
+        store.setConnState("disconnected", message);
+        // A config host with no usable key: fall back to password entry rather
+        // than a dead-end error, when the caller offers that path.
+        if (
+          opts?.onKeyAuthFail &&
+          /no usable key|key authentication failed/i.test(message)
+        ) {
+          opts.onKeyAuthFail();
+        } else {
+          store.pushNotice("error", `Connection failed: ${message}`);
+        }
+        throw error;
+      }
+    },
+    [],
+  );
 
   const disconnect = useCallback(async () => {
     const store = useAppStore.getState();

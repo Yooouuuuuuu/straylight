@@ -95,7 +95,7 @@ export default function App() {
       const wasReconnecting = store.connState === "reconnecting";
       store.setConnState(status.state, status.message);
       if (status.state === "connected" && wasReconnecting) {
-        store.refreshTree();
+        store.refreshRemote();
         store.restartConnTerminals(current.connId);
         store.pushNotice("info", "Reconnected.");
       }
