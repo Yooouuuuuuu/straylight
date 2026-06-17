@@ -57,6 +57,9 @@ pub async fn pty_open(
     conn_id: String,
     cols: u32,
     rows: u32,
+    // Optional shell command for a local profile (program + args). Ignored for
+    // SSH sessions, which always start the remote login shell.
+    command: Option<Vec<String>>,
 ) -> Result<String, String> {
     let target = {
         let sessions = state.sessions.lock().await;
@@ -71,7 +74,7 @@ pub async fn pty_open(
     let (tx, rx) = mpsc::unbounded_channel::<PtyCommand>();
 
     match target {
-        PtyTarget::Local => open_local_pty(app, pty_id.clone(), cols, rows, rx)?,
+        PtyTarget::Local => open_local_pty(app, pty_id.clone(), cols, rows, command, rx)?,
         PtyTarget::Ssh(conn) => open_ssh_pty(app, conn, pty_id.clone(), cols, rows, rx).await?,
     }
 
@@ -188,6 +191,7 @@ fn open_local_pty(
     pty_id: String,
     cols: u32,
     rows: u32,
+    command: Option<Vec<String>>,
     mut rx: mpsc::UnboundedReceiver<PtyCommand>,
 ) -> Result<(), String> {
     use portable_pty::{native_pty_system, CommandBuilder, PtySize};
@@ -202,7 +206,15 @@ fn open_local_pty(
         .openpty(size)
         .map_err(|e| format!("could not open a local terminal: {e}"))?;
 
-    let mut cmd = CommandBuilder::new(default_shell());
+    // A profile supplies the program + args; otherwise fall back to the default
+    // shell for this platform.
+    let argv = command
+        .filter(|c| !c.is_empty())
+        .unwrap_or_else(|| vec![default_shell()]);
+    let mut cmd = CommandBuilder::new(&argv[0]);
+    for arg in &argv[1..] {
+        cmd.arg(arg);
+    }
     if let Some(dirs) = directories::UserDirs::new() {
         cmd.cwd(dirs.home_dir());
     }
@@ -327,4 +339,155 @@ pub async fn pty_close(state: State<'_, AppState>, pty_id: String) -> Result<(),
         let _ = handle.tx.send(PtyCommand::Close);
     }
     Ok(())
+}
+
+/// A selectable local shell for the terminal's "new terminal" menu. Remote
+/// terminals always use the login shell, so profiles are local-only.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalProfile {
+    pub id: String,
+    pub label: String,
+    pub command: Vec<String>,
+}
+
+/// Discover the local shells available for the terminal profile picker.
+#[tauri::command]
+pub async fn list_terminal_profiles() -> Vec<TerminalProfile> {
+    tokio::task::spawn_blocking(discover_profiles)
+        .await
+        .unwrap_or_default()
+}
+
+#[cfg(windows)]
+fn discover_profiles() -> Vec<TerminalProfile> {
+    let mut profiles = Vec::new();
+    // Prefer PowerShell 7; only fall back to the built-in Windows PowerShell 5
+    // when pwsh isn't installed (pwsh otherwise covers it).
+    if on_path("pwsh.exe") {
+        profiles.push(TerminalProfile {
+            id: "pwsh".into(),
+            label: "PowerShell 7".into(),
+            command: vec!["pwsh.exe".into()],
+        });
+    } else {
+        profiles.push(TerminalProfile {
+            id: "powershell".into(),
+            label: "Windows PowerShell".into(),
+            command: vec!["powershell.exe".into()],
+        });
+    }
+    profiles.push(TerminalProfile {
+        id: "cmd".into(),
+        label: "Command Prompt".into(),
+        command: vec!["cmd.exe".into()],
+    });
+    if let Some(bash) = find_git_bash() {
+        profiles.push(TerminalProfile {
+            id: "git-bash".into(),
+            label: "Git Bash".into(),
+            command: vec![bash, "-i".into(), "-l".into()],
+        });
+    }
+    for distro in wsl_distros() {
+        profiles.push(TerminalProfile {
+            id: format!("wsl:{distro}"),
+            label: format!("WSL: {distro}"),
+            command: vec![
+                "wsl.exe".into(),
+                "-d".into(),
+                distro,
+                "--cd".into(),
+                "~".into(),
+            ],
+        });
+    }
+    profiles
+}
+
+#[cfg(windows)]
+fn find_git_bash() -> Option<String> {
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    for var in ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"] {
+        if let Some(p) = std::env::var_os(var) {
+            roots.push(std::path::PathBuf::from(p).join("Git"));
+        }
+    }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        roots.push(std::path::PathBuf::from(local).join("Programs").join("Git"));
+    }
+    for root in roots {
+        let bash = root.join("bin").join("bash.exe");
+        if bash.is_file() {
+            return Some(bash.to_string_lossy().into_owned());
+        }
+    }
+    None
+}
+
+#[cfg(windows)]
+fn wsl_distros() -> Vec<String> {
+    let output = std::process::Command::new("wsl.exe")
+        .args(["--list", "--quiet"])
+        .output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    // wsl.exe prints its management output as UTF-16LE, usually with a BOM —
+    // which must be stripped or it ends up glued to the first distro name.
+    let utf16: Vec<u16> = output
+        .stdout
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
+    let text = String::from_utf16_lossy(&utf16);
+    text.trim_start_matches('\u{feff}')
+        .lines()
+        .map(|l| {
+            l.trim()
+                .trim_matches(|c: char| c == '\0' || c == '\u{feff}')
+                .trim()
+                .to_string()
+        })
+        .filter(|l| !l.is_empty() && !l.starts_with("docker-desktop"))
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn discover_profiles() -> Vec<TerminalProfile> {
+    let mut profiles = Vec::new();
+    if let Ok(shell) = std::env::var("SHELL") {
+        if !shell.is_empty() {
+            let label = std::path::Path::new(&shell)
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| shell.clone());
+            profiles.push(TerminalProfile {
+                id: "default".into(),
+                label,
+                command: vec![shell],
+            });
+        }
+    }
+    for (id, path) in [
+        ("bash", "/bin/bash"),
+        ("zsh", "/bin/zsh"),
+        ("fish", "/usr/bin/fish"),
+    ] {
+        if std::path::Path::new(path).exists()
+            && !profiles
+                .iter()
+                .any(|p| p.command.first().map(String::as_str) == Some(path))
+        {
+            profiles.push(TerminalProfile {
+                id: id.into(),
+                label: id.into(),
+                command: vec![path.into()],
+            });
+        }
+    }
+    profiles
 }

@@ -61,6 +61,19 @@ export interface RemoteConnection {
   proxyJump: string | null;
 }
 
+/** One open terminal instance. Its xterm + PTY live in the component, keyed by
+ *  `id`; `epoch` is bumped to force a restart (e.g. after a reconnect). */
+export interface TerminalSession {
+  id: string;
+  /** The session this terminal runs on (local or remote). */
+  connId: string;
+  title: string;
+  /** Shell command for a local profile (e.g. ["wsl.exe","-d","Ubuntu"]); null
+   *  uses the session's default shell. Ignored for remote (login shell). */
+  command: string[] | null;
+  epoch: number;
+}
+
 export interface Notice {
   id: number;
   kind: "info" | "warn" | "error";
@@ -107,8 +120,10 @@ interface AppState {
   terminalVisible: boolean;
   showHidden: boolean;
   treeRefreshToken: number;
-  /** Bumped to force the terminal to restart (e.g. after a reconnect). */
-  terminalEpoch: number;
+
+  // Terminals ------------------------------------------------------------
+  terminals: TerminalSession[];
+  activeTerminalId: string | null;
 
   // Editor tabs ----------------------------------------------------------
   tabs: EditorTab[];
@@ -146,7 +161,15 @@ interface AppState {
   setTerminalVisible: (visible: boolean) => void;
   toggleHidden: () => void;
   refreshTree: () => void;
-  bumpTerminalEpoch: () => void;
+
+  openTerminal: (connId: string, label: string, command?: string[] | null) => void;
+  closeTerminal: (id: string) => void;
+  setActiveTerminal: (id: string) => void;
+  cycleTerminal: (direction: 1 | -1) => void;
+  /** Restart every terminal on a connection (its PTYs died — e.g. a reconnect). */
+  restartConnTerminals: (connId: string) => void;
+  /** Close every terminal on a connection (e.g. an explicit disconnect). */
+  closeConnTerminals: (connId: string) => void;
 
   openTab: (tab: NewTab) => void;
   setActiveTab: (id: string) => void;
@@ -180,6 +203,7 @@ interface AppState {
 
 let noticeId = 0;
 let tabCounter = 0;
+let terminalCounter = 0;
 
 export const useAppStore = create<AppState>()((set, get) => ({
   localConnId: null,
@@ -196,7 +220,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
   terminalVisible: true,
   showHidden: false,
   treeRefreshToken: 0,
-  terminalEpoch: 0,
+
+  terminals: [],
+  activeTerminalId: null,
 
   tabs: [],
   activeTabId: null,
@@ -234,7 +260,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   clearRemote: () =>
     set((s) => {
-      // Close any tabs belonging to the remote.
+      // Close any tabs and terminals belonging to the remote.
       const remoteId = s.remote?.connId;
       const tabs = remoteId
         ? s.tabs.filter((t) => t.connId !== remoteId)
@@ -242,6 +268,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const activeTabId = tabs.some((t) => t.id === s.activeTabId)
         ? s.activeTabId
         : (tabs[tabs.length - 1]?.id ?? null);
+      const terminals = remoteId
+        ? s.terminals.filter((t) => t.connId !== remoteId)
+        : s.terminals;
+      const activeTerminalId = terminals.some((t) => t.id === s.activeTerminalId)
+        ? s.activeTerminalId
+        : (terminals[terminals.length - 1]?.id ?? null);
       return {
         remote: null,
         remoteRootPath: null,
@@ -249,6 +281,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
         connMessage: null,
         tabs,
         activeTabId,
+        terminals,
+        activeTerminalId,
       };
     }),
 
@@ -263,7 +297,62 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setTerminalVisible: (terminalVisible) => set({ terminalVisible }),
   toggleHidden: () => set((s) => ({ showHidden: !s.showHidden })),
   refreshTree: () => set((s) => ({ treeRefreshToken: s.treeRefreshToken + 1 })),
-  bumpTerminalEpoch: () => set((s) => ({ terminalEpoch: s.terminalEpoch + 1 })),
+
+  openTerminal: (connId, label, command = null) =>
+    set((s) => {
+      const id = `term-${(terminalCounter += 1)}`;
+      // Keep titles unique per connection so two shells on the same workspace are
+      // distinguishable (e.g. "Local", "Local 2") without clashing across hosts.
+      let title = label;
+      let n = 1;
+      while (s.terminals.some((t) => t.connId === connId && t.title === title)) {
+        n += 1;
+        title = `${label} ${n}`;
+      }
+      const term: TerminalSession = { id, connId, title, command, epoch: 0 };
+      return { terminals: [...s.terminals, term], activeTerminalId: id };
+    }),
+
+  closeTerminal: (id) =>
+    set((s) => {
+      const idx = s.terminals.findIndex((t) => t.id === id);
+      if (idx < 0) return {};
+      const terminals = s.terminals.filter((t) => t.id !== id);
+      let activeTerminalId = s.activeTerminalId;
+      if (s.activeTerminalId === id) {
+        // `idx` is the closed terminal's original position; after filtering, the
+        // terminal that slid into it is terminals[idx]. Prefer the previous one,
+        // else the next, else none. (Same pattern as forceCloseTab.)
+        activeTerminalId = terminals[idx - 1]?.id ?? terminals[idx]?.id ?? null;
+      }
+      return { terminals, activeTerminalId };
+    }),
+
+  setActiveTerminal: (activeTerminalId) => set({ activeTerminalId }),
+
+  cycleTerminal: (direction) =>
+    set((s) => {
+      if (s.terminals.length === 0) return {};
+      const idx = s.terminals.findIndex((t) => t.id === s.activeTerminalId);
+      const next = (idx + direction + s.terminals.length) % s.terminals.length;
+      return { activeTerminalId: s.terminals[next].id };
+    }),
+
+  restartConnTerminals: (connId) =>
+    set((s) => ({
+      terminals: s.terminals.map((t) =>
+        t.connId === connId ? { ...t, epoch: t.epoch + 1 } : t,
+      ),
+    })),
+
+  closeConnTerminals: (connId) =>
+    set((s) => {
+      const terminals = s.terminals.filter((t) => t.connId !== connId);
+      const activeTerminalId = terminals.some((t) => t.id === s.activeTerminalId)
+        ? s.activeTerminalId
+        : (terminals[terminals.length - 1]?.id ?? null);
+      return { terminals, activeTerminalId };
+    }),
 
   openTab: (tab) =>
     set((s) => {

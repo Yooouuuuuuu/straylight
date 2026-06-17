@@ -196,12 +196,25 @@ export function fsRemove(connId: string, path: string): Promise<void> {
 // PTY / terminal
 // ---------------------------------------------------------------------------
 
+export interface TerminalProfile {
+  id: string;
+  label: string;
+  /** Program + args to launch for a local terminal. */
+  command: string[];
+}
+
+/** Local shells available for the terminal profile picker. */
+export function listTerminalProfiles(): Promise<TerminalProfile[]> {
+  return invoke("list_terminal_profiles");
+}
+
 export function ptyOpen(
   connId: string,
   cols: number,
   rows: number,
+  command?: string[] | null,
 ): Promise<string> {
-  return invoke("pty_open", { connId, cols, rows });
+  return invoke("pty_open", { connId, cols, rows, command: command ?? null });
 }
 
 export function ptyWrite(

@@ -100,6 +100,7 @@ pub fn run() {
             ssh::pty::pty_write,
             ssh::pty::pty_resize,
             ssh::pty::pty_close,
+            ssh::pty::list_terminal_profiles,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Straylight application");

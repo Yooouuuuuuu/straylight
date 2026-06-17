@@ -11,6 +11,9 @@ export type ShortcutAction =
   | "renameSelected"
   | "deleteSelected"
   | "toggleTerminal"
+  | "newTerminal"
+  | "nextTerminal"
+  | "prevTerminal"
   | "toggleSidebar"
   | "focusFileExplorer"
   | "closeFile"
@@ -70,6 +73,28 @@ export const SHORTCUTS: Shortcut[] = [
     label: "Ctrl+`",
   },
   {
+    action: "newTerminal",
+    key: "`",
+    ctrl: true,
+    shift: true,
+    description: "Open a new terminal",
+    label: "Ctrl+Shift+`",
+  },
+  {
+    action: "nextTerminal",
+    key: "PageDown",
+    ctrl: true,
+    description: "Next terminal",
+    label: "Ctrl+PageDown",
+  },
+  {
+    action: "prevTerminal",
+    key: "PageUp",
+    ctrl: true,
+    description: "Previous terminal",
+    label: "Ctrl+PageUp",
+  },
+  {
     action: "toggleSidebar",
     key: "b",
     ctrl: true,
@@ -104,7 +129,12 @@ export const SHORTCUTS: Shortcut[] = [
 /** Resolve a keyboard event to a shortcut action, if any. Treats Cmd as Ctrl. */
 export function matchShortcut(event: KeyboardEvent): ShortcutAction | null {
   const ctrl = event.ctrlKey || event.metaKey;
-  const key = event.key.toLowerCase();
+  // Match the backtick on its physical key or the "~" it yields under Shift, so
+  // Ctrl+` and Ctrl+Shift+` both resolve (event.key alone would miss the latter).
+  const key =
+    event.code === "Backquote" || event.key === "~"
+      ? "`"
+      : event.key.toLowerCase();
 
   for (const shortcut of SHORTCUTS) {
     if (
@@ -117,4 +147,24 @@ export function matchShortcut(event: KeyboardEvent): ShortcutAction | null {
     }
   }
   return null;
+}
+
+/** Actions that belong to the terminal. These are the *only* shortcuts that act
+ *  while a terminal is focused — everything else is left to the shell, so
+ *  Ctrl+B, Ctrl+R, Ctrl+W, Ctrl+E, etc. keep their readline/tmux meaning. xterm
+ *  is told to ignore these so they reach the window handler. */
+const TERMINAL_ACTIONS: ShortcutAction[] = [
+  "toggleTerminal",
+  "newTerminal",
+  "nextTerminal",
+  "prevTerminal",
+];
+
+export function isTerminalAction(action: ShortcutAction): boolean {
+  return TERMINAL_ACTIONS.includes(action);
+}
+
+export function isPassthroughShortcut(event: KeyboardEvent): boolean {
+  const action = matchShortcut(event);
+  return action !== null && TERMINAL_ACTIONS.includes(action);
 }

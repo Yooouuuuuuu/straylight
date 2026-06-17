@@ -1,7 +1,7 @@
 {
   "name": "straylight",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "Lightweight SSH file manager, terminal, and code viewer",
   "license": "MIT OR Apache-2.0",

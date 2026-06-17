@@ -33,14 +33,10 @@ export default function App() {
   const dialogOpen = useAppStore((s) => s.dialogOpen);
   const sidebarVisible = useAppStore((s) => s.sidebarVisible);
   const terminalVisible = useAppStore((s) => s.terminalVisible);
-  const remote = useAppStore((s) => s.remote);
   const localConnId = useAppStore((s) => s.localConnId);
   const setLocalConnId = useAppStore((s) => s.setLocalConnId);
   const setSidebarVisible = useAppStore((s) => s.setSidebarVisible);
   const setTerminalVisible = useAppStore((s) => s.setTerminalVisible);
-
-  // The terminal targets the remote when connected, otherwise the local shell.
-  const terminalConnId = remote?.connId ?? localConnId;
 
   const sidebarPanel = useRef<ImperativePanelHandle>(null);
   const terminalPanel = useRef<ImperativePanelHandle>(null);
@@ -80,6 +76,13 @@ export default function App() {
     void restoreSession(localConnId, connect);
   }, [localConnId, connect]);
 
+  // Ensure there's always at least one terminal once the local session is up.
+  useEffect(() => {
+    if (!localConnId) return;
+    const store = useAppStore.getState();
+    if (store.terminals.length === 0) store.openTerminal(localConnId, "Local");
+  }, [localConnId]);
+
   // Reflect backend-driven remote status (drops, reconnects, errors) in the
   // store. The connId is preserved across a reconnect, so tabs and the file tree
   // stay valid — but the old SFTP/PTY channels are dead, so on recovery we
@@ -93,7 +96,7 @@ export default function App() {
       store.setConnState(status.state, status.message);
       if (status.state === "connected" && wasReconnecting) {
         store.refreshTree();
-        store.bumpTerminalEpoch();
+        store.restartConnTerminals(current.connId);
         store.pushNotice("info", "Reconnected.");
       }
     });
@@ -110,7 +113,9 @@ export default function App() {
     else if (!sidebarVisible && !panel.isCollapsed()) panel.collapse();
   }, [sidebarVisible]);
 
-  // Drive the terminal panel's collapse state; blur it when hidden.
+  // Drive the terminal panel's collapse state; blur it when hidden. Resizes
+  // flow through useTerminal, which debounces them so ConPTY isn't repainted
+  // per frame.
   useEffect(() => {
     const panel = terminalPanel.current;
     if (!panel) return;
@@ -123,7 +128,7 @@ export default function App() {
         active.blur();
       }
     }
-  }, [terminalVisible, terminalConnId]);
+  }, [terminalVisible, localConnId]);
 
   return (
     <div className="app">
@@ -147,14 +152,14 @@ export default function App() {
           <PanelResizeHandle className="resize-handle" />
           <Panel id="main" order={2} minSize={30}>
             <PanelGroup
-              key={terminalConnId ? "with-terminal" : "no-terminal"}
+              key={localConnId ? "with-terminal" : "no-terminal"}
               autoSaveId="straylight.layout.v"
               direction="vertical"
             >
-              <Panel id="editor" order={1} minSize={20}>
+              <Panel id="editor" order={1} minSize={0}>
                 <EditorArea />
               </Panel>
-              {terminalConnId && (
+              {localConnId && (
                 <>
                   <PanelResizeHandle className="resize-handle" />
                   <Panel

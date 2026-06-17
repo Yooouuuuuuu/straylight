@@ -74,6 +74,8 @@ export function useSSH() {
       // that were waiting for it (session restore).
       setDesiredRemote(remote);
       await consumePendingRemoteTabs(remote);
+      // Give the new connection a ready-to-use remote shell.
+      store.openTerminal(remote.connId, remote.name);
     } catch (error) {
       store.setConnState("disconnected", String(error));
       store.pushNotice("error", `Connection failed: ${String(error)}`);

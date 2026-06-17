@@ -9,12 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Planned
 
+- **Explorer & connection UX:** file-tree keyboard navigation, a refresh
+  confirmation + auto-refresh, local roots collapsed by default, and a smoother
+  no-`~/.ssh/config` password connect flow.
 - **Drag-and-drop transfers** between the local and remote trees (and from the OS).
-- **Multiple terminals** with a shell picker (cmd / pwsh / git-bash / remote), and
-  tab reordering.
-- **WSL** transport.
+- **WSL filesystem** access (the WSL *terminal* already ships via the shell picker).
+- Terminal tab reordering.
 - **Phase 3:** git status / blame / log / diff, Podman containers, fuzzy finder,
   search-in-files, port forwarding, Markdown preview, and auto-update.
+
+## [0.5.0] - 2026-06-17
+
+Terminals grow up: multiple terminals, a shell picker, and Windows scrollback
+that finally behaves.
+
+### Added
+
+- **Multiple terminals** — open as many as you like, listed down the right side
+  of the panel (VS Code style). `+` opens one on the current workspace;
+  `Ctrl+PageDown` / `Ctrl+PageUp` cycle them; middle-click or × closes one. You
+  can keep a local and a remote shell open at the same time.
+- **Shell picker** — the `▾` beside `+` lists local profiles — **PowerShell 7,
+  Command Prompt, Git Bash, and each installed WSL distro** — plus the remote
+  login shell when connected. Picking a WSL distro opens a native `wsl.exe`
+  terminal.
+- A **remote terminal opens automatically** when you connect to a server (and on
+  launch auto-reconnect).
+
+### Changed
+
+- **`Ctrl+\`` is now smart** (VS Code-style): reveals and focuses the terminal
+  when it's hidden, focuses it when it's visible but unfocused, and only hides it
+  when it already has focus. `Ctrl+Shift+\`` opens a new terminal.
+- The terminal panel can be dragged up to **fully cover the editor**.
+
+### Fixed
+
+- **`Ctrl+Shift+\`` now works** — it had been matching the `~` that Shift
+  produces instead of the backtick key.
+- **Local / WSL terminal scrollback no longer wipes, duplicates, or drops lines**
+  on hide/show or resize. Three Windows-ConPTY problems: hiding the panel no
+  longer resizes the shell to one row; a fast drag is debounced to a single
+  resize; and xterm is now told it's driving a ConPTY (`windowsPty`) so it
+  reflows wrapped lines correctly. Remote SSH terminals are unaffected.
 
 ## [0.4.0] - 2026-06-16
 
@@ -165,7 +202,8 @@ terminal, in a Dracula-themed, VS Code-style window built on Tauri v2 and React.
 - Verified with `tsc --noEmit` and `vite build` (frontend) and `cargo check` and
   `cargo test` (backend, 4 tests passing).
 
-[Unreleased]: https://github.com/Yooouuuuuuu/straylight/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Yooouuuuuuu/straylight/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.1.0...v0.2.0

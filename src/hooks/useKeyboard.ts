@@ -5,6 +5,7 @@ import { useEffect } from "react";
 
 import { saveActiveFile } from "../lib/saveFile";
 import { matchShortcut } from "../lib/shortcuts";
+import { focusTerminal } from "../lib/terminalFocus";
 import { useAppStore } from "../store/appStore";
 
 export function useKeyboard() {
@@ -54,7 +55,37 @@ export function useKeyboard() {
           break;
         case "toggleTerminal":
           if (store.remote || store.localConnId) {
-            store.toggleTerminal();
+            // VS Code-style: reveal+focus when hidden, focus when visible but
+            // not focused, and only hide when the terminal already has focus.
+            if (!store.terminalVisible) {
+              store.setTerminalVisible(true);
+              focusTerminal(store.activeTerminalId);
+            } else if (!inTerminal && store.activeTerminalId) {
+              focusTerminal(store.activeTerminalId);
+            } else {
+              store.setTerminalVisible(false);
+            }
+            event.preventDefault();
+          }
+          break;
+        case "newTerminal": {
+          const connId = store.remote?.connId ?? store.localConnId;
+          if (connId) {
+            store.openTerminal(connId, store.remote ? store.remote.name : "Local");
+            store.setTerminalVisible(true);
+            event.preventDefault();
+          }
+          break;
+        }
+        case "nextTerminal":
+          if (store.terminals.length > 1) {
+            store.cycleTerminal(1);
+            event.preventDefault();
+          }
+          break;
+        case "prevTerminal":
+          if (store.terminals.length > 1) {
+            store.cycleTerminal(-1);
             event.preventDefault();
           }
           break;
