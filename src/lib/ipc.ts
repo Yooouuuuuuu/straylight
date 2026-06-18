@@ -135,6 +135,12 @@ export function localConnect(): Promise<string> {
   return invoke("local_connect");
 }
 
+/** The local machine's filesystem roots — Windows drive letters (`C:\`, …) or
+ *  `/` elsewhere — for switching disks in the folder browser. */
+export function listDrives(): Promise<string[]> {
+  return invoke("list_drives");
+}
+
 export function fsListDir(connId: string, path: string): Promise<DirListing> {
   return invoke("fs_list_dir", { connId, path });
 }

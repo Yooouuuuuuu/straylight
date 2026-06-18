@@ -78,8 +78,6 @@ pub fn run() {
     .init();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             ssh::config::ssh_list_config_hosts,
@@ -89,6 +87,7 @@ pub fn run() {
             ssh::connection::ssh_reconnect,
             ssh::connection::ssh_get_status,
             transport::local_connect,
+            transport::list_drives,
             transport::fs_list_dir,
             transport::fs_read_file,
             transport::fs_stat,

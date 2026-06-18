@@ -1,6 +1,6 @@
 /** Two-pane transfer overlay: drag a file/folder from one connection's tree onto
  *  a folder in the other to copy it across (see docs/drag-drop.md). Copy-only. */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { fsTransfer, fsTransferCheck } from "../../lib/ipc";
 import type { DragItem } from "../../lib/transferDrag";
@@ -10,7 +10,8 @@ import { TransferPane } from "./TransferPane";
 
 export interface TransferConn {
   connId: string;
-  rootPath: string;
+  /** The connection's pinned working dirs (absolute paths). */
+  roots: string[];
   label: string;
   color?: string;
 }
@@ -28,7 +29,15 @@ export function TransferPanel({
 }) {
   const pushNotice = useAppStore((s) => s.pushNotice);
   const refreshConn = useAppStore((s) => s.refreshConn);
+  const setTransferOpen = useAppStore((s) => s.setTransferOpen);
   const [busy, setBusy] = useState(false);
+
+  // While open, the transfer panes own F2/Delete — keep the global explorer
+  // shortcuts from acting on the (possibly different-host) explorer selection.
+  useEffect(() => {
+    setTransferOpen(true);
+    return () => setTransferOpen(false);
+  }, [setTransferOpen]);
   const [conflict, setConflict] = useState<{
     count: number;
     name: string;
@@ -102,14 +111,14 @@ export function TransferPanel({
         <div className="transfer-modal__body">
           <TransferPane
             connId={a.connId}
-            rootPath={a.rootPath}
+            roots={a.roots}
             label={a.label}
             color={a.color}
             onDropInto={(items, destDir) => void onDropInto(items, a.connId, destDir)}
           />
           <TransferPane
             connId={b.connId}
-            rootPath={b.rootPath}
+            roots={b.roots}
             label={b.label}
             color={b.color}
             onDropInto={(items, destDir) => void onDropInto(items, b.connId, destDir)}

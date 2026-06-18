@@ -1,6 +1,6 @@
 [package]
 name = "straylight"
-version = "0.7.0"
+version = "0.7.1"
 description = "Lightweight SSH file manager, terminal, and code viewer"
 authors = ["Straylight contributors"]
 edition = "2021"
@@ -16,11 +16,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# In Tauri v2, `dialog` and `fs` are separate plugin crates (not `tauri` features).
-# `tray-icon` remains a `tauri` feature.
+# `tray-icon` is a `tauri` feature. File operations go through our own transport
+# commands (see src/transport), so the `dialog`/`fs` plugin crates aren't used.
 tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-dialog = "2"
-tauri-plugin-fs = "2"
 
 # SSH / SFTP. russh 0.46.x uses the `KeyPair` / `russh_keys::key` API.
 # (~/.ssh/config is parsed manually in ssh/config.rs — the russh-config crate can

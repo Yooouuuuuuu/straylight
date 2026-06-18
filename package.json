@@ -1,7 +1,7 @@
 {
   "name": "straylight",
   "private": true,
-  "version": "0.7.0",
+  "version": "0.7.1",
   "type": "module",
   "description": "Lightweight SSH file manager, terminal, and code viewer",
   "license": "MIT OR Apache-2.0",
@@ -14,8 +14,6 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "^2",
-    "@tauri-apps/plugin-fs": "^2",
     "@xterm/addon-fit": "^0.10",
     "@xterm/addon-webgl": "^0.18",
     "@xterm/xterm": "^5",

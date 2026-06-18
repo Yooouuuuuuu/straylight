@@ -102,6 +102,49 @@ function savePinned(folders: string[]): void {
   }
 }
 
+// Pinned working dirs for remote/WSL connections, persisted per connection
+// identity so they survive a reconnect or relaunch. Remote is keyed by
+// `user@host:port`; WSL by distro name. (The local session uses PINNED_KEY.)
+const REMOTE_PINS_KEY = "straylight.remotePins";
+const WSL_PINS_KEY = "straylight.wslPins";
+
+function loadPinMap(key: string): Record<string, string[]> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) ?? "null");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const out: Record<string, string[]> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (Array.isArray(v)) out[k] = v.filter((x): x is string => typeof x === "string");
+      }
+      return out;
+    }
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
+/** Saved pins for a connection id, or null when none (so the caller can fall
+ *  back to seeding the home dir). */
+function loadConnPins(key: string, id: string): string[] | null {
+  const pins = loadPinMap(key)[id];
+  return pins && pins.length ? pins : null;
+}
+
+function saveConnPins(key: string, id: string, pins: string[]): void {
+  const map = loadPinMap(key);
+  map[id] = pins;
+  try {
+    localStorage.setItem(key, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
+
+function remoteHostKey(r: RemoteConnection): string {
+  return `${r.user}@${r.host}:${r.port}`;
+}
+
 /** Where a new terminal opens. "auto" = first active of remote → WSL → local. */
 export type TerminalTargetPref = "auto" | "local" | "remote" | "wsl";
 const TERM_TARGET_KEY = "straylight.newTerminalTarget";
@@ -118,9 +161,14 @@ interface AppState {
   // Remote (optional, one) ----------------------------------------------
   remote: RemoteConnection | null;
   remoteRootPath: string | null;
+  /** Working dirs shown for the remote (seeded with home on connect). Session-
+   *  only — reset on disconnect, since the connection itself isn't persisted. */
+  remotePins: string[];
   /** WSL distro connection — its own slot (an SSH connection to localhost). */
   wsl: RemoteConnection | null;
   wslRootPath: string | null;
+  /** Working dirs shown for the WSL distro (seeded with home on connect). */
+  wslPins: string[];
   connState: ConnectionState;
   connMessage: string | null;
 
@@ -129,6 +177,9 @@ interface AppState {
   dialogPrefill: SshHostEntry | null;
   /** Optional note shown atop the connect dialog (e.g. why it opened). */
   dialogNote: string | null;
+  /** True while the transfer panel is open — so global F2/Delete don't act on
+   *  the explorer selection while the transfer pane owns those keys. */
+  transferOpen: boolean;
   sidebarVisible: boolean;
   terminalVisible: boolean;
   /** User preference for which workspace a new terminal opens on. */
@@ -181,12 +232,17 @@ interface AppState {
 
   setRemote: (remote: RemoteConnection, rootPath: string) => void;
   clearRemote: () => void;
+  addRemotePin: (path: string) => void;
+  removeRemotePin: (path: string) => void;
   setWsl: (wsl: RemoteConnection, rootPath: string) => void;
   clearWsl: () => void;
+  addWslPin: (path: string) => void;
+  removeWslPin: (path: string) => void;
   setConnState: (state: ConnectionState, message?: string | null) => void;
 
   setDialogOpen: (open: boolean) => void;
   openDialog: (prefill?: SshHostEntry | null, note?: string | null) => void;
+  setTransferOpen: (open: boolean) => void;
   toggleSidebar: () => void;
   setSidebarVisible: (visible: boolean) => void;
   toggleTerminal: () => void;
@@ -258,14 +314,17 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   remote: null,
   remoteRootPath: null,
+  remotePins: [],
   wsl: null,
   wslRootPath: null,
+  wslPins: [],
   connState: "disconnected",
   connMessage: null,
 
   dialogOpen: false,
   dialogPrefill: null,
   dialogNote: null,
+  transferOpen: false,
   sidebarVisible: true,
   terminalVisible: true,
   newTerminalTarget: loadTermTarget(),
@@ -316,7 +375,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }),
 
   setRemote: (remote, rootPath) =>
-    set({ remote, remoteRootPath: rootPath, connState: "connected", connMessage: null }),
+    set({
+      remote,
+      remoteRootPath: rootPath,
+      remotePins: loadConnPins(REMOTE_PINS_KEY, remoteHostKey(remote)) ?? [rootPath],
+      connState: "connected",
+      connMessage: null,
+    }),
 
   clearRemote: () =>
     set((s) => {
@@ -337,6 +402,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       return {
         remote: null,
         remoteRootPath: null,
+        remotePins: [],
         connState: "disconnected",
         connMessage: null,
         tabs,
@@ -346,7 +412,26 @@ export const useAppStore = create<AppState>()((set, get) => ({
       };
     }),
 
-  setWsl: (wsl, rootPath) => set({ wsl, wslRootPath: rootPath }),
+  addRemotePin: (path) =>
+    set((s) => {
+      if (s.remotePins.includes(path)) return {};
+      const remotePins = [...s.remotePins, path];
+      if (s.remote) saveConnPins(REMOTE_PINS_KEY, remoteHostKey(s.remote), remotePins);
+      return { remotePins };
+    }),
+  removeRemotePin: (path) =>
+    set((s) => {
+      const remotePins = s.remotePins.filter((p) => p !== path);
+      if (s.remote) saveConnPins(REMOTE_PINS_KEY, remoteHostKey(s.remote), remotePins);
+      return { remotePins };
+    }),
+
+  setWsl: (wsl, rootPath) =>
+    set({
+      wsl,
+      wslRootPath: rootPath,
+      wslPins: loadConnPins(WSL_PINS_KEY, wsl.name) ?? [rootPath],
+    }),
   clearWsl: () =>
     set((s) => {
       const id = s.wsl?.connId;
@@ -358,7 +443,28 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const activeTerminalId = terminals.some((t) => t.id === s.activeTerminalId)
         ? s.activeTerminalId
         : (terminals[terminals.length - 1]?.id ?? null);
-      return { wsl: null, wslRootPath: null, tabs, activeTabId, terminals, activeTerminalId };
+      return {
+        wsl: null,
+        wslRootPath: null,
+        wslPins: [],
+        tabs,
+        activeTabId,
+        terminals,
+        activeTerminalId,
+      };
+    }),
+  addWslPin: (path) =>
+    set((s) => {
+      if (s.wslPins.includes(path)) return {};
+      const wslPins = [...s.wslPins, path];
+      if (s.wsl) saveConnPins(WSL_PINS_KEY, s.wsl.name, wslPins);
+      return { wslPins };
+    }),
+  removeWslPin: (path) =>
+    set((s) => {
+      const wslPins = s.wslPins.filter((p) => p !== path);
+      if (s.wsl) saveConnPins(WSL_PINS_KEY, s.wsl.name, wslPins);
+      return { wslPins };
     }),
   setConnState: (state, message = null) => set({ connState: state, connMessage: message }),
 
@@ -370,6 +476,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     ),
   openDialog: (prefill = null, note = null) =>
     set({ dialogOpen: true, dialogPrefill: prefill, dialogNote: note }),
+  setTransferOpen: (transferOpen) => set({ transferOpen }),
   toggleSidebar: () => set((s) => ({ sidebarVisible: !s.sidebarVisible })),
   setSidebarVisible: (sidebarVisible) => set({ sidebarVisible }),
   toggleTerminal: () => set((s) => ({ terminalVisible: !s.terminalVisible })),

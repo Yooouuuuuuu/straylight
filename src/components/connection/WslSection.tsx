@@ -4,7 +4,7 @@
  *  Remote. */
 import { useCallback, useEffect, useState } from "react";
 
-import { dirname } from "../../lib/format";
+import { basename, dirname } from "../../lib/format";
 import {
   fsListDir,
   sshDisconnect,
@@ -13,6 +13,7 @@ import {
   type WslDistro,
 } from "../../lib/ipc";
 import { useAppStore, type RemoteConnection } from "../../store/appStore";
+import { FolderBrowser } from "../FolderBrowser";
 import { RelativeTime } from "../RelativeTime";
 import { RootTree } from "../filetree/RootTree";
 import {
@@ -21,6 +22,7 @@ import {
   IconFilePlus,
   IconFolderPlus,
   IconLogout,
+  IconPlus,
   IconRefresh,
 } from "../icons";
 
@@ -29,6 +31,9 @@ const WSL_COLOR = "#bd93f9";
 export function WslSection() {
   const wsl = useAppStore((s) => s.wsl);
   const wslRootPath = useAppStore((s) => s.wslRootPath);
+  const wslPins = useAppStore((s) => s.wslPins);
+  const addWslPin = useAppStore((s) => s.addWslPin);
+  const removeWslPin = useAppStore((s) => s.removeWslPin);
   const setWsl = useAppStore((s) => s.setWsl);
   const clearWsl = useAppStore((s) => s.clearWsl);
   const openTerminal = useAppStore((s) => s.openTerminal);
@@ -45,6 +50,7 @@ export function WslSection() {
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [installFor, setInstallFor] = useState<string | null>(null);
+  const [browsing, setBrowsing] = useState(false);
 
   const load = useCallback(() => {
     setError(null);
@@ -116,7 +122,7 @@ export function WslSection() {
         ? selected.isDir
           ? selected.path
           : dirname(selected.path)
-        : wslRootPath;
+        : (wslPins[0] ?? wslRootPath);
     return (
       <>
         <div className="sidebar__section-head sidebar__section-head--remote">
@@ -127,6 +133,13 @@ export function WslSection() {
             onClick={() => toggleHiddenWsl()}
           >
             {showHiddenWsl ? <IconEye /> : <IconEyeOff />}
+          </button>
+          <button
+            className="icon-btn"
+            title="Open a folder"
+            onClick={() => setBrowsing(true)}
+          >
+            <IconPlus />
           </button>
           <button
             className="icon-btn"
@@ -158,16 +171,39 @@ export function WslSection() {
             <IconLogout />
           </button>
         </div>
-        <RootTree
-          connId={wsl.connId}
-          rootPath={wslRootPath}
-          label={wsl.name}
-          color={WSL_COLOR}
-          showHidden={showHiddenWsl}
-          refreshToken={refreshTokenWsl}
-          rootId={`${wsl.connId}::${wslRootPath}`}
-          order={999}
-        />
+        {wslPins.length > 0 ? (
+          wslPins.map((path, index) => (
+            <RootTree
+              key={path}
+              connId={wsl.connId}
+              rootPath={path}
+              label={basename(path) || path}
+              color={WSL_COLOR}
+              removable
+              defaultCollapsed
+              showHidden={showHiddenWsl}
+              refreshToken={refreshTokenWsl}
+              rootId={`${wsl.connId}::${path}`}
+              order={2000 + index}
+              onRemove={() => removeWslPin(path)}
+            />
+          ))
+        ) : (
+          <div className="filetree__message">
+            No folders yet — click + to open one.
+          </div>
+        )}
+        {browsing && (
+          <FolderBrowser
+            connId={wsl.connId}
+            title={`Open a folder on ${wsl.name}`}
+            onPick={(path) => {
+              addWslPin(path);
+              setBrowsing(false);
+            }}
+            onClose={() => setBrowsing(false)}
+          />
+        )}
       </>
     );
   }

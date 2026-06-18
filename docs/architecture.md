@@ -539,9 +539,7 @@ env_logger = "0.11"
     "zustand": "^4",
     "react-resizable-panels": "^2",
     "fuse.js": "^7",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "^2",
-    "@tauri-apps/plugin-fs": "^2"
+    "@tauri-apps/api": "^2"
   }
 }
 ```

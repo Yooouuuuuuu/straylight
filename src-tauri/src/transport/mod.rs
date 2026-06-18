@@ -420,6 +420,31 @@ pub async fn local_connect(state: State<'_, AppState>) -> Result<String, String>
     Ok(conn_id)
 }
 
+/// The local machine's filesystem roots, so the in-app folder browser can switch
+/// between disks without the user typing a path. On Windows these are the present
+/// drive letters (`C:\`, `D:\`, …); elsewhere it's just `/`.
+#[cfg(windows)]
+#[tauri::command]
+pub fn list_drives() -> Vec<String> {
+    // GetLogicalDrives returns a bitmask of present drives (bit 0 = A, 1 = B, …);
+    // unlike probing each root it never touches removable media or stalls.
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetLogicalDrives() -> u32;
+    }
+    let mask = unsafe { GetLogicalDrives() };
+    (0..26u32)
+        .filter(|i| mask & (1u32 << i) != 0)
+        .map(|i| format!("{}:\\", (b'A' + i as u8) as char))
+        .collect()
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+pub fn list_drives() -> Vec<String> {
+    vec!["/".to_string()]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

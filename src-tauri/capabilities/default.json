@@ -13,8 +13,6 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-is-maximized",
     "core:window:allow-close",
-    "core:window:allow-set-title",
-    "dialog:default",
-    "fs:default"
+    "core:window:allow-set-title"
   ]
 }

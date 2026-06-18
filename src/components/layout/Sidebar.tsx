@@ -2,7 +2,6 @@
  *  a Remote section (the attached SSH host, or connect controls). Each section
  *  carries its own hidden-files toggle, refresh, and "last refreshed" stamp. */
 import { useEffect, useRef, useState } from "react";
-import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 
 import { clipboardShortcut } from "../../lib/fileOps";
 import { basename, dirname } from "../../lib/format";
@@ -14,6 +13,7 @@ import { useAppStore } from "../../store/appStore";
 import { useSSH } from "../../hooks/useSSH";
 import { ConnectionManager } from "../connection/ConnectionManager";
 import { WslSection } from "../connection/WslSection";
+import { FolderBrowser } from "../FolderBrowser";
 import { RelativeTime } from "../RelativeTime";
 import { RootTree } from "../filetree/RootTree";
 import { TransferPanel, type TransferConn } from "../transfer/TransferPanel";
@@ -45,8 +45,11 @@ export function Sidebar() {
   const removePinnedFolder = useAppStore((s) => s.removePinnedFolder);
   const remote = useAppStore((s) => s.remote);
   const remoteRootPath = useAppStore((s) => s.remoteRootPath);
+  const remotePins = useAppStore((s) => s.remotePins);
+  const addRemotePin = useAppStore((s) => s.addRemotePin);
+  const removeRemotePin = useAppStore((s) => s.removeRemotePin);
   const wsl = useAppStore((s) => s.wsl);
-  const wslRootPath = useAppStore((s) => s.wslRootPath);
+  const wslPins = useAppStore((s) => s.wslPins);
   const selected = useAppStore((s) => s.selected);
   const openNewEntry = useAppStore((s) => s.openNewEntry);
   const { disconnect } = useSSH();
@@ -58,30 +61,50 @@ export function Sidebar() {
     b: TransferConn;
   } | null>(null);
   const localConn: TransferConn | null = localConnId
-    ? { connId: localConnId, rootPath: "", label: "Local", color: "#8be9fd" }
+    ? { connId: localConnId, roots: pinnedFolders, label: "Local", color: "#8be9fd" }
     : null;
-  const remoteConn: TransferConn | null =
-    remote && remoteRootPath
-      ? {
-          connId: remote.connId,
-          rootPath: remoteRootPath,
-          label: remote.name,
-          color: remote.color,
-        }
-      : null;
-  const wslConn: TransferConn | null =
-    wsl && wslRootPath
-      ? { connId: wsl.connId, rootPath: wslRootPath, label: wsl.name, color: "#bd93f9" }
-      : null;
+  const remoteConn: TransferConn | null = remote
+    ? {
+        connId: remote.connId,
+        roots: remotePins,
+        label: remote.name,
+        color: remote.color,
+      }
+    : null;
+  const wslConn: TransferConn | null = wsl
+    ? { connId: wsl.connId, roots: wslPins, label: wsl.name, color: "#bd93f9" }
+    : null;
 
-  async function openFolder() {
-    const picked = await openFolderDialog({
-      directory: true,
-      multiple: false,
-      title: "Open folder",
+  // In-app folder picker (replaces the OS dialog so local matches WSL/remote).
+  const [browse, setBrowse] = useState<{
+    connId: string;
+    title: string;
+    onPick: (path: string) => void;
+  } | null>(null);
+
+  const openLocalFolder = () => {
+    if (!localConnId) return;
+    setBrowse({
+      connId: localConnId,
+      title: "Open a local folder",
+      onPick: (path) => {
+        addPinnedFolder(path);
+        setBrowse(null);
+      },
     });
-    if (typeof picked === "string") addPinnedFolder(picked);
-  }
+  };
+
+  const openRemoteFolder = () => {
+    if (!remote) return;
+    setBrowse({
+      connId: remote.connId,
+      title: `Open a folder on ${remote.name}`,
+      onPick: (path) => {
+        addRemotePin(path);
+        setBrowse(null);
+      },
+    });
+  };
 
   // New file/folder is created in the selected folder (or the selected file's
   // parent) when the selection belongs to that section, otherwise the section's
@@ -93,7 +116,10 @@ export function Sidebar() {
     return fallback;
   };
   const localNewParent = targetIn(localConnId, pinnedFolders[0] ?? null);
-  const remoteNewParent = targetIn(remote?.connId ?? null, remoteRootPath);
+  const remoteNewParent = targetIn(
+    remote?.connId ?? null,
+    remotePins[0] ?? remoteRootPath,
+  );
 
   // Arrow-key navigation of the tree, scoped to when the explorer has focus.
   const contentRef = useRef<HTMLDivElement>(null);
@@ -216,7 +242,8 @@ export function Sidebar() {
           <button
             className="icon-btn sidebar__section-action"
             title="Open a local folder"
-            onClick={() => void openFolder()}
+            disabled={!localConnId}
+            onClick={openLocalFolder}
           >
             <IconPlus />
           </button>
@@ -260,6 +287,13 @@ export function Sidebar() {
               </button>
               <button
                 className="icon-btn"
+                title="Open a folder"
+                onClick={openRemoteFolder}
+              >
+                <IconPlus />
+              </button>
+              <button
+                className="icon-btn"
                 title="New file"
                 disabled={!remoteNewParent}
                 onClick={() => {
@@ -298,17 +332,29 @@ export function Sidebar() {
             </>
           )}
         </div>
-        {remote && remoteRootPath ? (
-          <RootTree
-            connId={remote.connId}
-            rootPath={remoteRootPath}
-            label={remote.name}
-            color={remote.color}
-            showHidden={showHiddenRemote}
-            refreshToken={refreshTokenRemote}
-            rootId={`${remote.connId}::${remoteRootPath}`}
-            order={pinnedFolders.length}
-          />
+        {remote ? (
+          remotePins.length > 0 ? (
+            remotePins.map((path, index) => (
+              <RootTree
+                key={path}
+                connId={remote.connId}
+                rootPath={path}
+                label={basename(path) || path}
+                color={remote.color}
+                removable
+                defaultCollapsed
+                showHidden={showHiddenRemote}
+                refreshToken={refreshTokenRemote}
+                rootId={`${remote.connId}::${path}`}
+                order={1000 + index}
+                onRemove={() => removeRemotePin(path)}
+              />
+            ))
+          ) : (
+            <div className="filetree__message">
+              No folders yet — click + to open one.
+            </div>
+          )
         ) : (
           <ConnectionManager />
         )}
@@ -322,6 +368,15 @@ export function Sidebar() {
         a={transfer.a}
         b={transfer.b}
         onClose={() => setTransfer(null)}
+      />
+    )}
+    {browse && (
+      <FolderBrowser
+        connId={browse.connId}
+        title={browse.title}
+        showDrives={browse.connId === localConnId}
+        onPick={browse.onPick}
+        onClose={() => setBrowse(null)}
       />
     )}
     </>

@@ -44,7 +44,9 @@ export function useKeyboard() {
           }
           break;
         case "renameSelected":
-          if (!inEditable && store.selected) {
+          // The transfer panel owns F2/Delete while open (it has its own
+          // selection on a possibly different host).
+          if (!inEditable && !store.transferOpen && store.selected) {
             store.startRename(store.selected.connId, store.selected.path);
             event.preventDefault();
           }
@@ -55,7 +57,7 @@ export function useKeyboard() {
             : store.selected
               ? [store.selected]
               : [];
-          if (!inEditable && targets.length) {
+          if (!inEditable && !store.transferOpen && targets.length) {
             store.openConfirmDelete(targets);
             event.preventDefault();
           }

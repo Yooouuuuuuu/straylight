@@ -15,10 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   poll (opt-in).
 - **Re-evaluate the explorer / sidebar UX once git status lands** — fitting git
   state into the tree and the section bars may force a sizable rework.
-- **Transfer & multi-select polish (0.7.1):** streaming transfers (remove the
-  in-memory size cap), dragging directly between the sidebar trees (folding the
-  three panel buttons into one), OS drag-in/out, and multi cut/copy/paste in the
-  explorer.
+- **0.7.2 — Streaming transfers:** remove the in-memory transfer size cap
+  (`MAX_TRANSFER_BYTES`, 512 MB) with chunked streaming across transports.
+- **Transfer polish (later):** drag directly between the sidebar trees (folding
+  the three panel buttons into one), OS drag-in/out, and multi cut/copy/paste in
+  the explorer.
 - **Local draft backup of unsaved edits** — survive a connection drop / crash /
   accidental close by caching dirty buffers locally and restoring them on reopen
   (VS Code "hot exit"); doubles as a WSL/remote edit safeguard.
@@ -27,6 +28,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Terminal tab reordering.
 - **Phase 3:** git status / blame / log / diff, Podman containers, fuzzy finder,
   search-in-files, port forwarding, Markdown preview, and auto-update.
+
+## [0.7.1] - 2026-06-19
+
+Target a working directory, not the home root: an in-app folder browser and
+pinnable directories for every connection, reused in the transfer tab.
+
+### Added
+
+- **In-app folder browser** for local, WSL, and remote — replaces the OS folder
+  dialog so every connection picks directories the same way. Includes a path bar,
+  and on Windows a **drive bar** (`C:` `D:` …) to switch disks without typing
+  (Linux/remote has a single `/` tree, so none is needed).
+- **Pinnable working directories on WSL and remote**, like Local — pin the repos
+  you actually work in (shown collapsed); the home dir is pinned automatically on
+  connect, and every pin is removable. Pins **persist per connection**
+  (`user@host:port` for remote, distro name for WSL) across reconnect and
+  relaunch.
+- **Spring-loaded folders** in the transfer tab — hover a collapsed folder during
+  a drag and it expands after 0.5s, so you can drill in without dropping.
+
+### Changed
+
+- **WSL/remote roots start collapsed** instead of auto-expanding the cluttered
+  home dir — you land on a tidy root and expand into your working dir.
+- **Transfer tab reuses the pinned dirs** (collapsed, hidden files off) with a
+  per-pane hidden-files toggle and a one-off **＋** button to open a folder for
+  that panel session only (not pinned or remembered).
+- Local "Open folder" now uses the in-app browser, not the Windows dialog.
+- In the transfer tab, dropping onto a file copies into its parent folder (no
+  dead rows mid-drag).
+
+### Fixed
+
+- **Transfer tab F2/Delete acted on the explorer's selection** — often a
+  different host — so Delete could target the wrong machine ("session not open").
+  The transfer panel now owns F2/Delete on its own selection while open, and
+  pinned root rows are excluded from rename/delete.
+- Forbidden drag cursor after a folder expanded mid-drag in the transfer tab.
+
+### Removed
+
+- Unused `tauri-plugin-dialog` and `tauri-plugin-fs` plugins (and their capability
+  grants) — file operations go through our own transport commands, and the folder
+  dialog is now in-app.
 
 ## [0.7.0] - 2026-06-18
 
