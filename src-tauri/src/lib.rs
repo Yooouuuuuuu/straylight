@@ -1,12 +1,12 @@
 //! Straylight — Tauri v2 backend.
 //!
-//! A "session" is one workspace the UI is attached to. It can be a remote SSH
-//! connection or the local filesystem (WSL is planned). File operations go
-//! through the transport-agnostic [`transport::FileTransport`]; terminals are
-//! currently SSH-only.
+//! A "session" is one workspace the UI is attached to: a remote SSH connection,
+//! a WSL distro (also reached over SSH — see [`wsl`]), or the local filesystem.
+//! File operations go through the transport-agnostic [`transport::FileTransport`].
 
 pub mod ssh;
 pub mod transport;
+pub mod wsl;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -103,6 +103,8 @@ pub fn run() {
             ssh::pty::pty_resize,
             ssh::pty::pty_close,
             ssh::pty::list_terminal_profiles,
+            wsl::wsl_list_distros,
+            wsl::wsl_connect,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Straylight application");

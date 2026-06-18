@@ -102,6 +102,14 @@ function savePinned(folders: string[]): void {
   }
 }
 
+/** Where a new terminal opens. "auto" = first active of remote → WSL → local. */
+export type TerminalTargetPref = "auto" | "local" | "remote" | "wsl";
+const TERM_TARGET_KEY = "straylight.newTerminalTarget";
+function loadTermTarget(): TerminalTargetPref {
+  const v = localStorage.getItem(TERM_TARGET_KEY);
+  return v === "local" || v === "remote" || v === "wsl" ? v : "auto";
+}
+
 interface AppState {
   // Local session (always available) ------------------------------------
   localConnId: string | null;
@@ -110,6 +118,9 @@ interface AppState {
   // Remote (optional, one) ----------------------------------------------
   remote: RemoteConnection | null;
   remoteRootPath: string | null;
+  /** WSL distro connection — its own slot (an SSH connection to localhost). */
+  wsl: RemoteConnection | null;
+  wslRootPath: string | null;
   connState: ConnectionState;
   connMessage: string | null;
 
@@ -120,14 +131,19 @@ interface AppState {
   dialogNote: string | null;
   sidebarVisible: boolean;
   terminalVisible: boolean;
+  /** User preference for which workspace a new terminal opens on. */
+  newTerminalTarget: TerminalTargetPref;
   // Explorer controls are per-section: Local and Remote each keep their own
   // hidden-files toggle, refresh token, and "last refreshed" timestamp.
   showHiddenLocal: boolean;
   showHiddenRemote: boolean;
+  showHiddenWsl: boolean;
   refreshTokenLocal: number;
   refreshTokenRemote: number;
+  refreshTokenWsl: number;
   lastRefreshLocal: number | null;
   lastRefreshRemote: number | null;
+  lastRefreshWsl: number | null;
 
   // Terminals ------------------------------------------------------------
   terminals: TerminalSession[];
@@ -161,6 +177,8 @@ interface AppState {
 
   setRemote: (remote: RemoteConnection, rootPath: string) => void;
   clearRemote: () => void;
+  setWsl: (wsl: RemoteConnection, rootPath: string) => void;
+  clearWsl: () => void;
   setConnState: (state: ConnectionState, message?: string | null) => void;
 
   setDialogOpen: (open: boolean) => void;
@@ -169,10 +187,13 @@ interface AppState {
   setSidebarVisible: (visible: boolean) => void;
   toggleTerminal: () => void;
   setTerminalVisible: (visible: boolean) => void;
+  setNewTerminalTarget: (target: TerminalTargetPref) => void;
   toggleHiddenLocal: () => void;
   toggleHiddenRemote: () => void;
+  toggleHiddenWsl: () => void;
   refreshLocal: () => void;
   refreshRemote: () => void;
+  refreshWsl: () => void;
   /** Refresh whichever section owns this connection (used after file ops). */
   refreshConn: (connId: string) => void;
   /** Stamp a section's "last refreshed" time once its tree has actually loaded. */
@@ -229,6 +250,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   remote: null,
   remoteRootPath: null,
+  wsl: null,
+  wslRootPath: null,
   connState: "disconnected",
   connMessage: null,
 
@@ -237,12 +260,16 @@ export const useAppStore = create<AppState>()((set, get) => ({
   dialogNote: null,
   sidebarVisible: true,
   terminalVisible: true,
+  newTerminalTarget: loadTermTarget(),
   showHiddenLocal: false,
   showHiddenRemote: false,
+  showHiddenWsl: false,
   refreshTokenLocal: 0,
   refreshTokenRemote: 0,
+  refreshTokenWsl: 0,
   lastRefreshLocal: null,
   lastRefreshRemote: null,
+  lastRefreshWsl: null,
 
   terminals: [],
   activeTerminalId: null,
@@ -310,6 +337,20 @@ export const useAppStore = create<AppState>()((set, get) => ({
       };
     }),
 
+  setWsl: (wsl, rootPath) => set({ wsl, wslRootPath: rootPath }),
+  clearWsl: () =>
+    set((s) => {
+      const id = s.wsl?.connId;
+      const tabs = id ? s.tabs.filter((t) => t.connId !== id) : s.tabs;
+      const activeTabId = tabs.some((t) => t.id === s.activeTabId)
+        ? s.activeTabId
+        : (tabs[tabs.length - 1]?.id ?? null);
+      const terminals = id ? s.terminals.filter((t) => t.connId !== id) : s.terminals;
+      const activeTerminalId = terminals.some((t) => t.id === s.activeTerminalId)
+        ? s.activeTerminalId
+        : (terminals[terminals.length - 1]?.id ?? null);
+      return { wsl: null, wslRootPath: null, tabs, activeTabId, terminals, activeTerminalId };
+    }),
   setConnState: (state, message = null) => set({ connState: state, connMessage: message }),
 
   setDialogOpen: (dialogOpen) =>
@@ -324,26 +365,40 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setSidebarVisible: (sidebarVisible) => set({ sidebarVisible }),
   toggleTerminal: () => set((s) => ({ terminalVisible: !s.terminalVisible })),
   setTerminalVisible: (terminalVisible) => set({ terminalVisible }),
+  setNewTerminalTarget: (newTerminalTarget) => {
+    try {
+      localStorage.setItem(TERM_TARGET_KEY, newTerminalTarget);
+    } catch {
+      /* ignore */
+    }
+    set({ newTerminalTarget });
+  },
   toggleHiddenLocal: () => set((s) => ({ showHiddenLocal: !s.showHiddenLocal })),
   toggleHiddenRemote: () =>
     set((s) => ({ showHiddenRemote: !s.showHiddenRemote })),
+  toggleHiddenWsl: () => set((s) => ({ showHiddenWsl: !s.showHiddenWsl })),
   refreshLocal: () =>
     set((s) => ({ refreshTokenLocal: s.refreshTokenLocal + 1 })),
   refreshRemote: () =>
     set((s) => ({ refreshTokenRemote: s.refreshTokenRemote + 1 })),
+  refreshWsl: () => set((s) => ({ refreshTokenWsl: s.refreshTokenWsl + 1 })),
   refreshConn: (connId) =>
     set((s) =>
       connId === s.localConnId
         ? { refreshTokenLocal: s.refreshTokenLocal + 1 }
-        : { refreshTokenRemote: s.refreshTokenRemote + 1 },
+        : connId === s.wsl?.connId
+          ? { refreshTokenWsl: s.refreshTokenWsl + 1 }
+          : { refreshTokenRemote: s.refreshTokenRemote + 1 },
     ),
   markRefreshed: (connId) =>
     set((s) =>
       connId === s.localConnId
         ? { lastRefreshLocal: Date.now() }
-        : connId === s.remote?.connId
-          ? { lastRefreshRemote: Date.now() }
-          : {},
+        : connId === s.wsl?.connId
+          ? { lastRefreshWsl: Date.now() }
+          : connId === s.remote?.connId
+            ? { lastRefreshRemote: Date.now() }
+            : {},
     ),
 
   openTerminal: (connId, label, command = null) =>

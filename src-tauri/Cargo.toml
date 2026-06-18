@@ -1,6 +1,6 @@
 [package]
 name = "straylight"
-version = "0.5.1"
+version = "0.6.0"
 description = "Lightweight SSH file manager, terminal, and code viewer"
 authors = ["Straylight contributors"]
 edition = "2021"
@@ -44,6 +44,8 @@ uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 log = "0.4"
 env_logger = "0.11"
+# Carry a WSL-generated private key out of the distro without newline mangling.
+base64 = "0.22"
 
 [profile.release]
 # Optimize for a small installer, matching Straylight's goals.

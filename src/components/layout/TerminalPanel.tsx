@@ -5,12 +5,22 @@
 import { useEffect, useState } from "react";
 
 import { listTerminalProfiles, type TerminalProfile } from "../../lib/ipc";
+import { pickTerminalTarget } from "../../lib/terminalTarget";
 import { useAppStore } from "../../store/appStore";
 import { Terminal } from "../terminal/Terminal";
 import { IconClose, IconPlus } from "../icons";
 
+const TARGET_OPTIONS = ["auto", "remote", "wsl", "local"] as const;
+const TARGET_LABELS: Record<(typeof TARGET_OPTIONS)[number], string> = {
+  auto: "Auto",
+  remote: "Remote",
+  wsl: "WSL",
+  local: "Local",
+};
+
 export function TerminalPanel() {
   const remote = useAppStore((s) => s.remote);
+  const wsl = useAppStore((s) => s.wsl);
   const localConnId = useAppStore((s) => s.localConnId);
   const terminals = useAppStore((s) => s.terminals);
   const activeTerminalId = useAppStore((s) => s.activeTerminalId);
@@ -18,6 +28,8 @@ export function TerminalPanel() {
   const closeTerminal = useAppStore((s) => s.closeTerminal);
   const setActiveTerminal = useAppStore((s) => s.setActiveTerminal);
   const setTerminalVisible = useAppStore((s) => s.setTerminalVisible);
+  const newTerminalTarget = useAppStore((s) => s.newTerminalTarget);
+  const setNewTerminalTarget = useAppStore((s) => s.setNewTerminalTarget);
 
   const [profiles, setProfiles] = useState<TerminalProfile[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -37,8 +49,11 @@ export function TerminalPanel() {
   }, []);
 
   const newDefault = () => {
-    const connId = remote?.connId ?? localConnId;
-    if (connId) openTerminal(connId, remote ? remote.name : "Local");
+    const target = pickTerminalTarget();
+    if (target) {
+      openTerminal(target.connId, target.label);
+      setTerminalVisible(true);
+    }
   };
 
   const openProfile = (p: TerminalProfile) => {
@@ -49,6 +64,11 @@ export function TerminalPanel() {
   const openRemoteShell = () => {
     setMenuOpen(false);
     if (remote) openTerminal(remote.connId, remote.name);
+  };
+
+  const openWslShell = () => {
+    setMenuOpen(false);
+    if (wsl) openTerminal(wsl.connId, wsl.name);
   };
 
   return (
@@ -117,6 +137,15 @@ export function TerminalPanel() {
                   <div className="terminal-menu__sep" />
                 </>
               )}
+              {wsl && (
+                <>
+                  <button className="terminal-menu__item" onClick={openWslShell}>
+                    {wsl.name}
+                    <span className="terminal-menu__hint">WSL</span>
+                  </button>
+                  <div className="terminal-menu__sep" />
+                </>
+              )}
               {profiles.length === 0 ? (
                 <div className="terminal-menu__empty">No local shells found</div>
               ) : (
@@ -130,6 +159,22 @@ export function TerminalPanel() {
                   </button>
                 ))
               )}
+              <div className="terminal-menu__sep" />
+              <div className="terminal-menu__pref">
+                <span className="terminal-menu__pref-label">New opens</span>
+                {TARGET_OPTIONS.map((opt) => (
+                  <button
+                    key={opt}
+                    className={`terminal-menu__pref-btn${newTerminalTarget === opt ? " terminal-menu__pref-btn--active" : ""}`}
+                    title={
+                      opt === "auto" ? "remote → WSL → local" : `Prefer ${opt}`
+                    }
+                    onClick={() => setNewTerminalTarget(opt)}
+                  >
+                    {TARGET_LABELS[opt]}
+                  </button>
+                ))}
+              </div>
             </div>
           </>
         )}

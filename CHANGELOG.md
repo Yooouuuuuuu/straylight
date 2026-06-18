@@ -15,11 +15,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   poll (opt-in).
 - **Re-evaluate the explorer / sidebar UX once git status lands** — fitting git
   state into the tree and the section bars may force a sizable rework.
-- **Drag-and-drop transfers** between the local and remote trees (and from the OS).
-- **WSL filesystem** access (the WSL *terminal* already ships via the shell picker).
+- **Drag-and-drop transfers** between the local, remote, and WSL trees (and the OS).
+- **Local draft backup of unsaved edits** — survive a connection drop / crash /
+  accidental close by caching dirty buffers locally and restoring them on reopen
+  (VS Code "hot exit"); doubles as a WSL/remote edit safeguard.
+- **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
+  daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 - Terminal tab reordering.
 - **Phase 3:** git status / blame / log / diff, Podman containers, fuzzy finder,
   search-in-files, port forwarding, Markdown preview, and auto-update.
+
+## [0.6.0] - 2026-06-18
+
+WSL as a first-class connection: browse a distro and run its terminal at native
+speed, with zero setup.
+
+### Added
+
+- **WSL distros as connections.** A new **WSL** sidebar section lists your
+  installed distros (the default highlighted, container/system distros hidden);
+  click one to connect. Under the hood Straylight **auto-provisions an SSH server
+  inside the distro** — installing OpenSSH on first use (with consent) — and
+  attaches it as a `localhost` SSH host, so files and the terminal run on the
+  distro's **native ext4** filesystem rather than the slow `\\wsl$` bridge. WSL
+  gets its own slot (Local + WSL + remote at once), a toolbar matching the other
+  sections (hidden-files, New File / New Folder, refresh, "last refreshed"), a
+  file tree, and a terminal opened on connect. See `docs/wsl-connection.md`.
+- **Configurable new-terminal target.** `+` and `Ctrl+Shift+\`` open a terminal on
+  the first active of **remote → WSL → local**; a "New opens" preference in the
+  shell menu (`Auto` / `Remote` / `WSL` / `Local`) pins it, and the choice
+  persists. The shell menu also lists the connected WSL distro's shell.
 
 ## [0.5.1] - 2026-06-17
 
@@ -251,7 +276,8 @@ terminal, in a Dracula-themed, VS Code-style window built on Tauri v2 and React.
 - Verified with `tsc --noEmit` and `vite build` (frontend) and `cargo check` and
   `cargo test` (backend, 4 tests passing).
 
-[Unreleased]: https://github.com/Yooouuuuuuu/straylight/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/Yooouuuuuuu/straylight/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/Yooouuuuuuu/straylight/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.3.0...v0.4.0

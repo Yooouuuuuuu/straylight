@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { saveActiveFile } from "../lib/saveFile";
 import { matchShortcut } from "../lib/shortcuts";
 import { focusTerminal } from "../lib/terminalFocus";
+import { pickTerminalTarget } from "../lib/terminalTarget";
 import { focusExplorer } from "../lib/treeNav";
 import { useAppStore } from "../store/appStore";
 
@@ -70,9 +71,9 @@ export function useKeyboard() {
           }
           break;
         case "newTerminal": {
-          const connId = store.remote?.connId ?? store.localConnId;
-          if (connId) {
-            store.openTerminal(connId, store.remote ? store.remote.name : "Local");
+          const target = pickTerminalTarget();
+          if (target) {
+            store.openTerminal(target.connId, target.label);
             store.setTerminalVisible(true);
             event.preventDefault();
           }
@@ -107,9 +108,10 @@ export function useKeyboard() {
           }
           break;
         case "refreshTree":
-          // Ctrl+Shift+R is a global "refresh everything" — both sections.
+          // Ctrl+Shift+R is a global "refresh everything" — all sections.
           store.refreshLocal();
           store.refreshRemote();
+          store.refreshWsl();
           event.preventDefault();
           break;
       }

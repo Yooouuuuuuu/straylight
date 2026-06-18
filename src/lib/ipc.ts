@@ -211,6 +211,32 @@ export function fsCopy(
 }
 
 // ---------------------------------------------------------------------------
+// WSL
+// ---------------------------------------------------------------------------
+
+export interface WslDistro {
+  name: string;
+  /** The distro a bare `wsl` targets. */
+  isDefault: boolean;
+  running: boolean;
+}
+
+/** List installed WSL distros (empty on non-Windows or when WSL is absent). */
+export function wslListDistros(): Promise<WslDistro[]> {
+  return invoke("wsl_list_distros");
+}
+
+/** Provision (if allowed) and connect to a WSL distro; returns its connection
+ *  id (a localhost SSH connection). Rejects with a `WSL_NEEDS_INSTALL:` prefix
+ *  when the distro has no SSH server and `allowInstall` was false. */
+export function wslConnect(
+  distro: string,
+  allowInstall: boolean,
+): Promise<string> {
+  return invoke("wsl_connect", { distro, allowInstall });
+}
+
+// ---------------------------------------------------------------------------
 // PTY / terminal
 // ---------------------------------------------------------------------------
 

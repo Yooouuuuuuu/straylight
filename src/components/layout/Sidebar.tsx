@@ -13,6 +13,7 @@ import {
 import { useAppStore } from "../../store/appStore";
 import { useSSH } from "../../hooks/useSSH";
 import { ConnectionManager } from "../connection/ConnectionManager";
+import { WslSection } from "../connection/WslSection";
 import { RelativeTime } from "../RelativeTime";
 import { RootTree } from "../filetree/RootTree";
 import {
@@ -254,6 +255,9 @@ export function Sidebar() {
         ) : (
           <ConnectionManager />
         )}
+
+        {/* WSL distros (their own slot, alongside Local and Remote) */}
+        <WslSection />
       </div>
     </div>
   );
