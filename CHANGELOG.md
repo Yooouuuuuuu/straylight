@@ -15,7 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   poll (opt-in).
 - **Re-evaluate the explorer / sidebar UX once git status lands** — fitting git
   state into the tree and the section bars may force a sizable rework.
-- **Drag-and-drop transfers** between the local, remote, and WSL trees (and the OS).
+- **Transfer & multi-select polish (0.7.1):** streaming transfers (remove the
+  in-memory size cap), dragging directly between the sidebar trees (folding the
+  three panel buttons into one), OS drag-in/out, and multi cut/copy/paste in the
+  explorer.
 - **Local draft backup of unsaved edits** — survive a connection drop / crash /
   accidental close by caching dirty buffers locally and restoring them on reopen
   (VS Code "hot exit"); doubles as a WSL/remote edit safeguard.
@@ -24,6 +27,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Terminal tab reordering.
 - **Phase 3:** git status / blame / log / diff, Podman containers, fuzzy finder,
   search-in-files, port forwarding, Markdown preview, and auto-update.
+
+## [0.7.0] - 2026-06-18
+
+Move files between machines, and act on many at once: cross-connection transfers
+and multi-select.
+
+### Added
+
+- **Transfers between connections.** Three buttons in the Explorer header open a
+  two-pane panel for a pair — **Local ⇄ Remote**, **Local ⇄ WSL**, **WSL ⇄
+  Remote**. Drag a file/folder from one pane onto a folder in the other (or use
+  copy/paste) to copy it across; folders go recursively, and a name clash prompts
+  **Overwrite / Keep both / Cancel**. Each pane is a full file manager
+  (right-click: New File/Folder, Copy, Paste, Rename, Delete, Copy Path — **Cut is
+  locked**, since transfers are copy-only). Backed by a new `fs_transfer` relay
+  over the transport layer (raw `read_bytes`/`write_bytes`). See
+  `docs/drag-drop.md`.
+- **Multi-select.** **Ctrl+click** toggles a node, **Shift+click** selects a range
+  — in both the explorer and the transfer panel. Act on the batch at once:
+  **delete** ("Delete N items") and **transfer** (drag or copy/paste many,
+  resolving collisions in one prompt). Rename and Copy Path lock while more than
+  one item is selected.
 
 ## [0.6.0] - 2026-06-18
 
@@ -276,7 +301,8 @@ terminal, in a Dracula-themed, VS Code-style window built on Tauri v2 and React.
 - Verified with `tsc --noEmit` and `vite build` (frontend) and `cargo check` and
   `cargo test` (backend, 4 tests passing).
 
-[Unreleased]: https://github.com/Yooouuuuuuu/straylight/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Yooouuuuuuu/straylight/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/Yooouuuuuuu/straylight/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.4.0...v0.5.0

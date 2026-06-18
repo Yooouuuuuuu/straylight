@@ -8,7 +8,7 @@ use tokio::io::AsyncReadExt;
 
 use crate::transport::{
     copy_variant, looks_binary, sort_entries, DirListing, FileContent, FileEntry, FileStat,
-    FileTransport, WriteResult, BINARY_SNIFF, MAX_READ_BYTES,
+    FileTransport, WriteResult, BINARY_SNIFF, MAX_READ_BYTES, MAX_TRANSFER_BYTES,
 };
 
 pub struct LocalTransport;
@@ -303,6 +303,33 @@ impl FileTransport for LocalTransport {
         }
         copy_recursive(src, dest.clone()).await?;
         Ok(dest.to_string_lossy().into_owned())
+    }
+
+    async fn read_bytes(&self, path: &str) -> Result<Vec<u8>, String> {
+        let meta = tokio::fs::metadata(path)
+            .await
+            .map_err(|e| format!("could not stat {path}: {e}"))?;
+        if meta.len() > MAX_TRANSFER_BYTES {
+            return Err(format!(
+                "{path} is too large to transfer yet (streaming is coming)"
+            ));
+        }
+        tokio::fs::read(path)
+            .await
+            .map_err(|e| format!("could not read {path}: {e}"))
+    }
+
+    async fn write_bytes(&self, path: &str, bytes: &[u8]) -> Result<(), String> {
+        tokio::fs::write(path, bytes)
+            .await
+            .map_err(|e| format!("could not write {path}: {e}"))
+    }
+
+    fn join(&self, parent: &str, name: &str) -> String {
+        PathBuf::from(parent)
+            .join(name)
+            .to_string_lossy()
+            .into_owned()
     }
 }
 

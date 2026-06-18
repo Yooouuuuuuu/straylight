@@ -210,6 +210,35 @@ export function fsCopy(
   return invoke("fs_copy", { connId, path, destDir });
 }
 
+/** Copy an entry from one connection into a directory on another (copy-only).
+ *  `renameOnConflict` resolves a top-level name clash by appending "copy",
+ *  otherwise it overwrites a file / merges into an existing folder. */
+export function fsTransfer(
+  srcConnId: string,
+  srcPath: string,
+  destConnId: string,
+  destDir: string,
+  renameOnConflict: boolean,
+): Promise<string> {
+  return invoke("fs_transfer", {
+    srcConnId,
+    srcPath,
+    destConnId,
+    destDir,
+    renameOnConflict,
+  });
+}
+
+/** Whether a transfer of `srcPath` into `destDir` on `destConnId` would collide
+ *  with an existing top-level entry (so the UI can prompt). */
+export function fsTransferCheck(
+  srcPath: string,
+  destConnId: string,
+  destDir: string,
+): Promise<boolean> {
+  return invoke("fs_transfer_check", { srcPath, destConnId, destDir });
+}
+
 // ---------------------------------------------------------------------------
 // WSL
 // ---------------------------------------------------------------------------

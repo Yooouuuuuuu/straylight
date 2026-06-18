@@ -159,11 +159,15 @@ interface AppState {
   closeConfirm: { tabId: string } | null;
 
   // File tree operations -------------------------------------------------
+  /** The anchor node — last clicked; drives rename, keyboard nav, new-file target. */
   selected: TreeNode | null;
+  /** The full multi-selection (always within one connection; includes the anchor). */
+  selection: TreeNode[];
   contextMenu: (TreeNode & { x: number; y: number }) | null;
   renaming: { connId: string; path: string } | null;
   newEntry: { connId: string; parent: string; isDir: boolean } | null;
-  confirmDelete: TreeNode | null;
+  /** Items pending delete confirmation (one or many). */
+  confirmDelete: TreeNode[] | null;
   /** Cut/copy buffer for the explorer; paste drops it into a folder. */
   clipboard: { mode: "cut" | "copy"; node: TreeNode } | null;
 
@@ -223,13 +227,17 @@ interface AppState {
   clearCloseConfirm: () => void;
 
   setSelected: (node: TreeNode | null) => void;
+  /** Ctrl+click: toggle a node in the selection (resets across connections). */
+  toggleSelected: (node: TreeNode) => void;
+  /** Shift+click: replace the selection with a computed range, keeping `anchor`. */
+  setSelection: (nodes: TreeNode[], anchor: TreeNode) => void;
   openContextMenu: (node: TreeNode, x: number, y: number) => void;
   closeContextMenu: () => void;
   startRename: (connId: string, path: string) => void;
   cancelRename: () => void;
   openNewEntry: (connId: string, parent: string, isDir: boolean) => void;
   closeNewEntry: () => void;
-  openConfirmDelete: (node: TreeNode) => void;
+  openConfirmDelete: (nodes: TreeNode[]) => void;
   closeConfirmDelete: () => void;
   applyRename: (connId: string, oldPath: string, newPath: string) => void;
   applyDelete: (connId: string, path: string) => void;
@@ -281,6 +289,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   closeConfirm: null,
 
   selected: null,
+  selection: [],
   contextMenu: null,
   renaming: null,
   newEntry: null,
@@ -531,9 +540,35 @@ export const useAppStore = create<AppState>()((set, get) => ({
   clearConflict: () => set({ conflict: null }),
   clearCloseConfirm: () => set({ closeConfirm: null }),
 
-  setSelected: (selected) => set({ selected }),
+  setSelected: (selected) =>
+    set({ selected, selection: selected ? [selected] : [] }),
+  toggleSelected: (node) =>
+    set((s) => {
+      const sameConn = s.selection.length === 0 || s.selection[0].connId === node.connId;
+      if (!sameConn) return { selected: node, selection: [node] };
+      const has = s.selection.some(
+        (n) => n.connId === node.connId && n.path === node.path,
+      );
+      const selection = has
+        ? s.selection.filter(
+            (n) => !(n.connId === node.connId && n.path === node.path),
+          )
+        : [...s.selection, node];
+      return { selection, selected: node };
+    }),
+  setSelection: (selection, selected) => set({ selection, selected }),
   openContextMenu: (node, x, y) =>
-    set({ selected: node, contextMenu: { ...node, x, y } }),
+    set((s) => ({
+      // Keep a multi-selection if the right-clicked node is part of it;
+      // otherwise the click selects just that node.
+      selection: s.selection.some(
+        (n) => n.connId === node.connId && n.path === node.path,
+      )
+        ? s.selection
+        : [node],
+      selected: node,
+      contextMenu: { ...node, x, y },
+    })),
   closeContextMenu: () => set({ contextMenu: null }),
   startRename: (connId, path) =>
     set({ renaming: { connId, path }, contextMenu: null }),
@@ -541,7 +576,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   openNewEntry: (connId, parent, isDir) =>
     set({ newEntry: { connId, parent, isDir }, contextMenu: null }),
   closeNewEntry: () => set({ newEntry: null }),
-  openConfirmDelete: (node) => set({ confirmDelete: node, contextMenu: null }),
+  openConfirmDelete: (confirmDelete) => set({ confirmDelete, contextMenu: null }),
   closeConfirmDelete: () => set({ confirmDelete: null }),
   applyRename: (connId, oldPath, newPath) =>
     set((s) => ({

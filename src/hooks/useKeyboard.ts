@@ -49,12 +49,18 @@ export function useKeyboard() {
             event.preventDefault();
           }
           break;
-        case "deleteSelected":
-          if (!inEditable && store.selected) {
-            store.openConfirmDelete(store.selected);
+        case "deleteSelected": {
+          const targets = store.selection.length
+            ? store.selection
+            : store.selected
+              ? [store.selected]
+              : [];
+          if (!inEditable && targets.length) {
+            store.openConfirmDelete(targets);
             event.preventDefault();
           }
           break;
+        }
         case "toggleTerminal":
           if (store.remote || store.localConnId) {
             // VS Code-style: reveal+focus when hidden, focus when visible but

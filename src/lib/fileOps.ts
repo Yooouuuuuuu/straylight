@@ -63,6 +63,26 @@ export async function deleteEntry(connId: string, path: string): Promise<void> {
   }
 }
 
+/** Delete several entries, refreshing each affected connection once at the end. */
+export async function deleteEntries(
+  nodes: { connId: string; path: string; name: string }[],
+): Promise<void> {
+  const store = useAppStore.getState();
+  store.closeConfirmDelete();
+  const conns = new Set<string>();
+  for (const n of nodes) {
+    try {
+      await fsRemove(n.connId, n.path);
+      store.applyDelete(n.connId, n.path);
+      conns.add(n.connId);
+    } catch (error) {
+      store.pushNotice("error", `Couldn't delete ${n.name}: ${String(error)}`);
+    }
+  }
+  store.setSelected(null); // the deleted items are gone — drop the selection
+  conns.forEach((c) => store.refreshConn(c));
+}
+
 export async function copyPath(path: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(path);

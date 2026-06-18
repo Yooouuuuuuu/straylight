@@ -19,7 +19,7 @@ function tooltip(entry: FileEntry): string {
   return parts.join("   ");
 }
 
-function RenameInput({
+export function RenameInput({
   initial,
   onCommit,
   onCancel,
@@ -92,7 +92,7 @@ export function FileNode({
   renaming: boolean;
   onToggle: () => void;
   onOpen: () => void;
-  onSelect: () => void;
+  onSelect: (mods: { ctrl: boolean; shift: boolean }) => void;
   onContextMenu: (x: number, y: number) => void;
   onCommitRename: (name: string) => void;
   onCancelRename: () => void;
@@ -105,10 +105,12 @@ export function FileNode({
   }, [active]);
 
   // Single click selects (and toggles a folder); a file opens only on
-  // double-click (or Enter / →), so clicking to set the nav cursor is cheap.
-  const handleClick = () => {
-    onSelect();
-    if (entry.isDir) onToggle();
+  // double-click (or Enter / →). Ctrl/Shift click multi-selects without toggling.
+  const handleClick = (e: React.MouseEvent) => {
+    const ctrl = e.ctrlKey || e.metaKey;
+    const shift = e.shiftKey;
+    onSelect({ ctrl, shift });
+    if (!ctrl && !shift && entry.isDir) onToggle();
   };
   const handleDoubleClick = () => {
     if (!entry.isDir) onOpen();

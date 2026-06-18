@@ -15,6 +15,7 @@ import { fsListDir, type FileEntry } from "../../lib/ipc";
 import { openRemoteFile } from "../../lib/openFile";
 import {
   registerTreeRoot,
+  selectionRange,
   unregisterTreeRoot,
   updateTreeRows,
   type TreeRow,
@@ -60,8 +61,11 @@ export function RootTree({
   order: number;
 }) {
   const selected = useAppStore((s) => s.selected);
+  const selection = useAppStore((s) => s.selection);
   const renaming = useAppStore((s) => s.renaming);
   const setSelected = useAppStore((s) => s.setSelected);
+  const toggleSelected = useAppStore((s) => s.toggleSelected);
+  const setSelection = useAppStore((s) => s.setSelection);
   const openContextMenu = useAppStore((s) => s.openContextMenu);
   const cancelRename = useAppStore((s) => s.cancelRename);
   const markRefreshed = useAppStore((s) => s.markRefreshed);
@@ -237,20 +241,37 @@ export function RootTree({
           depth={depth}
           expanded={isExpanded}
           loading={dirs[entry.path]?.loading ?? false}
-          active={selected?.connId === connId && selected?.path === entry.path}
+          active={selection.some(
+            (n) => n.connId === connId && n.path === entry.path,
+          )}
           renaming={
             renaming?.connId === connId && renaming?.path === entry.path
           }
           onToggle={() => toggleDir(entry.path)}
           onOpen={() => void openRemoteFile(connId, entry)}
-          onSelect={() =>
-            setSelected({
+          onSelect={(mods) => {
+            const node = {
               connId,
               path: entry.path,
               name: entry.name,
               isDir: entry.isDir,
-            })
-          }
+            };
+            if (mods.shift) {
+              const anchor = selected?.connId === connId ? selected.path : null;
+              const range = selectionRange(connId, anchor, entry.path).map((r) => ({
+                connId: r.connId,
+                path: r.path,
+                name: r.name,
+                isDir: r.isDir,
+              }));
+              if (range.length) setSelection(range, node);
+              else setSelected(node);
+            } else if (mods.ctrl) {
+              toggleSelected(node);
+            } else {
+              setSelected(node);
+            }
+          }}
           onContextMenu={(x, y) =>
             openContextMenu(
               {

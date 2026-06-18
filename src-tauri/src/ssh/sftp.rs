@@ -13,6 +13,7 @@ use crate::ssh::connection::Connection;
 use crate::transport::{
     copy_variant, join_path, looks_binary, mode_to_rwx, posix_basename, sort_entries, DirListing,
     FileContent, FileEntry, FileStat, FileTransport, WriteResult, BINARY_SNIFF, MAX_READ_BYTES,
+    MAX_TRANSFER_BYTES,
 };
 
 /// A [`FileTransport`] backed by an SSH connection's SFTP subsystem.
@@ -280,6 +281,48 @@ impl FileTransport for SftpTransport {
         }
         copy_recursive(sftp, path.to_string(), dest.clone()).await?;
         Ok(dest)
+    }
+
+    async fn read_bytes(&self, path: &str) -> Result<Vec<u8>, String> {
+        let guard = self.0.sftp().await?;
+        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let meta = sftp
+            .metadata(path.to_string())
+            .await
+            .map_err(|e| format!("could not stat {path}: {e}"))?;
+        if meta.size.unwrap_or(0) > MAX_TRANSFER_BYTES {
+            return Err(format!(
+                "{path} is too large to transfer yet (streaming is coming)"
+            ));
+        }
+        let mut file = sftp
+            .open(path.to_string())
+            .await
+            .map_err(|e| format!("could not open {path}: {e}"))?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)
+            .await
+            .map_err(|e| format!("could not read {path}: {e}"))?;
+        Ok(buf)
+    }
+
+    async fn write_bytes(&self, path: &str, bytes: &[u8]) -> Result<(), String> {
+        let guard = self.0.sftp().await?;
+        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let mut file = sftp
+            .create(path.to_string())
+            .await
+            .map_err(|e| format!("could not create {path}: {e}"))?;
+        file.write_all(bytes)
+            .await
+            .map_err(|e| format!("could not write {path}: {e}"))?;
+        file.flush().await.ok();
+        file.shutdown().await.ok();
+        Ok(())
+    }
+
+    fn join(&self, parent: &str, name: &str) -> String {
+        join_path(parent, name)
     }
 }
 

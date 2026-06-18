@@ -98,6 +98,8 @@ pub fn run() {
             transport::fs_remove,
             transport::fs_move,
             transport::fs_copy,
+            transport::fs_transfer,
+            transport::fs_transfer_check,
             ssh::pty::pty_open,
             ssh::pty::pty_write,
             ssh::pty::pty_resize,

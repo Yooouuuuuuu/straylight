@@ -8,6 +8,9 @@
 
 pub mod local;
 
+use std::future::Future;
+use std::pin::Pin;
+
 use serde::Serialize;
 use tauri::State;
 
@@ -15,6 +18,9 @@ use crate::AppState;
 
 /// Hard cap on how much of a single file we read into memory.
 pub const MAX_READ_BYTES: u64 = 50 * 1024 * 1024;
+/// Cap on a single file copied in one in-memory cross-connection transfer.
+/// (Streaming, which removes this, is the first follow-up — see docs/drag-drop.md.)
+pub const MAX_TRANSFER_BYTES: u64 = 512 * 1024 * 1024;
 /// How many leading bytes to inspect for NUL bytes when sniffing for binary.
 pub const BINARY_SNIFF: usize = 8192;
 
@@ -121,6 +127,17 @@ pub trait FileTransport: Send + Sync {
     /// Copy `path` into `dest_dir` (recursively for directories), auto-renaming
     /// (`name copy`, `name copy 2`, …) on a name collision. Returns the new path.
     async fn copy_to(&self, path: &str, dest_dir: &str) -> Result<String, String>;
+
+    /// Read a file's raw bytes (no text decoding), for cross-connection
+    /// transfers. Errors if the file exceeds [`MAX_TRANSFER_BYTES`].
+    async fn read_bytes(&self, path: &str) -> Result<Vec<u8>, String>;
+
+    /// Write raw bytes to `path`, creating or truncating it.
+    async fn write_bytes(&self, path: &str, bytes: &[u8]) -> Result<(), String>;
+
+    /// Join a parent directory with a child name in this transport's path style
+    /// (POSIX for SFTP, the OS separator for local).
+    fn join(&self, parent: &str, name: &str) -> String;
 }
 
 /// Convert the low 9 permission bits of a Unix mode into `rwxr-xr-x`.
@@ -166,6 +183,16 @@ pub fn copy_variant(name: &str, n: usize) -> String {
         format!("{stem} copy{ext}")
     } else {
         format!("{stem} copy {n}{ext}")
+    }
+}
+
+/// Basename tolerant of either separator — the source path of a transfer may be
+/// POSIX (SFTP/WSL) or Windows (local) depending on the source transport.
+pub fn any_basename(path: &str) -> &str {
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    match trimmed.rsplit(['/', '\\']).next() {
+        Some(name) if !name.is_empty() => name,
+        _ => trimmed,
     }
 }
 
@@ -300,6 +327,86 @@ pub async fn fs_copy(
         .await
 }
 
+/// Copy an entry from one connection into a directory on another (the relay
+/// behind cross-connection transfers). Copy-only — never moves. `rename_on_conflict`
+/// resolves a top-level name clash by appending "copy"; otherwise it overwrites a
+/// file / merges into an existing folder. Returns the new destination path.
+#[tauri::command]
+pub async fn fs_transfer(
+    state: State<'_, AppState>,
+    src_conn_id: String,
+    src_path: String,
+    dest_conn_id: String,
+    dest_dir: String,
+    rename_on_conflict: bool,
+) -> Result<String, String> {
+    let src = state.transport(&src_conn_id).await?;
+    let dest = state.transport(&dest_conn_id).await?;
+    transfer_entry(
+        src.as_ref(),
+        &src_path,
+        dest.as_ref(),
+        &dest_dir,
+        rename_on_conflict,
+        true,
+    )
+    .await
+}
+
+/// Whether transferring `src_path` into `dest_dir` on `dest_conn` would collide
+/// with an existing top-level entry — so the UI can prompt before overwriting.
+#[tauri::command]
+pub async fn fs_transfer_check(
+    state: State<'_, AppState>,
+    src_path: String,
+    dest_conn_id: String,
+    dest_dir: String,
+) -> Result<bool, String> {
+    let dest = state.transport(&dest_conn_id).await?;
+    let dest_path = dest.join(&dest_dir, any_basename(&src_path));
+    Ok(dest.stat(&dest_path).await.is_ok())
+}
+
+fn transfer_entry<'a>(
+    src: &'a dyn FileTransport,
+    src_path: &'a str,
+    dest: &'a dyn FileTransport,
+    dest_dir: &'a str,
+    rename_on_conflict: bool,
+    top: bool,
+) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
+    Box::pin(async move {
+        let meta = src.stat(src_path).await?;
+        let base = any_basename(src_path);
+        let mut name = base.to_string();
+        let mut dest_path = dest.join(dest_dir, &name);
+        // Resolve a top-level collision; nested entries just overwrite/merge.
+        if top {
+            let mut n = 1;
+            while dest.stat(&dest_path).await.is_ok() {
+                if !rename_on_conflict {
+                    break;
+                }
+                name = copy_variant(base, n);
+                dest_path = dest.join(dest_dir, &name);
+                n += 1;
+            }
+        }
+        if meta.is_dir {
+            // Create (or reuse) the destination folder, then recurse.
+            let _ = dest.create_entry(dest_dir, &name, true).await;
+            let listing = src.list_dir(src_path).await?;
+            for entry in listing.entries {
+                transfer_entry(src, &entry.path, dest, &dest_path, false, false).await?;
+            }
+        } else {
+            let bytes = src.read_bytes(src_path).await?;
+            dest.write_bytes(&dest_path, &bytes).await?;
+        }
+        Ok(dest_path)
+    })
+}
+
 /// Open a local-filesystem session and return its connection id.
 #[tauri::command]
 pub async fn local_connect(state: State<'_, AppState>) -> Result<String, String> {
@@ -354,5 +461,13 @@ mod tests {
         assert_eq!(posix_basename("/home/me/file.txt"), "file.txt");
         assert_eq!(posix_basename("/home/me/dir/"), "dir");
         assert_eq!(posix_basename("solo"), "solo");
+    }
+
+    #[test]
+    fn any_basenames() {
+        assert_eq!(any_basename("/home/me/file.txt"), "file.txt");
+        assert_eq!(any_basename("C:\\foo\\bar.txt"), "bar.txt");
+        assert_eq!(any_basename("/home/me/dir/"), "dir");
+        assert_eq!(any_basename("solo"), "solo");
     }
 }

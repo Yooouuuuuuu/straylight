@@ -11,6 +11,7 @@ export function ContextMenu() {
   const startRename = useAppStore((s) => s.startRename);
   const openNewEntry = useAppStore((s) => s.openNewEntry);
   const openConfirmDelete = useAppStore((s) => s.openConfirmDelete);
+  const selection = useAppStore((s) => s.selection);
   const setClipboard = useAppStore((s) => s.setClipboard);
   const clipboard = useAppStore((s) => s.clipboard);
   const ref = useRef<HTMLDivElement>(null);
@@ -99,19 +100,27 @@ export function ContextMenu() {
       <div className="context-menu__sep" />
       <button
         className="context-menu__item"
+        disabled={selection.length > 1}
+        title={selection.length > 1 ? "Rename works on one item at a time" : undefined}
         onClick={() => startRename(menu.connId, menu.path)}
       >
         Rename<span className="context-menu__key">F2</span>
       </button>
       <button
         className="context-menu__item context-menu__item--danger"
-        onClick={() => openConfirmDelete(node)}
+        onClick={() => openConfirmDelete(selection.length ? selection : [node])}
       >
-        Delete<span className="context-menu__key">Del</span>
+        Delete
+        {selection.length > 1 && ` (${selection.length})`}
+        <span className="context-menu__key">Del</span>
       </button>
       <div className="context-menu__sep" />
       <button
         className="context-menu__item"
+        disabled={selection.length > 1}
+        title={
+          selection.length > 1 ? "Copy Path works on one item at a time" : undefined
+        }
         onClick={() => {
           closeContextMenu();
           void copyPath(menu.path);

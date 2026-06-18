@@ -64,6 +64,22 @@ function allRows(): TreeRow[] {
     .flatMap((e) => e.rows);
 }
 
+/** Visible rows of one connection between two paths (inclusive), in display
+ *  order — for Shift-click range selection. */
+export function selectionRange(
+  connId: string,
+  fromPath: string | null,
+  toPath: string,
+): TreeRow[] {
+  const rows = allRows().filter((r) => r.connId === connId);
+  const j = rows.findIndex((r) => r.path === toPath);
+  if (j < 0) return [];
+  const i = fromPath ? rows.findIndex((r) => r.path === fromPath) : -1;
+  if (i < 0) return [rows[j]];
+  const [lo, hi] = i <= j ? [i, j] : [j, i];
+  return rows.slice(lo, hi + 1);
+}
+
 const NAV_KEYS = [
   "ArrowUp",
   "ArrowDown",

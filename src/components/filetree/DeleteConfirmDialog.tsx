@@ -1,7 +1,7 @@
-/** Confirm before deleting a file or folder. */
+/** Confirm before deleting a file or folder (one or many). */
 import { useEffect } from "react";
 
-import { deleteEntry } from "../../lib/fileOps";
+import { deleteEntries } from "../../lib/fileOps";
 import { useAppStore } from "../../store/appStore";
 
 export function DeleteConfirmDialog() {
@@ -21,8 +21,9 @@ export function DeleteConfirmDialog() {
     return () => window.removeEventListener("keydown", onKey);
   }, [confirmDelete, closeConfirmDelete]);
 
-  if (!confirmDelete) return null;
-  const node = confirmDelete;
+  if (!confirmDelete || confirmDelete.length === 0) return null;
+  const items = confirmDelete;
+  const single = items.length === 1 ? items[0] : null;
 
   return (
     <div
@@ -39,13 +40,25 @@ export function DeleteConfirmDialog() {
       >
         <div className="modal__header">
           <span className="modal__title">
-            Delete {node.isDir ? "folder" : "file"}
+            {single
+              ? `Delete ${single.isDir ? "folder" : "file"}`
+              : `Delete ${items.length} items`}
           </span>
         </div>
         <div className="modal__body">
           <div className="conn-empty" style={{ textAlign: "left", padding: 0 }}>
-            Delete <strong className="mono">{node.name}</strong>
-            {node.isDir ? " and everything inside it" : ""}? This can’t be undone.
+            {single ? (
+              <>
+                Delete <strong className="mono">{single.name}</strong>
+                {single.isDir ? " and everything inside it" : ""}? This can’t be
+                undone.
+              </>
+            ) : (
+              <>
+                Delete these <strong>{items.length}</strong> items (and everything
+                inside any folders)? This can’t be undone.
+              </>
+            )}
           </div>
         </div>
         <div className="modal__footer">
@@ -59,7 +72,7 @@ export function DeleteConfirmDialog() {
               borderColor: "var(--red)",
               color: "#fff",
             }}
-            onClick={() => void deleteEntry(node.connId, node.path)}
+            onClick={() => void deleteEntries(items)}
           >
             Delete
           </button>

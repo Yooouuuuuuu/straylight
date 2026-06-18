@@ -1490,6 +1490,192 @@
   border-color: var(--border-focus);
 }
 
+/* ----------------------------------------------------------- Transfer panel */
+
+.transfer-modal {
+  width: min(1000px, 94vw);
+  height: min(640px, 88vh);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  position: relative;
+}
+
+.transfer-modal__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.transfer-modal__title {
+  font-weight: 600;
+  color: var(--fg-primary);
+}
+
+.transfer-modal__hint {
+  flex: 1 1 auto;
+  color: var(--fg-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.transfer-modal__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+}
+
+.transfer-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-primary);
+}
+
+.transfer-pane:focus,
+.transfer-pane:focus-visible {
+  outline: none;
+}
+
+.transfer-pane--drop {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.transfer-pane__head {
+  flex: 0 0 auto;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.transfer-pane__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-1) 0;
+}
+
+.transfer-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 24px;
+  padding-right: var(--space-3);
+  cursor: pointer;
+  user-select: none;
+}
+
+.transfer-row:hover {
+  background: var(--bg-tertiary);
+}
+
+.transfer-row--active {
+  background: var(--bg-selected);
+}
+
+.transfer-row--drop {
+  background: rgba(189, 147, 249, 0.22);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.transfer-twisty {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-secondary);
+  transition: transform 100ms ease;
+  flex: 0 0 auto;
+}
+
+.transfer-twisty--open {
+  transform: rotate(90deg);
+}
+
+.transfer-twisty--leaf {
+  visibility: hidden;
+}
+
+.transfer-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.transfer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-primary);
+  font-size: var(--font-size-sm);
+}
+
+.transfer-msg {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  color: var(--fg-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.transfer-modal__busy {
+  position: absolute;
+  bottom: var(--space-4);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--fg-primary);
+  font-size: var(--font-size-sm);
+}
+
+.transfer-conflict {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  background: rgba(13, 14, 20, 0.6);
+  backdrop-filter: blur(2px);
+}
+
+.transfer-conflict__text {
+  padding: var(--space-4) var(--space-5);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--fg-primary);
+  font-size: var(--font-size-sm);
+  max-width: 80%;
+  text-align: center;
+}
+
+.transfer-conflict__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
 /* ------------------------------------------------------------------ Spinner */
 
 .spinner {

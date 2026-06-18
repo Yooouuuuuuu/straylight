@@ -1,7 +1,7 @@
 /** Left sidebar: a multi-root explorer with a Local section (pinned folders) and
  *  a Remote section (the attached SSH host, or connect controls). Each section
  *  carries its own hidden-files toggle, refresh, and "last refreshed" stamp. */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 
 import { clipboardShortcut } from "../../lib/fileOps";
@@ -16,6 +16,7 @@ import { ConnectionManager } from "../connection/ConnectionManager";
 import { WslSection } from "../connection/WslSection";
 import { RelativeTime } from "../RelativeTime";
 import { RootTree } from "../filetree/RootTree";
+import { TransferPanel, type TransferConn } from "../transfer/TransferPanel";
 import {
   IconEye,
   IconEyeOff,
@@ -24,6 +25,7 @@ import {
   IconLogout,
   IconPlus,
   IconRefresh,
+  IconTransfer,
 } from "../icons";
 
 export function Sidebar() {
@@ -43,9 +45,34 @@ export function Sidebar() {
   const removePinnedFolder = useAppStore((s) => s.removePinnedFolder);
   const remote = useAppStore((s) => s.remote);
   const remoteRootPath = useAppStore((s) => s.remoteRootPath);
+  const wsl = useAppStore((s) => s.wsl);
+  const wslRootPath = useAppStore((s) => s.wslRootPath);
   const selected = useAppStore((s) => s.selected);
   const openNewEntry = useAppStore((s) => s.openNewEntry);
   const { disconnect } = useSSH();
+
+  // Transfer panel (drag between two connections). The three buttons in the
+  // Explorer header open it for whichever pairs are connected.
+  const [transfer, setTransfer] = useState<{
+    a: TransferConn;
+    b: TransferConn;
+  } | null>(null);
+  const localConn: TransferConn | null = localConnId
+    ? { connId: localConnId, rootPath: "", label: "Local", color: "#8be9fd" }
+    : null;
+  const remoteConn: TransferConn | null =
+    remote && remoteRootPath
+      ? {
+          connId: remote.connId,
+          rootPath: remoteRootPath,
+          label: remote.name,
+          color: remote.color,
+        }
+      : null;
+  const wslConn: TransferConn | null =
+    wsl && wslRootPath
+      ? { connId: wsl.connId, rootPath: wslRootPath, label: wsl.name, color: "#bd93f9" }
+      : null;
 
   async function openFolder() {
     const picked = await openFolderDialog({
@@ -97,9 +124,39 @@ export function Sidebar() {
   }, []);
 
   return (
+    <>
     <div className="sidebar">
       <div className="sidebar__header">
         <span className="sidebar__title">Explorer</span>
+        <div className="sidebar__actions">
+          {localConn && remoteConn && (
+            <button
+              className="icon-btn"
+              title={`Transfer: Local ⇄ ${remoteConn.label}`}
+              onClick={() => setTransfer({ a: localConn, b: remoteConn })}
+            >
+              <IconTransfer />
+            </button>
+          )}
+          {localConn && wslConn && (
+            <button
+              className="icon-btn"
+              title={`Transfer: Local ⇄ ${wslConn.label}`}
+              onClick={() => setTransfer({ a: localConn, b: wslConn })}
+            >
+              <IconTransfer />
+            </button>
+          )}
+          {wslConn && remoteConn && (
+            <button
+              className="icon-btn"
+              title={`Transfer: ${wslConn.label} ⇄ ${remoteConn.label}`}
+              onClick={() => setTransfer({ a: wslConn, b: remoteConn })}
+            >
+              <IconTransfer />
+            </button>
+          )}
+        </div>
       </div>
 
       <div
@@ -260,5 +317,13 @@ export function Sidebar() {
         <WslSection />
       </div>
     </div>
+    {transfer && (
+      <TransferPanel
+        a={transfer.a}
+        b={transfer.b}
+        onClose={() => setTransfer(null)}
+      />
+    )}
+    </>
   );
 }

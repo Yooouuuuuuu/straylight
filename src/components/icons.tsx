@@ -129,6 +129,20 @@ export function IconFolderPlus({ size = 16, className }: IconProps) {
   );
 }
 
+export function IconTransfer({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M3 5.5h8M8.5 3 11 5.5 8.5 8M13 10.5H5M7.5 8 5 10.5 7.5 13"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function IconClose({ size = 16, className }: IconProps) {
   return (
     <svg {...svgProps(size)} className={className}>
