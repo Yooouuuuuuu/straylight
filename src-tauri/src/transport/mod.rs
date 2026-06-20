@@ -10,17 +10,20 @@ pub mod local;
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::AppState;
 
 /// Hard cap on how much of a single file we read into memory.
 pub const MAX_READ_BYTES: u64 = 50 * 1024 * 1024;
-/// Cap on a single file copied in one in-memory cross-connection transfer.
-/// (Streaming, which removes this, is the first follow-up — see docs/drag-drop.md.)
-pub const MAX_TRANSFER_BYTES: u64 = 512 * 1024 * 1024;
+/// Buffer size for streaming cross-connection transfers (peak memory per file).
+const TRANSFER_CHUNK: usize = 256 * 1024;
 /// How many leading bytes to inspect for NUL bytes when sniffing for binary.
 pub const BINARY_SNIFF: usize = 8192;
 
@@ -128,12 +131,18 @@ pub trait FileTransport: Send + Sync {
     /// (`name copy`, `name copy 2`, …) on a name collision. Returns the new path.
     async fn copy_to(&self, path: &str, dest_dir: &str) -> Result<String, String>;
 
-    /// Read a file's raw bytes (no text decoding), for cross-connection
-    /// transfers. Errors if the file exceeds [`MAX_TRANSFER_BYTES`].
-    async fn read_bytes(&self, path: &str) -> Result<Vec<u8>, String>;
+    /// Open a file for streaming reads (cross-connection transfers).
+    async fn open_read(&self, path: &str)
+        -> Result<Pin<Box<dyn AsyncRead + Send>>, String>;
 
-    /// Write raw bytes to `path`, creating or truncating it.
-    async fn write_bytes(&self, path: &str, bytes: &[u8]) -> Result<(), String>;
+    /// Open `path` for streaming writes, creating it or truncating an existing one.
+    async fn open_write(&self, path: &str)
+        -> Result<Pin<Box<dyn AsyncWrite + Send>>, String>;
+
+    /// Full metadata for a single path as a [`FileEntry`] — an lstat that detects
+    /// a symlink and reports its target rather than silently following it (for the
+    /// Properties dialog's single-item detail).
+    async fn entry_meta(&self, path: &str) -> Result<FileEntry, String>;
 
     /// Join a parent directory with a child name in this transport's path style
     /// (POSIX for SFTP, the OS separator for local).
@@ -327,30 +336,269 @@ pub async fn fs_copy(
         .await
 }
 
-/// Copy an entry from one connection into a directory on another (the relay
-/// behind cross-connection transfers). Copy-only — never moves. `rename_on_conflict`
-/// resolves a top-level name clash by appending "copy"; otherwise it overwrites a
-/// file / merges into an existing folder. Returns the new destination path.
+/// Progress emitted to the frontend during a batch transfer (event
+/// `transfer-progress`, throttled to ~100 ms plus one per file boundary).
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TransferProgress {
+    id: String,
+    done_bytes: u64,
+    total_bytes: u64,
+    done_files: usize,
+    total_files: usize,
+    current: String,
+}
+
+/// What a finished (or cancelled) batch transfer copied.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferOutcome {
+    files: usize,
+    bytes: u64,
+    cancelled: bool,
+}
+
+/// Shared progress + cancellation state threaded (by `&`) through the copy
+/// recursion. Interior-mutable so the hot path doesn't lock beyond a throttle
+/// timestamp.
+struct Progress {
+    app: AppHandle,
+    id: String,
+    cancel: Arc<AtomicBool>,
+    total_bytes: u64,
+    total_files: usize,
+    done_bytes: AtomicU64,
+    done_files: AtomicUsize,
+    last_emit: std::sync::Mutex<Instant>,
+}
+
+impl Progress {
+    fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+
+    fn add_bytes(&self, n: u64, current: &str) {
+        self.done_bytes.fetch_add(n, Ordering::Relaxed);
+        self.emit(current, false);
+    }
+
+    fn file_done(&self, current: &str) {
+        self.done_files.fetch_add(1, Ordering::Relaxed);
+        self.emit(current, true);
+    }
+
+    /// Emit a progress event, throttled to ~100 ms unless `force` (a file
+    /// boundary, or the initial/final frame).
+    fn emit(&self, current: &str, force: bool) {
+        {
+            let mut last = self.last_emit.lock().unwrap();
+            let now = Instant::now();
+            if !force && now.duration_since(*last) < Duration::from_millis(100) {
+                return;
+            }
+            *last = now;
+        }
+        let _ = self.app.emit(
+            "transfer-progress",
+            TransferProgress {
+                id: self.id.clone(),
+                done_bytes: self.done_bytes.load(Ordering::Relaxed),
+                total_bytes: self.total_bytes,
+                done_files: self.done_files.load(Ordering::Relaxed),
+                total_files: self.total_files,
+                current: current.to_string(),
+            },
+        );
+    }
+}
+
+/// Recursively total the bytes and file count under `path`, for the progress bar.
+fn measure<'a>(
+    src: &'a dyn FileTransport,
+    path: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<(u64, usize), String>> + Send + 'a>> {
+    Box::pin(async move {
+        let meta = src.stat(path).await?;
+        if !meta.is_dir {
+            return Ok((meta.size, 1));
+        }
+        let mut bytes = 0u64;
+        let mut files = 0usize;
+        for entry in src.list_dir(path).await?.entries {
+            let (b, f) = measure(src, &entry.path).await?;
+            bytes += b;
+            files += f;
+        }
+        Ok((bytes, files))
+    })
+}
+
+/// Copy a batch of entries from one connection into a directory on another,
+/// streaming each file and emitting `transfer-progress`. Copy-only — never moves.
+/// `rename_on_conflict` resolves a top-level name clash by appending "copy";
+/// otherwise it overwrites a file / merges into an existing folder.
 #[tauri::command]
-pub async fn fs_transfer(
+pub async fn fs_transfer_batch(
+    app: AppHandle,
     state: State<'_, AppState>,
+    transfer_id: String,
     src_conn_id: String,
-    src_path: String,
+    src_paths: Vec<String>,
     dest_conn_id: String,
     dest_dir: String,
     rename_on_conflict: bool,
-) -> Result<String, String> {
+) -> Result<TransferOutcome, String> {
     let src = state.transport(&src_conn_id).await?;
     let dest = state.transport(&dest_conn_id).await?;
-    transfer_entry(
+
+    // Register a cancellation flag the UI can trip via `fs_transfer_cancel`.
+    let cancel = Arc::new(AtomicBool::new(false));
+    state
+        .transfers
+        .lock()
+        .await
+        .insert(transfer_id.clone(), cancel.clone());
+
+    let result = run_transfer(
+        &app,
+        &transfer_id,
+        cancel,
         src.as_ref(),
-        &src_path,
+        &src_paths,
         dest.as_ref(),
         &dest_dir,
         rename_on_conflict,
-        true,
     )
-    .await
+    .await;
+
+    state.transfers.lock().await.remove(&transfer_id);
+    result
+}
+
+/// Trip a transfer's cancellation flag; the copy loop stops at the next chunk.
+#[tauri::command]
+pub async fn fs_transfer_cancel(
+    state: State<'_, AppState>,
+    transfer_id: String,
+) -> Result<(), String> {
+    if let Some(flag) = state.transfers.lock().await.get(&transfer_id) {
+        flag.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_transfer(
+    app: &AppHandle,
+    id: &str,
+    cancel: Arc<AtomicBool>,
+    src: &dyn FileTransport,
+    src_paths: &[String],
+    dest: &dyn FileTransport,
+    dest_dir: &str,
+    rename_on_conflict: bool,
+) -> Result<TransferOutcome, String> {
+    let mut total_bytes = 0u64;
+    let mut total_files = 0usize;
+    for p in src_paths {
+        let (b, f) = measure(src, p).await?;
+        total_bytes += b;
+        total_files += f;
+    }
+
+    let prog = Progress {
+        app: app.clone(),
+        id: id.to_string(),
+        cancel,
+        total_bytes,
+        total_files,
+        done_bytes: AtomicU64::new(0),
+        done_files: AtomicUsize::new(0),
+        last_emit: std::sync::Mutex::new(Instant::now()),
+    };
+    prog.emit("", true); // 0% up front so the bar appears immediately
+
+    for p in src_paths {
+        if prog.cancelled() {
+            break;
+        }
+        transfer_entry(src, p, dest, dest_dir, rename_on_conflict, true, &prog).await?;
+    }
+
+    let cancelled = prog.cancelled();
+    prog.emit("", true); // final frame
+    Ok(TransferOutcome {
+        files: prog.done_files.load(Ordering::Relaxed),
+        bytes: prog.done_bytes.load(Ordering::Relaxed),
+        cancelled,
+    })
+}
+
+/// Aggregate size + counts for the Properties dialog (recursive over a selection).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PropertiesInfo {
+    files: usize,
+    folders: usize,
+    bytes: u64,
+}
+
+/// Full metadata for one path — for the Properties dialog's single-item detail.
+#[tauri::command]
+pub async fn fs_entry_meta(
+    state: State<'_, AppState>,
+    conn_id: String,
+    path: String,
+) -> Result<FileEntry, String> {
+    state.transport(&conn_id).await?.entry_meta(&path).await
+}
+
+/// Recursively total files, folders, and bytes under `paths` (for Properties).
+/// A directory's contents are counted; symlinks count as files and aren't
+/// followed (so symlink cycles can't loop).
+#[tauri::command]
+pub async fn fs_measure(
+    state: State<'_, AppState>,
+    conn_id: String,
+    paths: Vec<String>,
+) -> Result<PropertiesInfo, String> {
+    let t = state.transport(&conn_id).await?;
+    let (mut files, mut folders, mut bytes) = (0usize, 0usize, 0u64);
+    for p in &paths {
+        let (f, d, b) = measure_props(t.as_ref(), p).await?;
+        files += f;
+        folders += d;
+        bytes += b;
+    }
+    Ok(PropertiesInfo { files, folders, bytes })
+}
+
+/// `(files, folders, bytes)` for `path`: a file is `(1, 0, size)`; a directory is
+/// its recursive contents (the directory itself is not counted).
+fn measure_props<'a>(
+    src: &'a dyn FileTransport,
+    path: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<(usize, usize, u64), String>> + Send + 'a>> {
+    Box::pin(async move {
+        let meta = src.stat(path).await?;
+        if !meta.is_dir {
+            return Ok((1, 0, meta.size));
+        }
+        let (mut files, mut folders, mut bytes) = (0usize, 0usize, 0u64);
+        for entry in src.list_dir(path).await?.entries {
+            if entry.is_dir && !entry.is_symlink {
+                folders += 1;
+                let (f, d, b) = measure_props(src, &entry.path).await?;
+                files += f;
+                folders += d;
+                bytes += b;
+            } else {
+                files += 1;
+                bytes += entry.size;
+            }
+        }
+        Ok((files, folders, bytes))
+    })
 }
 
 /// Whether transferring `src_path` into `dest_dir` on `dest_conn` would collide
@@ -374,8 +622,12 @@ fn transfer_entry<'a>(
     dest_dir: &'a str,
     rename_on_conflict: bool,
     top: bool,
-) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
+    prog: &'a Progress,
+) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
     Box::pin(async move {
+        if prog.cancelled() {
+            return Ok(());
+        }
         let meta = src.stat(src_path).await?;
         let base = any_basename(src_path);
         let mut name = base.to_string();
@@ -395,16 +647,71 @@ fn transfer_entry<'a>(
         if meta.is_dir {
             // Create (or reuse) the destination folder, then recurse.
             let _ = dest.create_entry(dest_dir, &name, true).await;
-            let listing = src.list_dir(src_path).await?;
-            for entry in listing.entries {
-                transfer_entry(src, &entry.path, dest, &dest_path, false, false).await?;
+            for entry in src.list_dir(src_path).await?.entries {
+                if prog.cancelled() {
+                    break;
+                }
+                transfer_entry(src, &entry.path, dest, &dest_path, false, false, prog).await?;
             }
         } else {
-            let bytes = src.read_bytes(src_path).await?;
-            dest.write_bytes(&dest_path, &bytes).await?;
+            stream_file(src, src_path, dest, &dest_path, &name, prog).await?;
         }
-        Ok(dest_path)
+        Ok(())
     })
+}
+
+/// Stream one file from `src` to `dest`, updating `prog`. On cancellation or an
+/// error mid-stream, the partial destination file is best-effort deleted so we
+/// never leave a silently truncated copy.
+async fn stream_file(
+    src: &dyn FileTransport,
+    src_path: &str,
+    dest: &dyn FileTransport,
+    dest_path: &str,
+    name: &str,
+    prog: &Progress,
+) -> Result<(), String> {
+    let mut reader = src.open_read(src_path).await?;
+    let mut writer = dest.open_write(dest_path).await?;
+    let mut buf = vec![0u8; TRANSFER_CHUNK];
+
+    let mut error: Option<String> = None;
+    let mut completed = true;
+    loop {
+        if prog.cancelled() {
+            completed = false;
+            break;
+        }
+        let n = match reader.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) => {
+                error = Some(format!("could not read {src_path}: {e}"));
+                completed = false;
+                break;
+            }
+        };
+        if let Err(e) = writer.write_all(&buf[..n]).await {
+            error = Some(format!("could not write {dest_path}: {e}"));
+            completed = false;
+            break;
+        }
+        prog.add_bytes(n as u64, name);
+    }
+
+    if completed {
+        writer.flush().await.ok();
+        writer.shutdown().await.ok();
+        prog.file_done(name);
+        Ok(())
+    } else {
+        drop(writer);
+        let _ = dest.remove(dest_path).await;
+        match error {
+            Some(e) => Err(e),
+            None => Ok(()), // cancelled — not an error
+        }
+    }
 }
 
 /// Open a local-filesystem session and return its connection id.

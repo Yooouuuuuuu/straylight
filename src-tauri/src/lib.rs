@@ -9,6 +9,7 @@ pub mod transport;
 pub mod wsl;
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
@@ -32,6 +33,8 @@ pub struct AppState {
     pub sessions: Mutex<HashMap<String, Session>>,
     /// Open PTY/terminal sessions, keyed by the id from [`ssh::pty::pty_open`].
     pub ptys: Mutex<HashMap<String, PtyHandle>>,
+    /// Cancellation flags for in-flight transfers, keyed by transfer id.
+    pub transfers: Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
 
 impl AppState {
@@ -39,6 +42,7 @@ impl AppState {
         Self {
             sessions: Mutex::new(HashMap::new()),
             ptys: Mutex::new(HashMap::new()),
+            transfers: Mutex::new(HashMap::new()),
         }
     }
 
@@ -97,8 +101,11 @@ pub fn run() {
             transport::fs_remove,
             transport::fs_move,
             transport::fs_copy,
-            transport::fs_transfer,
+            transport::fs_transfer_batch,
+            transport::fs_transfer_cancel,
             transport::fs_transfer_check,
+            transport::fs_entry_meta,
+            transport::fs_measure,
             ssh::pty::pty_open,
             ssh::pty::pty_write,
             ssh::pty::pty_resize,

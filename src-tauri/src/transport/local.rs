@@ -4,11 +4,11 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
 use crate::transport::{
-    copy_variant, looks_binary, sort_entries, DirListing, FileContent, FileEntry, FileStat,
-    FileTransport, WriteResult, BINARY_SNIFF, MAX_READ_BYTES, MAX_TRANSFER_BYTES,
+    any_basename, copy_variant, looks_binary, sort_entries, DirListing, FileContent, FileEntry,
+    FileStat, FileTransport, WriteResult, BINARY_SNIFF, MAX_READ_BYTES,
 };
 
 pub struct LocalTransport;
@@ -305,24 +305,61 @@ impl FileTransport for LocalTransport {
         Ok(dest.to_string_lossy().into_owned())
     }
 
-    async fn read_bytes(&self, path: &str) -> Result<Vec<u8>, String> {
-        let meta = tokio::fs::metadata(path)
+    async fn open_read(&self, path: &str) -> Result<Pin<Box<dyn AsyncRead + Send>>, String> {
+        let file = tokio::fs::File::open(path)
             .await
-            .map_err(|e| format!("could not stat {path}: {e}"))?;
-        if meta.len() > MAX_TRANSFER_BYTES {
-            return Err(format!(
-                "{path} is too large to transfer yet (streaming is coming)"
-            ));
-        }
-        tokio::fs::read(path)
-            .await
-            .map_err(|e| format!("could not read {path}: {e}"))
+            .map_err(|e| format!("could not open {path}: {e}"))?;
+        Ok(Box::pin(file))
     }
 
-    async fn write_bytes(&self, path: &str, bytes: &[u8]) -> Result<(), String> {
-        tokio::fs::write(path, bytes)
+    async fn open_write(&self, path: &str) -> Result<Pin<Box<dyn AsyncWrite + Send>>, String> {
+        let file = tokio::fs::File::create(path)
             .await
-            .map_err(|e| format!("could not write {path}: {e}"))
+            .map_err(|e| format!("could not create {path}: {e}"))?;
+        Ok(Box::pin(file))
+    }
+
+    async fn entry_meta(&self, path: &str) -> Result<FileEntry, String> {
+        let link = tokio::fs::symlink_metadata(path)
+            .await
+            .map_err(|e| format!("could not stat {path}: {e}"))?;
+        let is_symlink = link.file_type().is_symlink();
+        let (is_dir, size, symlink_target, modified, permissions) = if is_symlink {
+            let target = tokio::fs::read_link(path)
+                .await
+                .ok()
+                .map(|p| p.to_string_lossy().into_owned());
+            match tokio::fs::metadata(path).await {
+                Ok(m) => (m.is_dir(), m.len(), target, mtime_secs(&m), perms_string(&m)),
+                Err(_) => (
+                    false,
+                    link.len(),
+                    target,
+                    mtime_secs(&link),
+                    perms_string(&link),
+                ),
+            }
+        } else {
+            (
+                link.is_dir(),
+                link.len(),
+                None,
+                mtime_secs(&link),
+                perms_string(&link),
+            )
+        };
+        Ok(FileEntry {
+            name: any_basename(path).to_string(),
+            path: path.to_string(),
+            size,
+            is_dir,
+            is_symlink,
+            symlink_target,
+            permissions,
+            owner: String::new(),
+            group: String::new(),
+            modified,
+        })
     }
 
     fn join(&self, parent: &str, name: &str) -> String {

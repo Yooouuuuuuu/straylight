@@ -61,6 +61,7 @@ export function TransferPane({
   const renaming = useAppStore((s) => s.renaming);
   const openNewEntry = useAppStore((s) => s.openNewEntry);
   const openConfirmDelete = useAppStore((s) => s.openConfirmDelete);
+  const openProperties = useAppStore((s) => s.openProperties);
   const startRename = useAppStore((s) => s.startRename);
   const cancelRename = useAppStore((s) => s.cancelRename);
   const refreshToken = useAppStore((s) =>
@@ -656,6 +657,26 @@ export function TransferPane({
                 }}
               >
                 Copy Path
+              </button>
+              <div className="context-menu__sep" />
+              <button
+                className="context-menu__item"
+                onClick={() => {
+                  const e = menu.entry!;
+                  setMenu(null);
+                  openProperties(
+                    selection.length
+                      ? selection.map((s) => ({
+                          connId,
+                          path: s.path,
+                          name: s.name,
+                          isDir: s.isDir,
+                        }))
+                      : [{ connId, path: e.path, name: e.name, isDir: e.isDir }],
+                  );
+                }}
+              >
+                Properties{multi ? ` (${selection.length})` : ""}
               </button>
             </>
           ) : (

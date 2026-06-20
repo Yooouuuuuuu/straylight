@@ -216,23 +216,73 @@ export function fsCopy(
   return invoke("fs_copy", { connId, path, destDir });
 }
 
-/** Copy an entry from one connection into a directory on another (copy-only).
- *  `renameOnConflict` resolves a top-level name clash by appending "copy",
- *  otherwise it overwrites a file / merges into an existing folder. */
-export function fsTransfer(
+/** Live progress for a batch transfer (the `transfer-progress` event). */
+export interface TransferProgress {
+  id: string;
+  doneBytes: number;
+  totalBytes: number;
+  doneFiles: number;
+  totalFiles: number;
+  current: string;
+}
+
+/** What a finished (or cancelled) transfer copied. */
+export interface TransferOutcome {
+  files: number;
+  bytes: number;
+  cancelled: boolean;
+}
+
+/** Stream a batch of entries from one connection into a directory on another
+ *  (copy-only), emitting `transfer-progress`. `renameOnConflict` resolves a
+ *  top-level name clash by appending "copy", otherwise it overwrites a file /
+ *  merges into an existing folder. `transferId` keys progress + cancellation. */
+export function fsTransferBatch(
+  transferId: string,
   srcConnId: string,
-  srcPath: string,
+  srcPaths: string[],
   destConnId: string,
   destDir: string,
   renameOnConflict: boolean,
-): Promise<string> {
-  return invoke("fs_transfer", {
+): Promise<TransferOutcome> {
+  return invoke("fs_transfer_batch", {
+    transferId,
     srcConnId,
-    srcPath,
+    srcPaths,
     destConnId,
     destDir,
     renameOnConflict,
   });
+}
+
+/** Ask a running transfer to stop (it halts at the next chunk). */
+export function fsTransferCancel(transferId: string): Promise<void> {
+  return invoke("fs_transfer_cancel", { transferId });
+}
+
+/** Aggregate size + counts for the Properties dialog (recursive). */
+export interface PropertiesInfo {
+  files: number;
+  folders: number;
+  bytes: number;
+}
+
+/** Full metadata for a single path (Properties single-item detail). */
+export function fsEntryMeta(connId: string, path: string): Promise<FileEntry> {
+  return invoke("fs_entry_meta", { connId, path });
+}
+
+/** Recursively total files, folders, and bytes under `paths` (for Properties). */
+export function fsMeasure(connId: string, paths: string[]): Promise<PropertiesInfo> {
+  return invoke("fs_measure", { connId, paths });
+}
+
+export function onTransferProgress(
+  handler: (progress: TransferProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<TransferProgress>("transfer-progress", (event) =>
+    handler(event.payload),
+  );
 }
 
 /** Whether a transfer of `srcPath` into `destDir` on `destConnId` would collide

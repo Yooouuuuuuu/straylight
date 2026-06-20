@@ -15,10 +15,11 @@ under "Active roadmap."
   (`user@host:port` / distro name) across reconnect and relaunch. (The transfer
   tab is intentionally independent of the explorer's expansion state, rather than
   shared, per the final UX.)
-- **0.7.2 — Streaming transfers ⚠️ (important).** Transfers currently read each
-  file fully into memory with a **512 MB cap** (`MAX_TRANSFER_BYTES`); large files
-  are rejected. Replace with a chunked stream across transports to lift the cap.
-  This one can fail real transfers, so it's prioritized, not backlog.
+- **0.7.2 — Streaming transfers ⚠️. _Done._** Cross-connection transfers stream a
+  256 KB buffer (the 512 MB cap is gone) with a global live progress bar (shown in
+  the status bar too) + Cancel; partial files are cleaned up on failure/cancel.
+  Shipped alongside a **Properties** right-click dialog. Design:
+  [streaming-transfers.md](streaming-transfers.md).
 
 ## Non-priority backlog
 

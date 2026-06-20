@@ -3,6 +3,7 @@
 import { useAppStore } from "../../store/appStore";
 import { useSSH } from "../../hooks/useSSH";
 import type { ConnectionState } from "../../lib/ipc";
+import { TransferProgressBar } from "../transfer/TransferProgressBar";
 
 const STATE_TEXT: Record<ConnectionState, string> = {
   connecting: "Connecting…",
@@ -64,6 +65,8 @@ export function StatusBar() {
       )}
 
       <span className="statusbar__spacer" />
+
+      <TransferProgressBar variant="status" />
 
       {(remote || localConnId) && (
         <span

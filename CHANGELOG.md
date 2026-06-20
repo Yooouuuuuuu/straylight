@@ -15,8 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   poll (opt-in).
 - **Re-evaluate the explorer / sidebar UX once git status lands** — fitting git
   state into the tree and the section bars may force a sizable rework.
-- **0.7.2 — Streaming transfers:** remove the in-memory transfer size cap
-  (`MAX_TRANSFER_BYTES`, 512 MB) with chunked streaming across transports.
 - **Transfer polish (later):** drag directly between the sidebar trees (folding
   the three panel buttons into one), OS drag-in/out, and multi cut/copy/paste in
   the explorer.
@@ -28,6 +26,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Terminal tab reordering.
 - **Phase 3:** git status / blame / log / diff, Podman containers, fuzzy finder,
   search-in-files, port forwarding, Markdown preview, and auto-update.
+
+## [0.7.2] - 2026-06-20
+
+Transfer files of any size, watch them move, and inspect what you're moving.
+
+### Added
+
+- **Streaming transfers — no size cap.** Cross-connection copies now stream a
+  256 KB buffer between transports instead of buffering whole files in memory, so
+  the old 512 MB limit (`MAX_TRANSFER_BYTES`) is gone and a multi-GB file copies
+  with flat memory use. Design: [streaming-transfers.md](streaming-transfers.md).
+- **Live progress + cancel.** A transfer shows a progress bar
+  (`file 3/12 · 740 MB / 2.1 GB`) with a Cancel button. Progress is **global** —
+  it stays visible in the **status bar** after you close the transfer panel, and
+  Cancel rides along with it. Cancelling cleans up the partial file.
+- **Properties** (right-click). Name, kind, location, size, contents, modified
+  time, permissions, and owner · group for a file, folder, or multi-selection.
+  Folder/selection size is computed recursively ("Calculating…"); owner · group is
+  shown only where it's meaningful (remote/WSL, not local Windows).
+
+### Changed
+
+- A failed or cancelled transfer best-effort deletes the partial destination file,
+  so a interrupted copy never leaves a silently truncated file behind.
 
 ## [0.7.1] - 2026-06-19
 

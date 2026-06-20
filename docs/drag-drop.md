@@ -82,14 +82,14 @@ across transports, which is fiddly with SFTP file lifetimes, so it's deferred.
   the editor-open action replaced by select/drag — files don't open here).
 - Drag a node onto a destination folder (or the other pane's root) → `fs_transfer`.
   Copy/paste: select in one pane, copy, focus a folder in the other, paste.
-- The collision prompt and a progress/result toast wrap the call; the destination
-  tree refreshes on success.
+- Files **stream** with no size cap, behind a live progress bar and a Cancel
+  button; a collision prompt precedes the transfer and the destination tree
+  refreshes on completion. See [streaming-transfers.md](streaming-transfers.md).
 
 ---
 
 ## Future work
 
-- **Streaming transfers** (remove the in-memory size cap).
 - **Integrate into the sidebar** — drag directly between sidebar trees, collapsing
   the three buttons into one affordance.
 - **OS integration** — drop Explorer files onto a tree (upload); drag a remote file

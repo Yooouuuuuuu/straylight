@@ -7,13 +7,12 @@ use std::sync::Arc;
 use std::future::Future;
 use std::pin::Pin;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::ssh::connection::Connection;
 use crate::transport::{
     copy_variant, join_path, looks_binary, mode_to_rwx, posix_basename, sort_entries, DirListing,
     FileContent, FileEntry, FileStat, FileTransport, WriteResult, BINARY_SNIFF, MAX_READ_BYTES,
-    MAX_TRANSFER_BYTES,
 };
 
 /// A [`FileTransport`] backed by an SSH connection's SFTP subsystem.
@@ -283,42 +282,63 @@ impl FileTransport for SftpTransport {
         Ok(dest)
     }
 
-    async fn read_bytes(&self, path: &str) -> Result<Vec<u8>, String> {
+    async fn open_read(&self, path: &str) -> Result<Pin<Box<dyn AsyncRead + Send>>, String> {
         let guard = self.0.sftp().await?;
         let sftp = guard.as_ref().expect("sftp session initialized above");
-        let meta = sftp
-            .metadata(path.to_string())
-            .await
-            .map_err(|e| format!("could not stat {path}: {e}"))?;
-        if meta.size.unwrap_or(0) > MAX_TRANSFER_BYTES {
-            return Err(format!(
-                "{path} is too large to transfer yet (streaming is coming)"
-            ));
-        }
-        let mut file = sftp
+        let file = sftp
             .open(path.to_string())
             .await
             .map_err(|e| format!("could not open {path}: {e}"))?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)
-            .await
-            .map_err(|e| format!("could not read {path}: {e}"))?;
-        Ok(buf)
+        Ok(Box::pin(file))
     }
 
-    async fn write_bytes(&self, path: &str, bytes: &[u8]) -> Result<(), String> {
+    async fn open_write(&self, path: &str) -> Result<Pin<Box<dyn AsyncWrite + Send>>, String> {
         let guard = self.0.sftp().await?;
         let sftp = guard.as_ref().expect("sftp session initialized above");
-        let mut file = sftp
+        let file = sftp
             .create(path.to_string())
             .await
             .map_err(|e| format!("could not create {path}: {e}"))?;
-        file.write_all(bytes)
+        Ok(Box::pin(file))
+    }
+
+    async fn entry_meta(&self, path: &str) -> Result<FileEntry, String> {
+        let guard = self.0.sftp().await?;
+        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let link = sftp
+            .symlink_metadata(path.to_string())
             .await
-            .map_err(|e| format!("could not write {path}: {e}"))?;
-        file.flush().await.ok();
-        file.shutdown().await.ok();
-        Ok(())
+            .map_err(|e| format!("could not stat {path}: {e}"))?;
+        let is_symlink = link.is_symlink();
+        let (is_dir, size, symlink_target) = if is_symlink {
+            let target = sftp.read_link(path.to_string()).await.ok();
+            match sftp.metadata(path.to_string()).await {
+                Ok(resolved) => (resolved.is_dir(), resolved.size.unwrap_or(0), target),
+                Err(_) => (false, link.size.unwrap_or(0), target),
+            }
+        } else {
+            (link.is_dir(), link.size.unwrap_or(0), None)
+        };
+        Ok(FileEntry {
+            name: posix_basename(path),
+            path: path.to_string(),
+            size,
+            is_dir,
+            is_symlink,
+            symlink_target,
+            permissions: mode_to_rwx(link.permissions.unwrap_or(0)),
+            owner: link
+                .user
+                .clone()
+                .or_else(|| link.uid.map(|u| u.to_string()))
+                .unwrap_or_default(),
+            group: link
+                .group
+                .clone()
+                .or_else(|| link.gid.map(|g| g.to_string()))
+                .unwrap_or_default(),
+            modified: link.mtime.map(|m| m as i64).unwrap_or(0),
+        })
     }
 
     fn join(&self, parent: &str, name: &str) -> String {

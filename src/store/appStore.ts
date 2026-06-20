@@ -8,7 +8,26 @@
 import { create } from "zustand";
 
 import { basename } from "../lib/format";
-import type { ConnectionState, SshHostEntry } from "../lib/ipc";
+import {
+  fsTransferBatch,
+  fsTransferCancel,
+  type ConnectionState,
+  type SshHostEntry,
+  type TransferProgress,
+} from "../lib/ipc";
+
+/** The one in-flight cross-connection transfer (global, so it survives the
+ *  transfer panel closing and shows in the status bar too). */
+export interface ActiveTransfer {
+  id: string;
+  /** "Local → Ubuntu" — source → destination, for the status-bar line. */
+  label: string;
+  doneBytes: number;
+  totalBytes: number;
+  doneFiles: number;
+  totalFiles: number;
+  current: string;
+}
 
 export interface CursorPosition {
   line: number;
@@ -215,6 +234,10 @@ interface AppState {
   /** The full multi-selection (always within one connection; includes the anchor). */
   selection: TreeNode[];
   contextMenu: (TreeNode & { x: number; y: number }) | null;
+  /** Items shown in the Properties dialog (one or many), or null when closed. */
+  propertiesFor: TreeNode[] | null;
+  /** The one in-flight transfer, or null when idle. */
+  activeTransfer: ActiveTransfer | null;
   renaming: { connId: string; path: string } | null;
   newEntry: { connId: string; parent: string; isDir: boolean } | null;
   /** Items pending delete confirmation (one or many). */
@@ -289,6 +312,21 @@ interface AppState {
   setSelection: (nodes: TreeNode[], anchor: TreeNode) => void;
   openContextMenu: (node: TreeNode, x: number, y: number) => void;
   closeContextMenu: () => void;
+  openProperties: (nodes: TreeNode[]) => void;
+  closeProperties: () => void;
+  /** Start a streamed cross-connection transfer; progress is global. */
+  runTransfer: (args: {
+    transferId: string;
+    srcConnId: string;
+    srcPaths: string[];
+    destConnId: string;
+    destDir: string;
+    rename: boolean;
+    label: string;
+    firstName: string;
+  }) => Promise<void>;
+  updateTransferProgress: (progress: TransferProgress) => void;
+  cancelActiveTransfer: () => void;
   startRename: (connId: string, path: string) => void;
   cancelRename: () => void;
   openNewEntry: (connId: string, parent: string, isDir: boolean) => void;
@@ -350,6 +388,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   selected: null,
   selection: [],
   contextMenu: null,
+  propertiesFor: null,
+  activeTransfer: null,
   renaming: null,
   newEntry: null,
   confirmDelete: null,
@@ -677,6 +717,78 @@ export const useAppStore = create<AppState>()((set, get) => ({
       contextMenu: { ...node, x, y },
     })),
   closeContextMenu: () => set({ contextMenu: null }),
+  openProperties: (nodes) => set({ propertiesFor: nodes, contextMenu: null }),
+  closeProperties: () => set({ propertiesFor: null }),
+  runTransfer: async ({
+    transferId,
+    srcConnId,
+    srcPaths,
+    destConnId,
+    destDir,
+    rename,
+    label,
+    firstName,
+  }) => {
+    set({
+      activeTransfer: {
+        id: transferId,
+        label,
+        doneBytes: 0,
+        totalBytes: 0,
+        doneFiles: 0,
+        totalFiles: 0,
+        current: "",
+      },
+    });
+    try {
+      const outcome = await fsTransferBatch(
+        transferId,
+        srcConnId,
+        srcPaths,
+        destConnId,
+        destDir,
+        rename,
+      );
+      // Refresh whichever section owns the destination (explorer + any panel).
+      get().refreshConn(destConnId);
+      if (outcome.cancelled) {
+        get().pushNotice(
+          "info",
+          `Transfer cancelled — ${outcome.files} file${outcome.files === 1 ? "" : "s"} copied`,
+        );
+      } else {
+        get().pushNotice(
+          "info",
+          outcome.files === 1
+            ? `Copied ${firstName}`
+            : `Copied ${outcome.files} items`,
+        );
+      }
+    } catch (e) {
+      get().pushNotice("error", `Transfer failed: ${String(e)}`);
+    } finally {
+      set({ activeTransfer: null });
+    }
+  },
+  updateTransferProgress: (p) =>
+    set((s) =>
+      s.activeTransfer && s.activeTransfer.id === p.id
+        ? {
+            activeTransfer: {
+              ...s.activeTransfer,
+              doneBytes: p.doneBytes,
+              totalBytes: p.totalBytes,
+              doneFiles: p.doneFiles,
+              totalFiles: p.totalFiles,
+              current: p.current,
+            },
+          }
+        : {},
+    ),
+  cancelActiveTransfer: () => {
+    const t = get().activeTransfer;
+    if (t) void fsTransferCancel(t.id);
+  },
   startRename: (connId, path) =>
     set({ renaming: { connId, path }, contextMenu: null }),
   cancelRename: () => set({ renaming: null }),

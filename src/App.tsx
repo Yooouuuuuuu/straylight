@@ -11,7 +11,7 @@ import {
   type ImperativePanelHandle,
 } from "react-resizable-panels";
 
-import { localConnect, onSshStatus } from "./lib/ipc";
+import { localConnect, onSshStatus, onTransferProgress } from "./lib/ipc";
 import { useAppStore } from "./store/appStore";
 import { initSessionPersistence, restoreSession } from "./lib/session";
 import { useKeyboard } from "./hooks/useKeyboard";
@@ -27,6 +27,7 @@ import { CloseConfirmDialog } from "./components/editor/CloseConfirmDialog";
 import { ContextMenu } from "./components/filetree/ContextMenu";
 import { NewEntryDialog } from "./components/filetree/NewEntryDialog";
 import { DeleteConfirmDialog } from "./components/filetree/DeleteConfirmDialog";
+import { PropertiesDialog } from "./components/filetree/PropertiesDialog";
 import { ToastStack } from "./components/Toast";
 
 export default function App() {
@@ -100,6 +101,17 @@ export default function App() {
         store.pushNotice("info", "Reconnected.");
       }
     });
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  // Reflect transfer progress (from fs_transfer_batch) into the global store, so
+  // the bar shows in the status bar even after the transfer panel is closed.
+  useEffect(() => {
+    const unlistenPromise = onTransferProgress((p) =>
+      useAppStore.getState().updateTransferProgress(p),
+    );
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());
     };
@@ -187,6 +199,7 @@ export default function App() {
       <CloseConfirmDialog />
       <NewEntryDialog />
       <DeleteConfirmDialog />
+      <PropertiesDialog />
       <ContextMenu />
       <ToastStack />
     </div>

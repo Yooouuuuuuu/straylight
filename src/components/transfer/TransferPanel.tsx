@@ -1,12 +1,16 @@
 /** Two-pane transfer overlay: drag a file/folder from one connection's tree onto
- *  a folder in the other to copy it across (see docs/drag-drop.md). Copy-only. */
-import { useEffect, useState } from "react";
+ *  a folder in the other to copy it across (see docs/drag-drop.md). Copy-only,
+ *  streamed (no size cap). The transfer itself + its progress live in the global
+ *  store, so closing this panel mid-transfer keeps it running with the progress
+ *  bar shown in the status bar. */
+import { useEffect, useRef, useState } from "react";
 
-import { fsTransfer, fsTransferCheck } from "../../lib/ipc";
+import { fsTransferCheck } from "../../lib/ipc";
 import type { DragItem } from "../../lib/transferDrag";
 import { useAppStore } from "../../store/appStore";
 import { IconClose } from "../icons";
 import { TransferPane } from "./TransferPane";
+import { TransferProgressBar } from "./TransferProgressBar";
 
 export interface TransferConn {
   connId: string;
@@ -28,9 +32,14 @@ export function TransferPanel({
   onClose: () => void;
 }) {
   const pushNotice = useAppStore((s) => s.pushNotice);
-  const refreshConn = useAppStore((s) => s.refreshConn);
+  const runTransfer = useAppStore((s) => s.runTransfer);
   const setTransferOpen = useAppStore((s) => s.setTransferOpen);
-  const [busy, setBusy] = useState(false);
+  const [conflict, setConflict] = useState<{
+    count: number;
+    name: string;
+    resolve: (c: Choice) => void;
+  } | null>(null);
+  const busyRef = useRef(false); // guards the collision-prompt window
 
   // While open, the transfer panes own F2/Delete — keep the global explorer
   // shortcuts from acting on the (possibly different-host) explorer selection.
@@ -38,20 +47,18 @@ export function TransferPanel({
     setTransferOpen(true);
     return () => setTransferOpen(false);
   }, [setTransferOpen]);
-  const [conflict, setConflict] = useState<{
-    count: number;
-    name: string;
-    resolve: (c: Choice) => void;
-  } | null>(null);
 
   async function onDropInto(
     items: DragItem[],
     destConnId: string,
     destDir: string,
   ) {
-    if (busy) return;
+    // One transfer at a time (the global store tracks the running one).
+    if (busyRef.current || useAppStore.getState().activeTransfer) return;
     const xfer = items.filter((it) => it.connId !== destConnId);
     if (!xfer.length) return;
+    const srcConnId = xfer[0].connId; // a pane's items share one connection
+    busyRef.current = true;
     try {
       // One prompt for the whole batch if any item would collide.
       let anyCollide = false;
@@ -70,21 +77,23 @@ export function TransferPanel({
         if (choice === "cancel") return;
         rename = choice === "keepBoth";
       }
-      setBusy(true);
-      for (const it of xfer) {
-        await fsTransfer(it.connId, it.path, destConnId, destDir, rename);
-      }
-      // refreshConn bumps the section token, which refreshes both the matching
-      // explorer tree and this panel's pane (it reads the same token).
-      refreshConn(destConnId);
-      pushNotice(
-        "info",
-        xfer.length === 1 ? `Copied ${xfer[0].name}` : `Copied ${xfer.length} items`,
-      );
+      const srcLabel = srcConnId === a.connId ? a.label : b.label;
+      const destLabel = destConnId === a.connId ? a.label : b.label;
+      // Fire-and-forget: the store owns the transfer so it survives a close.
+      void runTransfer({
+        transferId: crypto.randomUUID(),
+        srcConnId,
+        srcPaths: xfer.map((it) => it.path),
+        destConnId,
+        destDir,
+        rename,
+        label: `${srcLabel} → ${destLabel}`,
+        firstName: xfer[0].name,
+      });
     } catch (e) {
       pushNotice("error", `Transfer failed: ${String(e)}`);
     } finally {
-      setBusy(false);
+      busyRef.current = false;
     }
   }
 
@@ -125,11 +134,7 @@ export function TransferPanel({
           />
         </div>
 
-        {busy && (
-          <div className="transfer-modal__busy">
-            <span className="spinner spinner--sm" /> Transferring…
-          </div>
-        )}
+        <TransferProgressBar variant="panel" />
 
         {conflict && (
           <div className="transfer-conflict">

@@ -11,6 +11,7 @@ export function ContextMenu() {
   const startRename = useAppStore((s) => s.startRename);
   const openNewEntry = useAppStore((s) => s.openNewEntry);
   const openConfirmDelete = useAppStore((s) => s.openConfirmDelete);
+  const openProperties = useAppStore((s) => s.openProperties);
   const selection = useAppStore((s) => s.selection);
   const setClipboard = useAppStore((s) => s.setClipboard);
   const clipboard = useAppStore((s) => s.clipboard);
@@ -127,6 +128,14 @@ export function ContextMenu() {
         }}
       >
         Copy Path
+      </button>
+      <div className="context-menu__sep" />
+      <button
+        className="context-menu__item"
+        onClick={() => openProperties(selection.length ? selection : [node])}
+      >
+        Properties
+        {selection.length > 1 && ` (${selection.length})`}
       </button>
     </div>
   );

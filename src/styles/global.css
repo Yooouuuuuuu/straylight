@@ -168,6 +168,52 @@
   max-width: 40vw;
 }
 
+/* In-flight transfer indicator in the status bar (global progress). */
+.statusbar__transfer {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-3);
+  max-width: 320px;
+}
+
+.statusbar__transfer-track {
+  width: 90px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-tertiary);
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.statusbar__transfer-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 120ms ease;
+}
+
+.statusbar__transfer-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-code);
+  font-size: var(--font-size-xs);
+}
+
+.statusbar__transfer-cancel {
+  flex: 0 0 auto;
+  padding: 0 var(--space-2);
+  color: var(--fg-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.statusbar__transfer-cancel:hover {
+  color: var(--red);
+  background: var(--bg-tertiary);
+}
+
 /* Connection state dot */
 .dot {
   width: 8px;
@@ -504,6 +550,39 @@
   font-family: var(--font-code);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Properties dialog: a key/value list. */
+.props {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.props__row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: var(--space-4);
+  align-items: baseline;
+  font-size: var(--font-size-sm);
+}
+
+.props__key {
+  color: var(--fg-secondary);
+}
+
+.props__val {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.props__name {
+  font-weight: 600;
+}
+
+.props__mono {
+  font-family: var(--font-code);
+  font-size: var(--font-size-xs);
 }
 
 /* Informational note at the top of the connect dialog (e.g. why it opened). */
@@ -1783,20 +1862,42 @@
   padding: var(--space-2) var(--space-4) var(--space-2) 28px;
 }
 
-.transfer-modal__busy {
-  position: absolute;
-  bottom: var(--space-4);
-  left: 50%;
-  transform: translateX(-50%);
+.transfer-progress {
+  flex: 0 0 auto;
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.transfer-progress__track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+
+.transfer-progress__fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 120ms ease;
+}
+
+.transfer-progress__row {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  color: var(--fg-primary);
-  font-size: var(--font-size-sm);
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+
+.transfer-progress__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+  font-family: var(--font-code);
 }
 
 .transfer-conflict {
