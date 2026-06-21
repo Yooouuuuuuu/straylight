@@ -31,12 +31,21 @@ export function EditorTabs() {
               closeTab(tab.id);
             }
           }}
-          title={tab.path}
+          title={tab.kind === "diff" ? `${tab.path} (changes)` : tab.path}
         >
           <span className="editor-tab__icon">
-            <FileIcon name={tab.name} isDir={false} isOpen={false} />
+            {tab.kind === "diff" ? (
+              <span className="editor-tab__diff">±</span>
+            ) : tab.kind === "log" ? (
+              <span className="editor-tab__diff">⎇</span>
+            ) : (
+              <FileIcon name={tab.name} isDir={false} isOpen={false} />
+            )}
           </span>
-          <span className="editor-tab__name">{tab.name}</span>
+          <span className="editor-tab__name">
+            {tab.name}
+            {tab.kind === "diff" ? " (changes)" : ""}
+          </span>
           <button
             className="editor-tab__close"
             title="Close"

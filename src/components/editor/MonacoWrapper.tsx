@@ -109,7 +109,8 @@ export function MonacoWrapper() {
     }
 
     const tab = useAppStore.getState().tabs.find((t) => t.id === activeTabId);
-    if (!activeTabId || !tab || tab.isBinary) {
+    // Diff/log tabs render their own views; the code editor shows nothing.
+    if (!activeTabId || !tab || tab.isBinary || tab.kind === "diff" || tab.kind === "log") {
       editor.setModel(null);
       prevActiveRef.current = null;
       return;

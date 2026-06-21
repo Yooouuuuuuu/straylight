@@ -3,10 +3,11 @@
  *  "eager", and show a running indicator (which doubles as a manual cancel).
  *  Slice 1 is read-only — the change list, branch, and counts; commit/diff come
  *  in later slices. */
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import { useAppStore } from "../../store/appStore";
 import { useVcsStore, type TrackedRepo } from "../../store/vcsStore";
+import { openDiff } from "../../lib/openDiff";
 import { vcsClass, vcsLetter } from "../../lib/vcsDecorations";
 import { FolderBrowser } from "../FolderBrowser";
 import { RelativeTime } from "../RelativeTime";
@@ -120,14 +121,56 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   const cancelRefresh = useVcsStore((s) => s.cancelRefresh);
   const toggleEager = useVcsStore((s) => s.toggleEager);
   const removeRepo = useVcsStore((s) => s.removeRepo);
+  const openLogTab = useAppStore((s) => s.openLogTab);
+  const stage = useVcsStore((s) => s.stage);
+  const unstage = useVcsStore((s) => s.unstage);
+  const commit = useVcsStore((s) => s.commit);
+  const [message, setMessage] = useState("");
+  const [committing, setCommitting] = useState(false);
 
   const st = repo.status;
   const inactive = !repo.connId;
   const loading = repo.activity === "loading";
+  const isGit = repo.backend !== "jj";
+  const changes = st?.changes ?? [];
+  const staged = changes.filter((c) => c.staged);
+  const unstaged = changes.filter((c) => !c.staged);
+  const canCommit =
+    !inactive &&
+    message.trim().length > 0 &&
+    (isGit ? staged.length > 0 : changes.length > 0);
+
+  const doCommit = async () => {
+    setCommitting(true);
+    const ok = await commit(repo.connKey, repo.root, message.trim());
+    setCommitting(false);
+    if (ok) setMessage("");
+  };
+
+  const changeRow = (c: (typeof changes)[number], action: ReactNode) => (
+    <div
+      className="change-row"
+      key={c.path}
+      title={`${c.path} — open diff`}
+      onClick={() => void openDiff(repo, c)}
+    >
+      <span className={`change-row__badge ${vcsClass(c.kind)}`}>
+        {vcsLetter(c.kind) || "•"}
+      </span>
+      <span className="change-row__path">{c.path}</span>
+      {action}
+    </div>
+  );
 
   return (
     <div className="repo-card">
       <div className="repo-card__head">
+        <span
+          className={`repo-card__backend repo-card__backend--${repo.backend}`}
+          title={repo.backend === "jj" ? "Jujutsu repository" : "git repository"}
+        >
+          {repo.backend}
+        </span>
         <span className="repo-card__name" title={repo.root}>
           {repo.label}
         </span>
@@ -149,6 +192,21 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
             <IconRefresh />
           </button>
         )}
+        <button
+          className="icon-btn"
+          title="Commit history"
+          disabled={inactive}
+          onClick={() =>
+            openLogTab({
+              connId: repo.connId!,
+              root: repo.root,
+              backend: repo.backend,
+              label: repo.label,
+            })
+          }
+        >
+          ⎇
+        </button>
         <button
           className={`icon-btn ${repo.eager ? "icon-btn--active" : ""}`}
           title={repo.eager ? "Live updates on — click to pause" : "Live updates off"}
@@ -186,17 +244,105 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
 
       {repo.error && <div className="repo-card__error">{repo.error}</div>}
 
-      {st && st.changes.length > 0 && (
-        <div className="repo-card__changes">
-          {st.changes.map((c) => (
-            <div className="change-row" key={c.path} title={c.path}>
-              <span className={`change-row__badge ${vcsClass(c.kind)}`}>
-                {vcsLetter(c.kind) || "•"}
-              </span>
-              <span className="change-row__path">{c.path}</span>
-            </div>
-          ))}
+      {!inactive && st && changes.length > 0 && (
+        <div className="repo-card__commit">
+          <textarea
+            className="repo-card__msg input--mono"
+            rows={2}
+            placeholder={
+              isGit ? "Commit message (staged changes)" : "Describe & commit this change"
+            }
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+          />
+          <button
+            className="btn btn--primary btn--block"
+            disabled={!canCommit || committing}
+            onClick={() => void doCommit()}
+            title={
+              isGit && staged.length === 0
+                ? "Stage changes first"
+                : "Commit"
+            }
+          >
+            {committing ? "Committing…" : "Commit"}
+          </button>
         </div>
+      )}
+
+      {isGit ? (
+        <>
+          {staged.length > 0 && (
+            <div className="repo-card__group">
+              <div className="repo-card__group-head">
+                <span>Staged ({staged.length})</span>
+                <button
+                  className="repo-card__group-act"
+                  onClick={() =>
+                    void unstage(repo.connKey, repo.root, staged.map((c) => c.path))
+                  }
+                >
+                  Unstage all
+                </button>
+              </div>
+              <div className="repo-card__changes">
+                {staged.map((c) =>
+                  changeRow(
+                    c,
+                    <button
+                      className="change-row__act"
+                      title="Unstage"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void unstage(repo.connKey, repo.root, [c.path]);
+                      }}
+                    >
+                      −
+                    </button>,
+                  ),
+                )}
+              </div>
+            </div>
+          )}
+          {unstaged.length > 0 && (
+            <div className="repo-card__group">
+              <div className="repo-card__group-head">
+                <span>Changes ({unstaged.length})</span>
+                <button
+                  className="repo-card__group-act"
+                  onClick={() =>
+                    void stage(repo.connKey, repo.root, unstaged.map((c) => c.path))
+                  }
+                >
+                  Stage all
+                </button>
+              </div>
+              <div className="repo-card__changes">
+                {unstaged.map((c) =>
+                  changeRow(
+                    c,
+                    <button
+                      className="change-row__act"
+                      title="Stage"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void stage(repo.connKey, repo.root, [c.path]);
+                      }}
+                    >
+                      +
+                    </button>,
+                  ),
+                )}
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        changes.length > 0 && (
+          <div className="repo-card__changes">
+            {changes.map((c) => changeRow(c, null))}
+          </div>
+        )
       )}
 
       {repo.lastUpdated && !loading && (

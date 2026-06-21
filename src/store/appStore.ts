@@ -60,6 +60,14 @@ export interface EditorTab {
   lineEnding: "LF" | "CRLF";
   dirty: boolean;
   cursor: CursorPosition;
+  /** "diff" shows a Monaco diff; "log" shows a repo's commit history. Default "file". */
+  kind?: "file" | "diff" | "log";
+  /** The base (HEAD / jj `@-`) content, for a diff tab's old side. */
+  diffBase?: string;
+  /** Whether the file exists in the base (false = added/untracked). */
+  diffBaseExists?: boolean;
+  /** Backend ("git" | "jj") for a log tab (path holds the repo root). */
+  vcsBackend?: string;
 }
 
 export type NewTab = Omit<EditorTab, "id" | "dirty" | "cursor">;
@@ -292,6 +300,25 @@ interface AppState {
   closeConnTerminals: (connId: string) => void;
 
   openTab: (tab: NewTab) => void;
+  /** Open (or focus) a read-only diff tab for a changed file. */
+  openDiffTab: (d: {
+    connId: string;
+    name: string;
+    path: string;
+    relPath: string;
+    base: string;
+    baseExists: boolean;
+    content: string;
+    language: string;
+    isBinary: boolean;
+  }) => void;
+  /** Open (or focus) a repo's commit-history tab. */
+  openLogTab: (d: {
+    connId: string;
+    root: string;
+    backend: string;
+    label: string;
+  }) => void;
   setActiveTab: (id: string) => void;
   cycleTab: (direction: 1 | -1) => void;
   closeTab: (id: string) => void;
@@ -627,6 +654,57 @@ export const useAppStore = create<AppState>()((set, get) => ({
         cursor: { line: 1, column: 1 },
       };
       return { tabs: [...s.tabs, newTab], activeTabId: id };
+    }),
+
+  openDiffTab: (d) =>
+    set((s) => {
+      const id = `diff::${d.connId}::${d.relPath}`;
+      if (s.tabs.some((t) => t.id === id)) return { activeTabId: id };
+      const tab: EditorTab = {
+        id,
+        connId: d.connId,
+        path: d.path,
+        name: d.name,
+        content: d.content,
+        language: d.language,
+        isBinary: d.isBinary,
+        encoding: "utf-8",
+        size: 0,
+        modified: 0,
+        truncated: false,
+        lineEnding: d.content.includes("\r\n") ? "CRLF" : "LF",
+        dirty: false,
+        cursor: { line: 1, column: 1 },
+        kind: "diff",
+        diffBase: d.base,
+        diffBaseExists: d.baseExists,
+      };
+      return { tabs: [...s.tabs, tab], activeTabId: id };
+    }),
+
+  openLogTab: (d) =>
+    set((s) => {
+      const id = `log::${d.connId}::${d.root}`;
+      if (s.tabs.some((t) => t.id === id)) return { activeTabId: id };
+      const tab: EditorTab = {
+        id,
+        connId: d.connId,
+        path: d.root,
+        name: `${d.label} — History`,
+        content: "",
+        language: "plaintext",
+        isBinary: false,
+        encoding: "utf-8",
+        size: 0,
+        modified: 0,
+        truncated: false,
+        lineEnding: "LF",
+        dirty: false,
+        cursor: { line: 1, column: 1 },
+        kind: "log",
+        vcsBackend: d.backend,
+      };
+      return { tabs: [...s.tabs, tab], activeTabId: id };
     }),
 
   setActiveTab: (activeTabId) => set({ activeTabId }),

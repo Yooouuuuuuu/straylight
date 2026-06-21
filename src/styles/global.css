@@ -320,6 +320,28 @@
   border-bottom: 1px solid var(--border);
 }
 
+.repo-card__backend {
+  flex: 0 0 auto;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--bg-tertiary);
+  color: var(--fg-secondary);
+}
+
+.repo-card__backend--jj {
+  background: rgba(189, 147, 249, 0.18);
+  color: var(--purple);
+}
+
+.repo-card__backend--git {
+  background: rgba(255, 184, 108, 0.16);
+  color: var(--orange);
+}
+
 .repo-card__name {
   flex: 1 1 auto;
   min-width: 0;
@@ -371,12 +393,19 @@
   border-top: 1px solid var(--border);
 }
 
+/* Inside a Staged/Changes group the header already provides the divider. */
+.repo-card__group .repo-card__changes {
+  border-top: none;
+  max-height: 200px;
+}
+
 .change-row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   padding: 1px var(--space-4);
   font-size: var(--font-size-xs);
+  cursor: pointer;
 }
 
 .change-row:hover {
@@ -391,10 +420,86 @@
 }
 
 .change-row__path {
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--fg-primary);
+}
+
+.change-row__act {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--fg-secondary);
+  font-weight: 700;
+  cursor: pointer;
+  visibility: hidden;
+}
+
+.change-row:hover .change-row__act {
+  visibility: visible;
+}
+
+.change-row__act:hover {
+  background: var(--bg-selected);
+  color: var(--fg-primary);
+}
+
+/* Commit box */
+.repo-card__commit {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.repo-card__msg {
+  width: 100%;
+  resize: vertical;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--fg-primary);
+  font-size: var(--font-size-xs);
+  outline: none;
+}
+
+.repo-card__msg:focus {
+  border-color: var(--border-focus);
+}
+
+/* Staged / Changes groups */
+.repo-card__group {
+  border-top: 1px solid var(--border);
+}
+
+.repo-card__group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-secondary);
+}
+
+.repo-card__group-act {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.repo-card__group-act:hover {
+  text-decoration: underline;
 }
 
 .repo-card__stamp {
@@ -1383,6 +1488,144 @@
 .monaco-host {
   position: absolute;
   inset: 0;
+}
+
+/* Diff editor overlays the (blanked) code editor when a diff tab is active. */
+.monaco-host--diff {
+  z-index: 1;
+  background: var(--bg-primary);
+}
+
+.diff-binary {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-primary);
+  color: var(--fg-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.editor-tab__diff {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  font-weight: 700;
+  color: var(--orange);
+}
+
+/* Commit-history (log) view */
+.vcs-log {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: auto;
+  background: var(--bg-primary);
+  padding: var(--space-3) 0;
+}
+
+.vcs-log__msg {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-6);
+  color: var(--fg-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.commit-row {
+  display: flex;
+  gap: var(--space-2);
+  padding: 0 var(--space-5);
+}
+
+.commit-row__rail {
+  position: relative;
+  flex: 0 0 16px;
+}
+
+.commit-row__rail::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--border);
+}
+
+.commit-row__dot {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--fg-secondary);
+  border: 2px solid var(--bg-primary);
+  box-sizing: content-box;
+}
+
+.commit-row__dot--current {
+  background: var(--green);
+}
+
+.commit-row__dot--merge {
+  background: var(--purple);
+}
+
+.commit-row__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid rgba(68, 71, 90, 0.4);
+}
+
+.commit-row__top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.commit-row__subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-primary);
+  font-size: var(--font-size-sm);
+}
+
+.commit-row__ref {
+  flex: 0 0 auto;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--cyan);
+  font-family: var(--font-code);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.commit-row__ref--head {
+  background: rgba(80, 250, 123, 0.16);
+  color: var(--green);
+}
+
+.commit-row__meta {
+  margin-top: 1px;
+  color: var(--fg-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.commit-row__id {
+  font-family: var(--font-code);
+  color: var(--orange);
 }
 
 /* ------------------------------------------------------------- Editor tabs */

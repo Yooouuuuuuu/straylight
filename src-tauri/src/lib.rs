@@ -36,6 +36,9 @@ pub struct AppState {
     pub ptys: Mutex<HashMap<String, PtyHandle>>,
     /// Cancellation flags for in-flight transfers, keyed by transfer id.
     pub transfers: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    /// Per-repo locks (keyed by `connId::root`) serializing VCS mutations so two
+    /// commits/stages can't race on git's `index.lock`.
+    pub vcs_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 impl AppState {
@@ -44,6 +47,7 @@ impl AppState {
             sessions: Mutex::new(HashMap::new()),
             ptys: Mutex::new(HashMap::new()),
             transfers: Mutex::new(HashMap::new()),
+            vcs_locks: Mutex::new(HashMap::new()),
         }
     }
 
@@ -116,6 +120,11 @@ pub fn run() {
             wsl::wsl_connect,
             vcs::vcs_open,
             vcs::vcs_status,
+            vcs::vcs_file_base,
+            vcs::vcs_stage,
+            vcs::vcs_unstage,
+            vcs::vcs_commit,
+            vcs::vcs_log,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Straylight application");

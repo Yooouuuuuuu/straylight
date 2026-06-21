@@ -106,7 +106,10 @@ function scopeOf(connId: string): Scope | null {
 function writeSnapshot(): void {
   const s = useAppStore.getState();
 
-  const localTabs: PersistedTab[] = s.tabs
+  // Only real file tabs persist; diff/log tabs are ephemeral.
+  const fileTabs = s.tabs.filter((t) => !t.kind || t.kind === "file");
+
+  const localTabs: PersistedTab[] = fileTabs
     .filter((t) => t.connId === s.localConnId)
     .map((t) => ({ scope: "local", path: t.path }));
 
@@ -115,7 +118,7 @@ function writeSnapshot(): void {
   // tab list for the next launch.
   let remoteTabs: PersistedTab[];
   if (s.remote) {
-    remoteTabs = s.tabs
+    remoteTabs = fileTabs
       .filter((t) => t.connId === s.remote!.connId)
       .map((t) => ({ scope: "remote", path: t.path }));
   } else if (pendingRemoteRestore) {
@@ -124,7 +127,7 @@ function writeSnapshot(): void {
     remoteTabs = [];
   }
 
-  const activeTab = s.tabs.find((t) => t.id === s.activeTabId);
+  const activeTab = fileTabs.find((t) => t.id === s.activeTabId);
   const activeScope = activeTab ? scopeOf(activeTab.connId) : null;
   const active =
     activeTab && activeScope ? { scope: activeScope, path: activeTab.path } : null;

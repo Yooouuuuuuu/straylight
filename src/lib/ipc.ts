@@ -335,6 +335,68 @@ export function vcsStatus(
   return invoke("vcs_status", { connId, root, backend });
 }
 
+/** The base (pre-change) content of a file for the diff's old side. */
+export interface VcsFileBase {
+  content: string;
+  exists: boolean;
+  isBinary: boolean;
+}
+
+export function vcsFileBase(
+  connId: string,
+  root: string,
+  backend: string,
+  path: string,
+): Promise<VcsFileBase> {
+  return invoke("vcs_file_base", { connId, root, backend, path });
+}
+
+/** Stage paths in the git index (git only). */
+export function vcsStage(connId: string, root: string, paths: string[]): Promise<void> {
+  return invoke("vcs_stage", { connId, root, paths });
+}
+
+/** Unstage paths from the git index. */
+export function vcsUnstage(
+  connId: string,
+  root: string,
+  paths: string[],
+): Promise<void> {
+  return invoke("vcs_unstage", { connId, root, paths });
+}
+
+/** Commit: git commits the staged set; jj commits the working change + starts a new one. */
+export function vcsCommit(
+  connId: string,
+  root: string,
+  backend: string,
+  message: string,
+): Promise<void> {
+  return invoke("vcs_commit", { connId, root, backend, message });
+}
+
+/** One commit in the history graph. */
+export interface VcsCommit {
+  id: string;
+  parents: string[];
+  author: string;
+  /** Unix seconds. */
+  timestamp: number;
+  subject: string;
+  refs: string[];
+  current: boolean;
+}
+
+/** Commit history (newest first) for the repo. */
+export function vcsLog(
+  connId: string,
+  root: string,
+  backend: string,
+  limit: number,
+): Promise<VcsCommit[]> {
+  return invoke("vcs_log", { connId, root, backend, limit });
+}
+
 // ---------------------------------------------------------------------------
 // WSL
 // ---------------------------------------------------------------------------

@@ -5,6 +5,8 @@ import { useAppStore } from "../../store/appStore";
 import { BinaryFileCard } from "../editor/BinaryFileCard";
 import { EditorTabs } from "../editor/EditorTabs";
 import { MonacoWrapper } from "../editor/MonacoWrapper";
+import { MonacoDiffWrapper } from "../editor/MonacoDiffWrapper";
+import { VcsLogView } from "../vcs/VcsLogView";
 
 function EmptyState() {
   const busyPath = useAppStore((s) => s.busyPath);
@@ -75,7 +77,13 @@ export function EditorArea() {
           ) : (
             <>
               <MonacoWrapper />
-              {active?.isBinary && <BinaryFileCard file={active} />}
+              {active?.kind === "diff" ? (
+                <MonacoDiffWrapper tab={active} />
+              ) : active?.kind === "log" ? (
+                <VcsLogView tab={active} />
+              ) : (
+                active?.isBinary && <BinaryFileCard file={active} />
+              )}
             </>
           )}
         </div>

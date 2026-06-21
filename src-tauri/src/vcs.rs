@@ -11,6 +11,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::ssh::connection::Connection;
+use crate::transport::looks_binary;
 use crate::{AppState, Session};
 
 /// Result of running one command on a host.
@@ -182,6 +183,289 @@ pub async fn vcs_open(
         }
     }
     Err("Not a git or jj repository".into())
+}
+
+/// One commit in the history graph.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VcsCommit {
+    pub id: String,
+    pub parents: Vec<String>,
+    pub author: String,
+    pub timestamp: i64,
+    pub subject: String,
+    pub refs: Vec<String>,
+    pub current: bool,
+}
+
+/// Commit history for a repo (newest first), for the history/graph view.
+#[tauri::command]
+pub async fn vcs_log(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    backend: String,
+    limit: u32,
+) -> Result<Vec<VcsCommit>, String> {
+    if backend == "jj" {
+        jj_log(&state, &conn_id, &root, limit).await
+    } else {
+        git_log(&state, &conn_id, &root, limit).await
+    }
+}
+
+fn parse_git_refs(d: &str) -> (bool, Vec<String>) {
+    let mut current = false;
+    let mut refs = Vec::new();
+    for part in d.split(", ") {
+        let p = part.trim();
+        if p.is_empty() {
+            continue;
+        }
+        if p == "HEAD" {
+            current = true;
+        } else if let Some(branch) = p.strip_prefix("HEAD -> ") {
+            current = true;
+            refs.push(branch.to_string());
+        } else if let Some(tag) = p.strip_prefix("tag: ") {
+            refs.push(tag.to_string());
+        } else {
+            refs.push(p.to_string());
+        }
+    }
+    (current, refs)
+}
+
+async fn git_log(
+    state: &AppState,
+    conn_id: &str,
+    root: &str,
+    limit: u32,
+) -> Result<Vec<VcsCommit>, String> {
+    let n = limit.to_string();
+    let out = run_command(
+        state,
+        conn_id,
+        root,
+        &[
+            "git",
+            "log",
+            "-n",
+            &n,
+            "--pretty=format:%h%x1f%p%x1f%an%x1f%at%x1f%D%x1f%s",
+            "-z",
+        ],
+    )
+    .await?;
+    if out.code != 0 {
+        let msg = out.stderr.trim();
+        return Err(if msg.is_empty() {
+            "git log failed".into()
+        } else {
+            msg.to_string()
+        });
+    }
+    let mut commits = Vec::new();
+    for rec in out.stdout.split('\0').filter(|r| !r.is_empty()) {
+        let f: Vec<&str> = rec.splitn(6, '\u{1f}').collect();
+        if f.len() < 6 {
+            continue;
+        }
+        let (current, refs) = parse_git_refs(f[4]);
+        commits.push(VcsCommit {
+            id: f[0].to_string(),
+            parents: f[1].split_whitespace().map(String::from).collect(),
+            author: f[2].to_string(),
+            timestamp: f[3].trim().parse().unwrap_or(0),
+            subject: f[5].to_string(),
+            refs,
+            current,
+        });
+    }
+    Ok(commits)
+}
+
+async fn jj_log(
+    state: &AppState,
+    conn_id: &str,
+    root: &str,
+    limit: u32,
+) -> Result<Vec<VcsCommit>, String> {
+    let n = limit.to_string();
+    // Validated template (jj 0.42): tab-delimited fields, `%s` epoch timestamp.
+    let tmpl = "commit_id.short() ++ \"\\t\" ++ parents.map(|c| c.commit_id().short()).join(\" \") ++ \"\\t\" ++ author.name() ++ \"\\t\" ++ author.timestamp().format(\"%s\") ++ \"\\t\" ++ bookmarks ++ \"\\t\" ++ if(current_working_copy, \"@\", \"\") ++ \"\\t\" ++ description.first_line() ++ \"\\n\"";
+    let out = run_command(
+        state,
+        conn_id,
+        root,
+        &[
+            "jj", "--color", "never", "log", "--no-graph", "--limit", &n, "-T", tmpl,
+        ],
+    )
+    .await?;
+    if out.code != 0 {
+        let msg = out.stderr.trim();
+        return Err(if msg.is_empty() {
+            "jj log failed".into()
+        } else {
+            msg.to_string()
+        });
+    }
+    let is_zero = |s: &str| !s.is_empty() && s.chars().all(|c| c == '0');
+    let mut commits = Vec::new();
+    for line in out.stdout.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        let f: Vec<&str> = line.splitn(7, '\t').collect();
+        if f.len() < 7 {
+            continue;
+        }
+        if is_zero(f[0]) {
+            continue; // the virtual root commit
+        }
+        commits.push(VcsCommit {
+            id: f[0].to_string(),
+            parents: f[1]
+                .split_whitespace()
+                .filter(|p| !is_zero(p))
+                .map(String::from)
+                .collect(),
+            author: f[2].to_string(),
+            timestamp: f[3].trim().parse().unwrap_or(0),
+            subject: f[6].to_string(),
+            refs: f[4].split_whitespace().map(String::from).collect(),
+            current: f[5] == "@",
+        });
+    }
+    Ok(commits)
+}
+
+/// Get (or create) the per-repo lock so VCS mutations serialize per repo.
+async fn repo_guard(state: &AppState, conn_id: &str, root: &str) -> Arc<tokio::sync::Mutex<()>> {
+    let key = format!("{conn_id}::{root}");
+    let mut locks = state.vcs_locks.lock().await;
+    locks
+        .entry(key)
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
+}
+
+fn ok_or_stderr(out: CmdOutput, what: &str) -> Result<(), String> {
+    if out.code == 0 {
+        return Ok(());
+    }
+    let msg = out.stderr.trim();
+    Err(if msg.is_empty() {
+        format!("{what} failed (exit {})", out.code)
+    } else {
+        msg.to_string()
+    })
+}
+
+/// Stage paths (git index). git-only — jj has no staging.
+#[tauri::command]
+pub async fn vcs_stage(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    paths: Vec<String>,
+) -> Result<(), String> {
+    let lock = repo_guard(&state, &conn_id, &root).await;
+    let _held = lock.lock().await;
+    let mut argv: Vec<&str> = vec!["git", "add", "--"];
+    argv.extend(paths.iter().map(String::as_str));
+    let out = run_command(&state, &conn_id, &root, &argv).await?;
+    ok_or_stderr(out, "git add")
+}
+
+/// Unstage paths (git index).
+#[tauri::command]
+pub async fn vcs_unstage(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    paths: Vec<String>,
+) -> Result<(), String> {
+    let lock = repo_guard(&state, &conn_id, &root).await;
+    let _held = lock.lock().await;
+    let mut argv: Vec<&str> = vec!["git", "reset", "-q", "HEAD", "--"];
+    argv.extend(paths.iter().map(String::as_str));
+    let out = run_command(&state, &conn_id, &root, &argv).await?;
+    ok_or_stderr(out, "git reset")
+}
+
+/// Commit: git commits the staged set; jj commits the working-copy change and
+/// starts a new one (`jj commit` = describe + new).
+#[tauri::command]
+pub async fn vcs_commit(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    backend: String,
+    message: String,
+) -> Result<(), String> {
+    let lock = repo_guard(&state, &conn_id, &root).await;
+    let _held = lock.lock().await;
+    let out = if backend == "jj" {
+        run_command(
+            &state,
+            &conn_id,
+            &root,
+            &["jj", "--color", "never", "commit", "-m", &message],
+        )
+        .await?
+    } else {
+        run_command(&state, &conn_id, &root, &["git", "commit", "-m", &message]).await?
+    };
+    ok_or_stderr(out, "commit")
+}
+
+/// The base (pre-change) version of a file, for the diff's "old" side: git's
+/// `HEAD:<path>` or jj's `@-` revision. `exists: false` means the file isn't in
+/// the base (added/untracked) — the diff shows an empty old side.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VcsFileBase {
+    pub content: String,
+    pub exists: bool,
+    pub is_binary: bool,
+}
+
+#[tauri::command]
+pub async fn vcs_file_base(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    backend: String,
+    path: String,
+) -> Result<VcsFileBase, String> {
+    let out = if backend == "jj" {
+        run_command(
+            &state,
+            &conn_id,
+            &root,
+            &["jj", "--color", "never", "file", "show", "-r", "@-", &path],
+        )
+        .await?
+    } else {
+        let spec = format!("HEAD:{path}");
+        run_command(&state, &conn_id, &root, &["git", "show", &spec]).await?
+    };
+    if out.code != 0 {
+        // Not in the base (added / untracked): no old side.
+        return Ok(VcsFileBase {
+            content: String::new(),
+            exists: false,
+            is_binary: false,
+        });
+    }
+    let is_binary = looks_binary(out.stdout.as_bytes());
+    Ok(VcsFileBase {
+        content: if is_binary { String::new() } else { out.stdout },
+        exists: true,
+        is_binary,
+    })
 }
 
 /// Return the normalized status for a repo, dispatching on its backend.

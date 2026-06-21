@@ -8,7 +8,14 @@
 import { create } from "zustand";
 
 import { basename } from "../lib/format";
-import { vcsOpen, vcsStatus, type VcsStatus } from "../lib/ipc";
+import {
+  vcsCommit,
+  vcsOpen,
+  vcsStage,
+  vcsStatus,
+  vcsUnstage,
+  type VcsStatus,
+} from "../lib/ipc";
 import { useAppStore } from "./appStore";
 
 export interface TrackedRepo {
@@ -37,6 +44,9 @@ interface VcsState {
   toggleEager: (connKey: string, root: string) => void;
   refreshRepo: (connKey: string, root: string) => Promise<void>;
   cancelRefresh: (connKey: string, root: string) => void;
+  stage: (connKey: string, root: string, paths: string[]) => Promise<void>;
+  unstage: (connKey: string, root: string, paths: string[]) => Promise<void>;
+  commit: (connKey: string, root: string, message: string) => Promise<boolean>;
   /** Re-resolve each repo's live connId from the active connections. */
   resolveConns: () => void;
   /** A file changed under `connId`: refresh eager repos that contain it. */
@@ -274,6 +284,43 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
     set((s) => ({
       repos: mapRepo(s.repos, connKey, root, (r) => ({ ...r, activity: "idle" })),
     }));
+  },
+
+  stage: async (connKey, root, paths) => {
+    const connId = get().repos.find((r) => r.connKey === connKey && r.root === root)?.connId;
+    if (!connId) return;
+    try {
+      await vcsStage(connId, root, paths);
+    } catch (e) {
+      useAppStore.getState().pushNotice("error", `Stage failed: ${String(e)}`);
+    }
+    await get().refreshRepo(connKey, root);
+  },
+
+  unstage: async (connKey, root, paths) => {
+    const connId = get().repos.find((r) => r.connKey === connKey && r.root === root)?.connId;
+    if (!connId) return;
+    try {
+      await vcsUnstage(connId, root, paths);
+    } catch (e) {
+      useAppStore.getState().pushNotice("error", `Unstage failed: ${String(e)}`);
+    }
+    await get().refreshRepo(connKey, root);
+  },
+
+  commit: async (connKey, root, message) => {
+    const repo = get().repos.find((r) => r.connKey === connKey && r.root === root);
+    const connId = repo?.connId;
+    if (!repo || !connId) return false;
+    try {
+      await vcsCommit(connId, root, repo.backend, message);
+    } catch (e) {
+      useAppStore.getState().pushNotice("error", `Commit failed: ${String(e)}`);
+      return false;
+    }
+    useAppStore.getState().pushNotice("info", "Committed.");
+    await get().refreshRepo(connKey, root);
+    return true;
   },
 
   resolveConns: () =>
