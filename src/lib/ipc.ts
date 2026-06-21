@@ -397,6 +397,47 @@ export function vcsLog(
   return invoke("vcs_log", { connId, root, backend, limit });
 }
 
+/** Fetch / pull / push. Returns the command output (for a toast). */
+export function vcsRemote(
+  connId: string,
+  root: string,
+  backend: string,
+  op: "fetch" | "pull" | "push",
+): Promise<string> {
+  return invoke("vcs_remote", { connId, root, backend, op });
+}
+
+/** Files changed by one commit (vs its parent), for browsing history. */
+export function vcsCommitFiles(
+  connId: string,
+  root: string,
+  backend: string,
+  commit: string,
+): Promise<VcsChange[]> {
+  return invoke("vcs_commit_files", { connId, root, backend, commit });
+}
+
+/** A file's content at a specific revision (for a commit's diffs). */
+export function vcsFileAt(
+  connId: string,
+  root: string,
+  backend: string,
+  rev: string,
+  path: string,
+): Promise<VcsFileBase> {
+  return invoke("vcs_file_at", { connId, root, backend, rev, path });
+}
+
+/** Discard working-tree changes for paths (destructive). */
+export function vcsDiscard(
+  connId: string,
+  root: string,
+  backend: string,
+  paths: string[],
+): Promise<void> {
+  return invoke("vcs_discard", { connId, root, backend, paths });
+}
+
 // ---------------------------------------------------------------------------
 // WSL
 // ---------------------------------------------------------------------------

@@ -31,6 +31,7 @@ import { ContextMenu } from "./components/filetree/ContextMenu";
 import { NewEntryDialog } from "./components/filetree/NewEntryDialog";
 import { DeleteConfirmDialog } from "./components/filetree/DeleteConfirmDialog";
 import { PropertiesDialog } from "./components/filetree/PropertiesDialog";
+import { DiscardDialog } from "./components/vcs/DiscardDialog";
 import { ToastStack } from "./components/Toast";
 
 export default function App() {
@@ -251,6 +252,7 @@ export default function App() {
       <NewEntryDialog />
       <DeleteConfirmDialog />
       <PropertiesDialog />
+      <DiscardDialog />
       <ContextMenu />
       <ToastStack />
     </div>

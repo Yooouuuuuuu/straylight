@@ -20,8 +20,27 @@ under "Active roadmap."
   the status bar too) + Cancel; partial files are cleaned up on failure/cancel.
   Shipped alongside a **Properties** right-click dialog. Design:
   [streaming-transfers.md](streaming-transfers.md).
+- **0.8.x — Version control (Phase 3 core). _Done (git + jj)._** Status + tree
+  decorations + branch/bookmark hint, Monaco diff (base vs working), stage/unstage
+  + commit (jj: describe+commit), and a commit-history view (the ⎇ panel appended
+  in the VC region, plus a pop-out editor tab). Repos are opened explicitly,
+  eager-toggle + per-connection persistence, per-repo mutation lock. Runs the VCS
+  binary on the host (no local clone). Design + spikes:
+  [version-control.md](version-control.md).
 
 ## Non-priority backlog
+
+### Version control (Phase 3, later)
+- [ ] **Push / pull** UI (for now: use the terminal — real PTY + host credentials;
+      our exec channel has no TTY for passphrase/2FA prompts).
+- [ ] **Multi-lane commit graph** — the history rail is single-lane today.
+- [ ] **Blame**, **conflict-resolution editor**, **ignored-file dimming**.
+- [ ] **jj on a remote** — resolve `jj` on the exec PATH (login shell / cached
+      absolute path); today it works locally and falls back to git otherwise.
+- [ ] Refresh git status on window focus, so terminal-side git ops (e.g.
+      `git add` in the terminal) reflect without a manual refresh.
+- [ ] Partially-staged files now show in both Staged + Changes (fixed); revisit
+      if the per-side rendering needs more nuance (e.g. per-hunk staging).
 
 ### Explorer & transfer
 - [ ] Fold the transfer panel into the sidebar — drag directly between the trees;

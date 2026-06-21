@@ -9,11 +9,15 @@ import { create } from "zustand";
 
 import { basename } from "../lib/format";
 import {
+  fsRemove,
   vcsCommit,
+  vcsDiscard,
   vcsOpen,
+  vcsRemote,
   vcsStage,
   vcsStatus,
   vcsUnstage,
+  type VcsChange,
   type VcsStatus,
 } from "../lib/ipc";
 import { useAppStore } from "./appStore";
@@ -31,6 +35,8 @@ export interface TrackedRepo {
   activity: "idle" | "loading" | "error";
   error: string | null;
   lastUpdated: number | null;
+  /** The fetch/pull/push op currently running, or null. */
+  remoteBusy?: "fetch" | "pull" | "push" | null;
 }
 
 interface VcsState {
@@ -38,6 +44,8 @@ interface VcsState {
   scmVisible: boolean;
   /** Which repo's history is shown in the left-of-SCM history panel (or null). */
   historyRepo: { connKey: string; root: string } | null;
+  /** Pending discard awaiting confirmation. */
+  pendingDiscard: { connKey: string; root: string; changes: VcsChange[] } | null;
   /** Normalized absolute path → change kind ("child" marks an ancestor folder). */
   decorations: Record<string, string>;
 
@@ -49,6 +57,10 @@ interface VcsState {
   stage: (connKey: string, root: string, paths: string[]) => Promise<void>;
   unstage: (connKey: string, root: string, paths: string[]) => Promise<void>;
   commit: (connKey: string, root: string, message: string) => Promise<boolean>;
+  remoteOp: (connKey: string, root: string, op: "fetch" | "pull" | "push") => Promise<void>;
+  requestDiscard: (connKey: string, root: string, changes: VcsChange[]) => void;
+  confirmDiscard: () => Promise<void>;
+  cancelDiscard: () => void;
   /** Re-resolve each repo's live connId from the active connections. */
   resolveConns: () => void;
   /** A file changed under `connId`: refresh eager repos that contain it. */
@@ -173,6 +185,7 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
   repos: load(),
   scmVisible: false,
   historyRepo: null,
+  pendingDiscard: null,
   decorations: {},
 
   openRepo: async (connId, dir) => {
@@ -326,6 +339,74 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
     useAppStore.getState().pushNotice("info", "Committed.");
     await get().refreshRepo(connKey, root);
     return true;
+  },
+
+  remoteOp: async (connKey, root, op) => {
+    const repo = get().repos.find((r) => r.connKey === connKey && r.root === root);
+    const connId = repo?.connId;
+    if (!repo || !connId) return;
+    set((s) => ({
+      repos: mapRepo(s.repos, connKey, root, (r) => ({ ...r, remoteBusy: op })),
+    }));
+    try {
+      const msg = await vcsRemote(connId, root, repo.backend, op);
+      const first = msg.split("\n").find((l) => l.trim()) ?? `${op} complete`;
+      useAppStore.getState().pushNotice("info", `${op}: ${first}`);
+    } catch (e) {
+      useAppStore.getState().pushNotice("error", `${op} failed: ${String(e)}`);
+    } finally {
+      set((s) => ({
+        repos: mapRepo(s.repos, connKey, root, (r) => ({ ...r, remoteBusy: null })),
+      }));
+    }
+    await get().refreshRepo(connKey, root);
+  },
+
+  requestDiscard: (connKey, root, changes) =>
+    set({ pendingDiscard: { connKey, root, changes } }),
+  cancelDiscard: () => set({ pendingDiscard: null }),
+  confirmDiscard: async () => {
+    const pd = get().pendingDiscard;
+    if (!pd) return;
+    set({ pendingDiscard: null });
+    const repo = get().repos.find(
+      (r) => r.connKey === pd.connKey && r.root === pd.root,
+    );
+    const connId = repo?.connId;
+    if (!repo || !connId) return;
+    const norm = repo.root.replace(/\\/g, "/").replace(/\/+$/, "");
+    try {
+      if (repo.backend === "jj") {
+        await vcsDiscard(connId, repo.root, "jj", pd.changes.map((c) => c.path));
+      } else {
+        // git: restore tracked changes; for added/untracked, unstage + delete.
+        const tracked = pd.changes
+          .filter((c) => c.kind !== "untracked" && c.kind !== "added")
+          .map((c) => c.path);
+        const fresh = pd.changes.filter(
+          (c) => c.kind === "untracked" || c.kind === "added",
+        );
+        if (tracked.length) await vcsDiscard(connId, repo.root, "git", tracked);
+        for (const c of fresh) {
+          if (c.kind === "added") {
+            try {
+              await vcsUnstage(connId, repo.root, [c.path]);
+            } catch {
+              /* ignore */
+            }
+          }
+          try {
+            await fsRemove(connId, `${norm}/${c.path}`);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      useAppStore.getState().pushNotice("info", "Discarded changes.");
+    } catch (e) {
+      useAppStore.getState().pushNotice("error", `Discard failed: ${String(e)}`);
+    }
+    await get().refreshRepo(pd.connKey, pd.root);
   },
 
   resolveConns: () =>

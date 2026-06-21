@@ -125,6 +125,8 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   const stage = useVcsStore((s) => s.stage);
   const unstage = useVcsStore((s) => s.unstage);
   const commit = useVcsStore((s) => s.commit);
+  const remoteOp = useVcsStore((s) => s.remoteOp);
+  const requestDiscard = useVcsStore((s) => s.requestDiscard);
   const [message, setMessage] = useState("");
   const [committing, setCommitting] = useState(false);
 
@@ -158,8 +160,29 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
         {vcsLetter(c.kind) || "•"}
       </span>
       <span className="change-row__path">{c.path}</span>
+      <button
+        className="change-row__act change-row__act--discard"
+        title="Discard changes"
+        onClick={(e) => {
+          e.stopPropagation();
+          requestDiscard(repo.connKey, repo.root, [c]);
+        }}
+      >
+        ↩
+      </button>
       {action}
     </div>
+  );
+
+  const remoteBtn = (op: "fetch" | "pull" | "push", label: string) => (
+    <button
+      className="repo-card__remote-btn"
+      disabled={inactive || repo.remoteBusy != null}
+      onClick={() => void remoteOp(repo.connKey, repo.root, op)}
+      title={label}
+    >
+      {repo.remoteBusy === op ? "…" : label}
+    </button>
   );
 
   return (
@@ -236,6 +259,14 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
       </div>
 
       {repo.error && <div className="repo-card__error">{repo.error}</div>}
+
+      {!inactive && st && (
+        <div className="repo-card__remote">
+          {remoteBtn("fetch", "Fetch")}
+          {isGit && remoteBtn("pull", "Pull")}
+          {remoteBtn("push", "Push")}
+        </div>
+      )}
 
       {!inactive && st && changes.length > 0 && (
         <div className="repo-card__commit">

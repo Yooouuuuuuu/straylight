@@ -125,6 +125,10 @@ pub fn run() {
             vcs::vcs_unstage,
             vcs::vcs_commit,
             vcs::vcs_log,
+            vcs::vcs_remote,
+            vcs::vcs_commit_files,
+            vcs::vcs_file_at,
+            vcs::vcs_discard,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Straylight application");

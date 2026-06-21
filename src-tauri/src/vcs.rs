@@ -421,6 +421,178 @@ pub async fn vcs_commit(
     ok_or_stderr(out, "commit")
 }
 
+/// Fetch / pull / push (jj: `jj git fetch` / `jj git push`; jj "pull" maps to
+/// fetch). Returns the command output for a toast. May hang on interactive auth —
+/// run those in the terminal instead (our exec channel has no TTY).
+#[tauri::command]
+pub async fn vcs_remote(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    backend: String,
+    op: String,
+) -> Result<String, String> {
+    let argv: Vec<&str> = match (backend.as_str(), op.as_str()) {
+        ("jj", "fetch") | ("jj", "pull") => vec!["jj", "git", "fetch"],
+        ("jj", "push") => vec!["jj", "git", "push"],
+        (_, "fetch") => vec!["git", "fetch"],
+        (_, "pull") => vec!["git", "pull"],
+        (_, "push") => vec!["git", "push"],
+        _ => return Err(format!("unknown operation '{op}'")),
+    };
+    let out = run_command(&state, &conn_id, &root, &argv).await?;
+    let msg = format!("{}\n{}", out.stdout.trim(), out.stderr.trim())
+        .trim()
+        .to_string();
+    if out.code != 0 {
+        return Err(if msg.is_empty() {
+            format!("{op} failed (exit {})", out.code)
+        } else {
+            msg
+        });
+    }
+    Ok(if msg.is_empty() {
+        format!("{op} complete")
+    } else {
+        msg
+    })
+}
+
+/// The files changed by one commit (vs its parent), for browsing history.
+#[tauri::command]
+pub async fn vcs_commit_files(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    backend: String,
+    commit: String,
+) -> Result<Vec<VcsChange>, String> {
+    if backend == "jj" {
+        let out = run_command(
+            &state,
+            &conn_id,
+            &root,
+            &["jj", "--color", "never", "diff", "-r", &commit, "--summary"],
+        )
+        .await?;
+        if out.code != 0 {
+            return Err(out.stderr.trim().to_string());
+        }
+        Ok(parse_jj_summary(&out.stdout))
+    } else {
+        let out = run_command(
+            &state,
+            &conn_id,
+            &root,
+            &[
+                "git",
+                "diff-tree",
+                "--no-commit-id",
+                "-r",
+                "--name-status",
+                "-z",
+                "--root",
+                &commit,
+            ],
+        )
+        .await?;
+        if out.code != 0 {
+            return Err(out.stderr.trim().to_string());
+        }
+        Ok(parse_name_status_z(&out.stdout))
+    }
+}
+
+/// Parse `git diff-tree --name-status -z`: a status token then its path token(s)
+/// (renames/copies carry both old and new paths).
+fn parse_name_status_z(data: &str) -> Vec<VcsChange> {
+    let tokens: Vec<&str> = data.split('\0').filter(|t| !t.is_empty()).collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        let code = tokens[i].chars().next().unwrap_or('M');
+        if (code == 'R' || code == 'C') && i + 2 < tokens.len() {
+            out.push(VcsChange {
+                path: tokens[i + 2].to_string(),
+                old_path: Some(tokens[i + 1].to_string()),
+                kind: kind_from_code(code).into(),
+                staged: false,
+            });
+            i += 3;
+        } else if i + 1 < tokens.len() {
+            out.push(VcsChange {
+                path: tokens[i + 1].to_string(),
+                old_path: None,
+                kind: kind_from_code(code).into(),
+                staged: false,
+            });
+            i += 2;
+        } else {
+            break;
+        }
+    }
+    out
+}
+
+/// A file's content at a specific revision (for browsing a commit's diffs).
+#[tauri::command]
+pub async fn vcs_file_at(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    backend: String,
+    rev: String,
+    path: String,
+) -> Result<VcsFileBase, String> {
+    let out = if backend == "jj" {
+        run_command(
+            &state,
+            &conn_id,
+            &root,
+            &["jj", "--color", "never", "file", "show", "-r", &rev, &path],
+        )
+        .await?
+    } else {
+        let spec = format!("{rev}:{path}");
+        run_command(&state, &conn_id, &root, &["git", "show", &spec]).await?
+    };
+    if out.code != 0 {
+        return Ok(VcsFileBase {
+            content: String::new(),
+            exists: false,
+            is_binary: false,
+        });
+    }
+    let is_binary = looks_binary(out.stdout.as_bytes());
+    Ok(VcsFileBase {
+        content: if is_binary { String::new() } else { out.stdout },
+        exists: true,
+        is_binary,
+    })
+}
+
+/// Discard working-tree changes for paths (git: restore to HEAD + unstage; jj:
+/// restore from the parent). Destructive — the UI confirms first.
+#[tauri::command]
+pub async fn vcs_discard(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    backend: String,
+    paths: Vec<String>,
+) -> Result<(), String> {
+    let lock = repo_guard(&state, &conn_id, &root).await;
+    let _held = lock.lock().await;
+    let mut argv: Vec<&str> = if backend == "jj" {
+        vec!["jj", "restore"]
+    } else {
+        vec!["git", "restore", "--staged", "--worktree", "--"]
+    };
+    argv.extend(paths.iter().map(String::as_str));
+    let out = run_command(&state, &conn_id, &root, &argv).await?;
+    ok_or_stderr(out, "discard")
+}
+
 /// The base (pre-change) version of a file, for the diff's "old" side: git's
 /// `HEAD:<path>` or jj's `@-` revision. `exists: false` means the file isn't in
 /// the base (added/untracked) — the diff shows an empty old side.

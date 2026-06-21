@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   an inline field (e.g. on the "Connect to a server" button).
 - **Auto-refresh** (optional): a filesystem watch for the local tree; SSH would
   poll (opt-in).
-- **Version control, continued:** diff viewer (click a change → Monaco diff),
-  stage/commit (git) and describe/new (jj), then log / blame / push-pull.
+- **Version control, later:** branch/bookmark switching, amend, stash, per-hunk
+  staging, blame, conflict editor, multi-lane commit graph.
 - **Transfer polish (later):** drag directly between the sidebar trees (folding
   the three panel buttons into one), OS drag-in/out, and multi cut/copy/paste in
   the explorer.
@@ -26,6 +26,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Terminal tab reordering.
 - **Phase 3 (continued):** Podman containers, fuzzy finder, search-in-files, port
   forwarding, Markdown preview, and auto-update.
+
+## [0.8.3] - 2026-06-21
+
+Sync with remotes, browse history, and undo changes.
+
+### Added
+
+- **Fetch / Pull / Push** per repo (jj: `jj git fetch` / `jj git push`). Note: these
+  authenticate as the *host's* git identity; an interactive prompt (key passphrase,
+  2FA, HTTPS password) will hang the in-app command — run those in the terminal.
+- **Browse history.** Click a commit in the history view to expand its changed
+  files; click a file to open a diff **for that commit** (commit vs its parent),
+  for git and jj.
+- **Discard changes** (↩ on a change row) — reverts a file to the last commit
+  (git `restore` / jj `restore`) and deletes new/untracked files, behind a confirm.
+
+## [0.8.2] - 2026-06-21
+
+Commit history, and clearer staging.
+
+### Added
+
+- **Commit history.** The **⎇** button on a repo card opens a history panel
+  appended to the left of the Source Control cards — a single-lane graph with each
+  commit's refs/bookmarks, subject, author, and time — plus a **⧉** button to pop
+  it out into a full-width editor tab. Works for git and jj.
+- **A `git` / `jj` badge** on every repo card.
+
+### Fixed
+
+- **Staging status was ambiguous.** A file that's staged *and* re-modified now
+  shows in **both** Staged and Changes; after `git add .` everything sits under a
+  clear "✓ Staged Changes" group (previously a staged `M` was indistinguishable
+  from an unstaged `M`).
+
+## [0.8.1] - 2026-06-21
+
+Diff and commit.
+
+### Added
+
+- **Diff viewer.** Click a changed file in Source Control → a read-only Monaco
+  side-by-side diff (base — git `HEAD:` / jj `@-` — vs the working copy). Opens as
+  a tab; added/untracked → empty old side, deleted → empty new side, renames diff
+  against the old path, binaries are skipped.
+- **Stage / unstage / commit.** git cards split into **Staged Changes** and
+  **Changes** with per-file and "all" actions and a commit-message box (commits the
+  staged set). jj uses **describe + commit** (`jj commit`) — no staging. Mutations
+  serialize per repo so rapid clicks can't collide on `index.lock`.
 
 ## [0.8.0] - 2026-06-21
 

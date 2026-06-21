@@ -2,7 +2,7 @@
  *  jj `@-`) vs the working copy. Added/untracked → empty old side; deleted →
  *  empty new side. */
 import { basename } from "./format";
-import { fsReadFile, vcsFileBase, type VcsChange } from "./ipc";
+import { fsReadFile, vcsFileAt, vcsFileBase, type VcsChange } from "./ipc";
 import { languageForFile } from "./language";
 import { useAppStore } from "../store/appStore";
 import type { TrackedRepo } from "../store/vcsStore";
@@ -51,6 +51,54 @@ export async function openDiff(repo: TrackedRepo, change: VcsChange): Promise<vo
       content,
       language: languageForFile(basename(change.path)),
       isBinary: baseBinary || workingBinary,
+    });
+  } finally {
+    store.setBusyPath(null);
+  }
+}
+
+/** Open a diff for a file *as changed by a specific commit* (commit vs parent). */
+export async function openCommitDiff(
+  conn: { connId: string; root: string; backend: string },
+  commitId: string,
+  change: VcsChange,
+): Promise<void> {
+  const store = useAppStore.getState();
+  const root = conn.root.replace(/\\/g, "/").replace(/\/+$/, "");
+  const parentRev = conn.backend === "jj" ? `${commitId}-` : `${commitId}^`;
+  const newPath = change.path;
+  const oldPath = change.oldPath ?? change.path;
+
+  store.setBusyPath(newPath);
+  try {
+    let base = "";
+    let baseBinary = false;
+    try {
+      const b = await vcsFileAt(conn.connId, root, conn.backend, parentRev, oldPath);
+      base = b.content;
+      baseBinary = b.isBinary;
+    } catch {
+      /* no parent side */
+    }
+    let content = "";
+    let newBinary = false;
+    try {
+      const f = await vcsFileAt(conn.connId, root, conn.backend, commitId, newPath);
+      content = f.content;
+      newBinary = f.isBinary;
+    } catch {
+      /* deleted in this commit */
+    }
+    store.openDiffTab({
+      connId: conn.connId,
+      name: `${basename(newPath)} @ ${commitId.slice(0, 7)}`,
+      path: newPath,
+      relPath: `${commitId}:${newPath}`, // unique tab per commit+file
+      base,
+      baseExists: base.length > 0,
+      content,
+      language: languageForFile(basename(newPath)),
+      isBinary: baseBinary || newBinary,
     });
   } finally {
     store.setBusyPath(null);
