@@ -628,16 +628,9 @@ fn parse_jj_summary(data: &str) -> Vec<VcsChange> {
     out
 }
 
-/// Map a porcelain v2 `<XY>` field to a change kind + staged flag. `X` is the
-/// index (staged) status, `Y` the worktree; we report the worktree change if
-/// present, else the staged one.
-fn kind_from_xy(xy: &str) -> (String, bool) {
-    let b = xy.as_bytes();
-    let x = *b.first().unwrap_or(&b'.') as char;
-    let y = *b.get(1).unwrap_or(&b'.') as char;
-    let staged = x != '.';
-    let code = if y != '.' { y } else { x };
-    let kind = match code {
+/// Map a single porcelain status letter to a change kind.
+fn kind_from_code(code: char) -> &'static str {
+    match code {
         'A' => "added",
         'D' => "deleted",
         'R' => "renamed",
@@ -645,8 +638,7 @@ fn kind_from_xy(xy: &str) -> (String, bool) {
         'T' => "typechange",
         'U' => "conflicted",
         _ => "modified",
-    };
-    (kind.to_string(), staged)
+    }
 }
 
 /// Parse `git status --porcelain=v2 --branch -z`. In `-z` mode every record
@@ -673,30 +665,58 @@ fn parse_porcelain_v2(data: &str) -> VcsStatus {
                 }
             }
         } else if let Some(rest) = t.strip_prefix("1 ") {
-            // <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>
+            // <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>. X = index (staged),
+            // Y = worktree — emit a separate entry for each non-`.` side so a
+            // file staged *and* re-modified shows in both groups.
             let parts: Vec<&str> = rest.splitn(8, ' ').collect();
             if parts.len() == 8 {
-                let (kind, staged) = kind_from_xy(parts[0]);
-                changes.push(VcsChange {
-                    path: parts[7].to_string(),
-                    old_path: None,
-                    kind,
-                    staged,
-                });
+                let xy = parts[0].as_bytes();
+                let x = *xy.first().unwrap_or(&b'.') as char;
+                let y = *xy.get(1).unwrap_or(&b'.') as char;
+                let path = parts[7].to_string();
+                if x != '.' {
+                    changes.push(VcsChange {
+                        path: path.clone(),
+                        old_path: None,
+                        kind: kind_from_code(x).into(),
+                        staged: true,
+                    });
+                }
+                if y != '.' {
+                    changes.push(VcsChange {
+                        path,
+                        old_path: None,
+                        kind: kind_from_code(y).into(),
+                        staged: false,
+                    });
+                }
             }
         } else if let Some(rest) = t.strip_prefix("2 ") {
-            // <XY> <sub> <mH> <mI> <mW> <hH> <hI> <Xscore> <path> ; origPath = next token
+            // <XY> … <Xscore> <path> ; origPath = next token (rename/copy).
             let parts: Vec<&str> = rest.splitn(9, ' ').collect();
             if parts.len() == 9 {
-                let (kind, staged) = kind_from_xy(parts[0]);
+                let xy = parts[0].as_bytes();
+                let x = *xy.first().unwrap_or(&b'.') as char;
+                let y = *xy.get(1).unwrap_or(&b'.') as char;
+                let path = parts[8].to_string();
                 let old_path = tokens.get(i + 1).map(|s| s.to_string());
                 i += 1; // consume the original-path token
-                changes.push(VcsChange {
-                    path: parts[8].to_string(),
-                    old_path,
-                    kind,
-                    staged,
-                });
+                if x != '.' {
+                    changes.push(VcsChange {
+                        path: path.clone(),
+                        old_path,
+                        kind: kind_from_code(x).into(),
+                        staged: true,
+                    });
+                }
+                if y != '.' {
+                    changes.push(VcsChange {
+                        path,
+                        old_path: None,
+                        kind: kind_from_code(y).into(),
+                        staged: false,
+                    });
+                }
             }
         } else if let Some(rest) = t.strip_prefix("u ") {
             // <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>
@@ -760,6 +780,16 @@ mod tests {
         assert_eq!(s.changes[1].kind, "renamed");
         assert_eq!(s.changes[1].path, "new.txt");
         assert_eq!(s.changes[1].old_path.as_deref(), Some("old.txt"));
+    }
+
+    #[test]
+    fn splits_staged_and_unstaged() {
+        // "MM" = staged modification + further worktree modification → both groups.
+        let data = "# branch.head main\01 MM N... 100644 100644 100644 aaa bbb f.txt\0";
+        let s = parse_porcelain_v2(data);
+        assert_eq!(s.changes.len(), 2);
+        assert!(s.changes[0].staged && s.changes[0].kind == "modified");
+        assert!(!s.changes[1].staged && s.changes[1].kind == "modified");
     }
 
     #[test]

@@ -502,6 +502,62 @@
   text-decoration: underline;
 }
 
+.repo-card__group-head--staged {
+  color: var(--green);
+}
+
+/* The VC region holds the history panel appended to the left of the SCM cards. */
+.vc-region {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+.vc-region .history-panel {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.vc-region .scm {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* History panel (appended to the left of the Source Control cards) */
+.history-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.history-panel__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.history-panel__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-secondary);
+}
+
+.history-panel__body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .repo-card__stamp {
   padding: var(--space-2) var(--space-4);
   font-size: var(--font-size-xs);

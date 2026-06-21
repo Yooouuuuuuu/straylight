@@ -121,7 +121,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   const cancelRefresh = useVcsStore((s) => s.cancelRefresh);
   const toggleEager = useVcsStore((s) => s.toggleEager);
   const removeRepo = useVcsStore((s) => s.removeRepo);
-  const openLogTab = useAppStore((s) => s.openLogTab);
+  const showHistory = useVcsStore((s) => s.showHistory);
   const stage = useVcsStore((s) => s.stage);
   const unstage = useVcsStore((s) => s.unstage);
   const commit = useVcsStore((s) => s.commit);
@@ -196,14 +196,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
           className="icon-btn"
           title="Commit history"
           disabled={inactive}
-          onClick={() =>
-            openLogTab({
-              connId: repo.connId!,
-              root: repo.root,
-              backend: repo.backend,
-              label: repo.label,
-            })
-          }
+          onClick={() => showHistory(repo.connKey, repo.root)}
         >
           ⎇
         </button>
@@ -274,8 +267,8 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
         <>
           {staged.length > 0 && (
             <div className="repo-card__group">
-              <div className="repo-card__group-head">
-                <span>Staged ({staged.length})</span>
+              <div className="repo-card__group-head repo-card__group-head--staged">
+                <span>✓ Staged Changes ({staged.length})</span>
                 <button
                   className="repo-card__group-act"
                   onClick={() =>

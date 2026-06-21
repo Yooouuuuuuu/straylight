@@ -23,6 +23,7 @@ import { EditorArea } from "./components/layout/EditorArea";
 import { TerminalPanel } from "./components/layout/TerminalPanel";
 import { StatusBar } from "./components/layout/StatusBar";
 import { ScmPanel } from "./components/vcs/ScmPanel";
+import { HistoryPanel } from "./components/vcs/HistoryPanel";
 import { ConnectionDialog } from "./components/connection/ConnectionDialog";
 import { ConflictDialog } from "./components/editor/ConflictDialog";
 import { CloseConfirmDialog } from "./components/editor/CloseConfirmDialog";
@@ -45,6 +46,7 @@ export default function App() {
   const wslConnId = useAppStore((s) => s.wsl?.connId ?? null);
   const scmVisible = useVcsStore((s) => s.scmVisible);
   const setScmVisible = useVcsStore((s) => s.setScmVisible);
+  const historyOpen = useVcsStore((s) => s.historyRepo != null);
 
   const sidebarPanel = useRef<ImperativePanelHandle>(null);
   const terminalPanel = useRef<ImperativePanelHandle>(null);
@@ -139,6 +141,15 @@ export default function App() {
     else if (!scmVisible && !panel.isCollapsed()) panel.collapse();
   }, [scmVisible]);
 
+  // When history appends inside the VC panel, make sure that panel is open and
+  // wide enough to hold both the history and the cards.
+  useEffect(() => {
+    const panel = scmPanel.current;
+    if (!panel || !historyOpen) return;
+    if (panel.isCollapsed()) panel.expand();
+    if (panel.getSize() < 40) panel.resize(44);
+  }, [historyOpen]);
+
   // Drive the sidebar panel's collapse state from the store.
   useEffect(() => {
     const panel = sidebarPanel.current;
@@ -222,11 +233,14 @@ export default function App() {
             collapsedSize={0}
             defaultSize={22}
             minSize={14}
-            maxSize={40}
+            maxSize={60}
             onCollapse={() => setScmVisible(false)}
             onExpand={() => setScmVisible(true)}
           >
-            <ScmPanel />
+            <div className="vc-region">
+              {historyOpen && <HistoryPanel />}
+              <ScmPanel />
+            </div>
           </Panel>
         </PanelGroup>
       </div>

@@ -36,6 +36,8 @@ export interface TrackedRepo {
 interface VcsState {
   repos: TrackedRepo[];
   scmVisible: boolean;
+  /** Which repo's history is shown in the left-of-SCM history panel (or null). */
+  historyRepo: { connKey: string; root: string } | null;
   /** Normalized absolute path → change kind ("child" marks an ancestor folder). */
   decorations: Record<string, string>;
 
@@ -53,6 +55,8 @@ interface VcsState {
   onFileChanged: (connId: string, path: string) => void;
   setScmVisible: (v: boolean) => void;
   toggleScm: () => void;
+  showHistory: (connKey: string, root: string) => void;
+  closeHistory: () => void;
 }
 
 const KEY = "straylight.vcsRepos";
@@ -168,6 +172,7 @@ const tokens = new Map<string, number>();
 export const useVcsStore = create<VcsState>()((set, get) => ({
   repos: load(),
   scmVisible: false,
+  historyRepo: null,
   decorations: {},
 
   openRepo: async (connId, dir) => {
@@ -344,4 +349,7 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
 
   setScmVisible: (scmVisible) => set({ scmVisible }),
   toggleScm: () => set((s) => ({ scmVisible: !s.scmVisible })),
+  showHistory: (connKey, root) =>
+    set({ historyRepo: { connKey, root }, scmVisible: true }),
+  closeHistory: () => set({ historyRepo: null }),
 }));

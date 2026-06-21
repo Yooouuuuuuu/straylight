@@ -5,25 +5,32 @@
 import { useEffect, useState } from "react";
 
 import { vcsLog, type VcsCommit } from "../../lib/ipc";
-import type { EditorTab } from "../../store/appStore";
 import { RelativeTime } from "../RelativeTime";
 
-export function VcsLogView({ tab }: { tab: EditorTab }) {
+export function VcsLogView({
+  connId,
+  root,
+  backend,
+}: {
+  connId: string;
+  root: string;
+  backend: string;
+}) {
   const [commits, setCommits] = useState<VcsCommit[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const isJj = tab.vcsBackend === "jj";
+  const isJj = backend === "jj";
 
   useEffect(() => {
     let active = true;
     setCommits(null);
     setError(null);
-    vcsLog(tab.connId, tab.path, tab.vcsBackend ?? "git", 200)
+    vcsLog(connId, root, backend, 200)
       .then((c) => active && setCommits(c))
       .catch((e) => active && setError(String(e)));
     return () => {
       active = false;
     };
-  }, [tab.id, tab.connId, tab.path, tab.vcsBackend]);
+  }, [connId, root, backend]);
 
   return (
     <div className="vcs-log">

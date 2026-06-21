@@ -80,7 +80,11 @@ export function EditorArea() {
               {active?.kind === "diff" ? (
                 <MonacoDiffWrapper tab={active} />
               ) : active?.kind === "log" ? (
-                <VcsLogView tab={active} />
+                <VcsLogView
+                  connId={active.connId}
+                  root={active.path}
+                  backend={active.vcsBackend ?? "git"}
+                />
               ) : (
                 active?.isBinary && <BinaryFileCard file={active} />
               )}
