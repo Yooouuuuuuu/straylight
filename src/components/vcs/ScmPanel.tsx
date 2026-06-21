@@ -3,11 +3,12 @@
  *  "eager", and show a running indicator (which doubles as a manual cancel).
  *  Slice 1 is read-only — the change list, branch, and counts; commit/diff come
  *  in later slices. */
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { useAppStore } from "../../store/appStore";
 import { useVcsStore, type TrackedRepo } from "../../store/vcsStore";
 import { openDiff } from "../../lib/openDiff";
+import { vcsBranches, type VcsBranch } from "../../lib/ipc";
 import { vcsClass, vcsLetter } from "../../lib/vcsDecorations";
 import { FolderBrowser } from "../FolderBrowser";
 import { RelativeTime } from "../RelativeTime";
@@ -127,8 +128,12 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   const commit = useVcsStore((s) => s.commit);
   const remoteOp = useVcsStore((s) => s.remoteOp);
   const requestDiscard = useVcsStore((s) => s.requestDiscard);
+  const amend = useVcsStore((s) => s.amend);
+  const stash = useVcsStore((s) => s.stash);
   const [message, setMessage] = useState("");
   const [committing, setCommitting] = useState(false);
+  const [amendMode, setAmendMode] = useState(false);
+  const [branchOpen, setBranchOpen] = useState(false);
 
   const st = repo.status;
   const inactive = !repo.connId;
@@ -139,14 +144,20 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   const unstaged = changes.filter((c) => !c.staged);
   const canCommit =
     !inactive &&
-    message.trim().length > 0 &&
-    (isGit ? staged.length > 0 : changes.length > 0);
+    (amendMode
+      ? message.trim().length > 0
+      : message.trim().length > 0 && (isGit ? staged.length > 0 : changes.length > 0));
 
   const doCommit = async () => {
     setCommitting(true);
-    const ok = await commit(repo.connKey, repo.root, message.trim());
+    const ok = amendMode
+      ? await amend(repo.connKey, repo.root, message.trim())
+      : await commit(repo.connKey, repo.root, message.trim());
     setCommitting(false);
-    if (ok) setMessage("");
+    if (ok) {
+      setMessage("");
+      setAmendMode(false);
+    }
   };
 
   const changeRow = (c: (typeof changes)[number], action: ReactNode) => (
@@ -244,7 +255,13 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
           <span className="repo-card__offline">offline</span>
         ) : st ? (
           <>
-            <span className="repo-card__branch">{st.ref || "—"}</span>
+            <span
+              className="repo-card__branch repo-card__branch--btn"
+              title="Switch / create branch"
+              onClick={() => setBranchOpen((o) => !o)}
+            >
+              {st.ref || "—"} ▾
+            </span>
             {(st.ahead || st.behind) && (
               <span className="repo-card__ab">
                 {st.ahead ? `↑${st.ahead}` : ""}
@@ -258,6 +275,10 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
         )}
       </div>
 
+      {branchOpen && !inactive && (
+        <BranchMenu repo={repo} onClose={() => setBranchOpen(false)} />
+      )}
+
       {repo.error && <div className="repo-card__error">{repo.error}</div>}
 
       {!inactive && st && (
@@ -265,10 +286,28 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
           {remoteBtn("fetch", "Fetch")}
           {isGit && remoteBtn("pull", "Pull")}
           {remoteBtn("push", "Push")}
+          {isGit && (
+            <button
+              className="repo-card__remote-btn"
+              onClick={() => void stash(repo.connKey, repo.root, "push", message.trim())}
+              title="Stash all changes"
+            >
+              Stash
+            </button>
+          )}
+          {isGit && (
+            <button
+              className="repo-card__remote-btn"
+              onClick={() => void stash(repo.connKey, repo.root, "pop", "")}
+              title="Pop the latest stash"
+            >
+              Pop
+            </button>
+          )}
         </div>
       )}
 
-      {!inactive && st && changes.length > 0 && (
+      {!inactive && st && (changes.length > 0 || isGit) && (
         <div className="repo-card__commit">
           <textarea
             className="repo-card__msg input--mono"
@@ -279,17 +318,31 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
             value={message}
             onChange={(e) => setMessage(e.target.value)}
           />
+          {isGit && (
+            <label className="repo-card__amend">
+              <input
+                type="checkbox"
+                checked={amendMode}
+                onChange={(e) => setAmendMode(e.target.checked)}
+              />
+              Amend last commit
+            </label>
+          )}
           <button
             className="btn btn--primary btn--block"
             disabled={!canCommit || committing}
             onClick={() => void doCommit()}
             title={
-              isGit && staged.length === 0
-                ? "Stage changes first"
-                : "Commit"
+              !amendMode && isGit && staged.length === 0 ? "Stage changes first" : "Commit"
             }
           >
-            {committing ? "Committing…" : "Commit"}
+            {committing
+              ? amendMode
+                ? "Amending…"
+                : "Committing…"
+              : amendMode
+                ? "Amend"
+                : "Commit"}
           </button>
         </div>
       )}
@@ -374,6 +427,76 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
           updated <RelativeTime at={repo.lastUpdated} />
         </div>
       )}
+    </div>
+  );
+}
+
+function BranchMenu({
+  repo,
+  onClose,
+}: {
+  repo: TrackedRepo;
+  onClose: () => void;
+}) {
+  const switchBranch = useVcsStore((s) => s.switchBranch);
+  const createBranch = useVcsStore((s) => s.createBranch);
+  const [branches, setBranches] = useState<VcsBranch[] | null>(null);
+  const [name, setName] = useState("");
+  const isJj = repo.backend === "jj";
+
+  useEffect(() => {
+    if (!repo.connId) return;
+    let active = true;
+    vcsBranches(repo.connId, repo.root, repo.backend)
+      .then((b) => active && setBranches(b))
+      .catch(() => active && setBranches([]));
+    return () => {
+      active = false;
+    };
+  }, [repo.connId, repo.root, repo.backend]);
+
+  return (
+    <div className="branch-menu">
+      <div className="branch-menu__list">
+        {branches === null ? (
+          <div className="branch-menu__msg">
+            <span className="spinner spinner--sm" /> Loading…
+          </div>
+        ) : branches.length === 0 ? (
+          <div className="branch-menu__msg">
+            No {isJj ? "bookmarks" : "branches"} yet.
+          </div>
+        ) : (
+          branches.map((b) => (
+            <button
+              key={b.name}
+              className={`branch-menu__item ${b.current ? "branch-menu__item--current" : ""}`}
+              disabled={b.current}
+              onClick={() => {
+                void switchBranch(repo.connKey, repo.root, b.name);
+                onClose();
+              }}
+            >
+              {b.current ? "● " : ""}
+              {b.name}
+            </button>
+          ))
+        )}
+      </div>
+      <input
+        className="input input--mono branch-menu__new"
+        placeholder={isJj ? "New bookmark…" : "New branch…"}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && name.trim()) {
+            void createBranch(repo.connKey, repo.root, name.trim());
+            onClose();
+          } else if (e.key === "Escape") {
+            onClose();
+          }
+        }}
+      />
     </div>
   );
 }

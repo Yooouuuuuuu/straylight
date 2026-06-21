@@ -13,8 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   an inline field (e.g. on the "Connect to a server" button).
 - **Auto-refresh** (optional): a filesystem watch for the local tree; SSH would
   poll (opt-in).
-- **Version control, later:** branch/bookmark switching, amend, stash, per-hunk
-  staging, blame, conflict editor, multi-lane commit graph.
+- **Version control, later:** per-hunk staging, blame, conflict editor, multi-lane
+  commit graph.
+- **Phase 3, later:** Podman containers, Markdown preview, auto-update.
 - **Transfer polish (later):** drag directly between the sidebar trees (folding
   the three panel buttons into one), OS drag-in/out, and multi cut/copy/paste in
   the explorer.
@@ -24,8 +25,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 - Terminal tab reordering.
-- **Phase 3 (continued):** Podman containers, fuzzy finder, search-in-files, port
-  forwarding, Markdown preview, and auto-update.
+## [0.8.4] - 2026-06-22
+
+Round out version control, and add quick-open, search, and port forwarding.
+
+### Added
+
+- **Branch / bookmark switching.** Click the branch on a repo card to switch
+  (`git switch` / `jj new <bookmark>`) or type a name to create + switch.
+- **Amend** the last commit (git), and **stash / pop** (git).
+- **Fuzzy file finder (Ctrl+P).** Index files across every pinned folder and
+  fuzzy-open one. Local walks the filesystem; remote/WSL use `find`.
+- **Search in files (Ctrl+Shift+F).** Literal search across pinned folders, grouped
+  by file; click a hit to open the file at that line. Local scans in Rust;
+  remote/WSL use `grep`.
+- **Port forwarding.** A "Ports" status-bar control forwards a local 127.0.0.1
+  port to a `host:port` reachable from the SSH server, over a `direct-tcpip`
+  tunnel on the existing connection.
+
+### Internal
+
+- Extracted a reusable `exec` module (the host command-runner shared by VCS, the
+  finder, and search).
 
 ## [0.8.3] - 2026-06-21
 

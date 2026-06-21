@@ -132,6 +132,20 @@ impl Connection {
             .map_err(|e| format!("could not open SSH channel: {e}"))
     }
 
+    /// Open a `direct-tcpip` channel to `host:port` as reachable from the server
+    /// — the per-connection tunnel behind local port forwarding.
+    pub async fn open_direct_tcpip(
+        &self,
+        host: &str,
+        port: u32,
+    ) -> Result<Channel<client::Msg>, String> {
+        let handle = self.live.read().await.handle.clone();
+        handle
+            .channel_open_direct_tcpip(host.to_string(), port, "127.0.0.1".to_string(), 0)
+            .await
+            .map_err(|e| format!("could not open tunnel to {host}:{port}: {e}"))
+    }
+
     /// Drop the cached SFTP session so the next operation re-opens it. Used when
     /// an SFTP call fails (e.g. the channel died) and after a reconnect.
     pub async fn reset_sftp(&self) {

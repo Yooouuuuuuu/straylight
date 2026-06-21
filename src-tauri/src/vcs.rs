@@ -10,105 +10,9 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::State;
 
-use crate::ssh::connection::Connection;
+use crate::exec::{run_command, CmdOutput};
 use crate::transport::looks_binary;
-use crate::{AppState, Session};
-
-/// Result of running one command on a host.
-struct CmdOutput {
-    stdout: String,
-    stderr: String,
-    code: i32,
-}
-
-/// Quote one argument for a POSIX shell (single-quote, escaping embedded quotes).
-fn shell_quote(arg: &str) -> String {
-    let mut out = String::with_capacity(arg.len() + 2);
-    out.push('\'');
-    for ch in arg.chars() {
-        if ch == '\'' {
-            out.push_str("'\\''");
-        } else {
-            out.push(ch);
-        }
-    }
-    out.push('\'');
-    out
-}
-
-/// Run `argv` in `cwd` on the host behind `conn_id` (SSH exec or local process).
-async fn run_command(
-    state: &AppState,
-    conn_id: &str,
-    cwd: &str,
-    argv: &[&str],
-) -> Result<CmdOutput, String> {
-    enum Target {
-        Ssh(Arc<Connection>),
-        Local,
-    }
-    // Resolve the target and drop the lock before the (possibly slow) command.
-    let target = {
-        let sessions = state.sessions.lock().await;
-        match sessions.get(conn_id) {
-            Some(Session::Ssh(conn)) => Target::Ssh(conn.clone()),
-            Some(Session::Local) => Target::Local,
-            None => return Err(format!("session '{conn_id}' is not open")),
-        }
-    };
-    match target {
-        Target::Ssh(conn) => run_ssh(&conn, cwd, argv).await,
-        Target::Local => run_local(cwd, argv).await,
-    }
-}
-
-async fn run_ssh(conn: &Connection, cwd: &str, argv: &[&str]) -> Result<CmdOutput, String> {
-    use russh::ChannelMsg;
-
-    let mut channel = conn.open_channel().await?;
-    let quoted: Vec<String> = argv.iter().map(|a| shell_quote(a)).collect();
-    // `cd` into the repo, force a stable locale, then run the command.
-    let command = format!("cd {} && LC_ALL=C {}", shell_quote(cwd), quoted.join(" "));
-    channel
-        .exec(true, command.as_bytes())
-        .await
-        .map_err(|e| format!("could not start command: {e}"))?;
-
-    let mut stdout: Vec<u8> = Vec::new();
-    let mut stderr: Vec<u8> = Vec::new();
-    let mut code: Option<i32> = None;
-    // Read to the end of the channel; ExitStatus can arrive before or after Eof,
-    // so we keep going until the channel actually closes.
-    loop {
-        match channel.wait().await {
-            Some(ChannelMsg::Data { data }) => stdout.extend_from_slice(&data),
-            Some(ChannelMsg::ExtendedData { data, .. }) => stderr.extend_from_slice(&data),
-            Some(ChannelMsg::ExitStatus { exit_status }) => code = Some(exit_status as i32),
-            Some(ChannelMsg::Close) | None => break,
-            _ => {}
-        }
-    }
-    Ok(CmdOutput {
-        stdout: String::from_utf8_lossy(&stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&stderr).into_owned(),
-        code: code.unwrap_or(-1),
-    })
-}
-
-async fn run_local(cwd: &str, argv: &[&str]) -> Result<CmdOutput, String> {
-    let (bin, rest) = argv.split_first().ok_or("empty command")?;
-    let output = tokio::process::Command::new(bin)
-        .args(rest)
-        .current_dir(cwd)
-        .output()
-        .await
-        .map_err(|e| format!("could not run {bin}: {e}"))?;
-    Ok(CmdOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        code: output.status.code().unwrap_or(-1),
-    })
-}
+use crate::AppState;
 
 /// A detected repository: which VCS, and its absolute root.
 #[derive(Debug, Clone, Serialize)]
@@ -419,6 +323,162 @@ pub async fn vcs_commit(
         run_command(&state, &conn_id, &root, &["git", "commit", "-m", &message]).await?
     };
     ok_or_stderr(out, "commit")
+}
+
+/// A branch (git) or bookmark (jj).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VcsBranch {
+    pub name: String,
+    pub current: bool,
+}
+
+/// List local branches / bookmarks, marking the current one.
+#[tauri::command]
+pub async fn vcs_branches(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    backend: String,
+) -> Result<Vec<VcsBranch>, String> {
+    if backend == "jj" {
+        let names = run_command(
+            &state,
+            &conn_id,
+            &root,
+            &["jj", "--color", "never", "bookmark", "list", "-T", "name ++ \"\\n\""],
+        )
+        .await?;
+        let cur = run_command(
+            &state,
+            &conn_id,
+            &root,
+            &["jj", "--color", "never", "log", "--no-graph", "-r", "@ | @-", "-T", "bookmarks ++ \" \""],
+        )
+        .await?;
+        let current: std::collections::HashSet<&str> = cur.stdout.split_whitespace().collect();
+        Ok(names
+            .stdout
+            .lines()
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map(|n| VcsBranch {
+                name: n.to_string(),
+                current: current.contains(n),
+            })
+            .collect())
+    } else {
+        let cur = run_command(&state, &conn_id, &root, &["git", "branch", "--show-current"]).await?;
+        let current = cur.stdout.trim().to_string();
+        let list = run_command(
+            &state,
+            &conn_id,
+            &root,
+            &["git", "for-each-ref", "--format=%(refname:short)", "refs/heads"],
+        )
+        .await?;
+        if list.code != 0 {
+            return Err(list.stderr.trim().to_string());
+        }
+        Ok(list
+            .stdout
+            .lines()
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map(|n| VcsBranch {
+                name: n.to_string(),
+                current: n == current,
+            })
+            .collect())
+    }
+}
+
+/// Switch to an existing branch / bookmark (jj: start a new change on it).
+#[tauri::command]
+pub async fn vcs_switch(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    backend: String,
+    target: String,
+) -> Result<(), String> {
+    let lock = repo_guard(&state, &conn_id, &root).await;
+    let _held = lock.lock().await;
+    let out = if backend == "jj" {
+        run_command(&state, &conn_id, &root, &["jj", "new", &target]).await?
+    } else {
+        run_command(&state, &conn_id, &root, &["git", "switch", &target]).await?
+    };
+    ok_or_stderr(out, "switch")
+}
+
+/// Create a new branch / bookmark at the current position and switch to it.
+#[tauri::command]
+pub async fn vcs_create_branch(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    backend: String,
+    name: String,
+) -> Result<(), String> {
+    let lock = repo_guard(&state, &conn_id, &root).await;
+    let _held = lock.lock().await;
+    let out = if backend == "jj" {
+        run_command(&state, &conn_id, &root, &["jj", "bookmark", "create", &name, "-r", "@"]).await?
+    } else {
+        run_command(&state, &conn_id, &root, &["git", "switch", "-c", &name]).await?
+    };
+    ok_or_stderr(out, "create branch")
+}
+
+/// Amend the last commit (git only) — uses the staged set; keeps the existing
+/// message when `message` is empty.
+#[tauri::command]
+pub async fn vcs_amend(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    message: String,
+) -> Result<(), String> {
+    let lock = repo_guard(&state, &conn_id, &root).await;
+    let _held = lock.lock().await;
+    let out = if message.trim().is_empty() {
+        run_command(&state, &conn_id, &root, &["git", "commit", "--amend", "--no-edit"]).await?
+    } else {
+        run_command(&state, &conn_id, &root, &["git", "commit", "--amend", "-m", &message]).await?
+    };
+    ok_or_stderr(out, "amend")
+}
+
+/// git stash (git only): op = `push` | `pop` | `list`. `list` returns the
+/// stashes (one per line); the others return their output for a toast.
+#[tauri::command]
+pub async fn vcs_stash(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    op: String,
+    message: String,
+) -> Result<String, String> {
+    let lock = repo_guard(&state, &conn_id, &root).await;
+    let _held = lock.lock().await;
+    let argv: Vec<&str> = match op.as_str() {
+        "push" if message.trim().is_empty() => vec!["git", "stash", "push"],
+        "push" => vec!["git", "stash", "push", "-m", &message],
+        "pop" => vec!["git", "stash", "pop"],
+        "list" => vec!["git", "stash", "list", "--format=%gd: %s"],
+        _ => return Err(format!("unknown stash op '{op}'")),
+    };
+    let out = run_command(&state, &conn_id, &root, &argv).await?;
+    if out.code != 0 {
+        let msg = out.stderr.trim();
+        return Err(if msg.is_empty() {
+            format!("stash {op} failed")
+        } else {
+            msg.to_string()
+        });
+    }
+    Ok(out.stdout.trim().to_string())
 }
 
 /// Fetch / pull / push (jj: `jj git fetch` / `jj git push`; jj "pull" maps to

@@ -134,6 +134,27 @@ export function MonacoWrapper() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTabId]);
 
+  // Reveal a target line once its file's model is active (from search results).
+  const revealTarget = useAppStore((s) => s.revealTarget);
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !revealTarget) return;
+    const tab = useAppStore.getState().tabs.find((t) => t.id === activeTabId);
+    if (
+      !tab ||
+      tab.connId !== revealTarget.connId ||
+      tab.path !== revealTarget.path ||
+      !editor.getModel()
+    ) {
+      return;
+    }
+    const line = Math.max(1, revealTarget.line);
+    editor.revealLineInCenter(line);
+    editor.setPosition({ lineNumber: line, column: 1 });
+    editor.focus();
+    useAppStore.getState().setRevealTarget(null);
+  }, [revealTarget, activeTabId]);
+
   // Dispose models for tabs that were closed.
   useEffect(() => {
     const ids = new Set(tabs.map((t) => t.id));

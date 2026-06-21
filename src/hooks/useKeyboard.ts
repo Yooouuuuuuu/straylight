@@ -31,6 +31,19 @@ export function useKeyboard() {
             event.preventDefault();
           }
           break;
+        case "quickOpen":
+          // Ctrl+P is readline "previous" in a terminal — leave it there.
+          if (!inTerminal) {
+            store.setFinderOpen(true);
+            event.preventDefault();
+          }
+          break;
+        case "searchInFiles":
+          if (!inTerminal) {
+            store.setSearchOpen(true);
+            event.preventDefault();
+          }
+          break;
         case "nextTab":
           if (store.tabs.length > 1) {
             store.cycleTab(1);

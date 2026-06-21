@@ -207,6 +207,14 @@ interface AppState {
   /** True while the transfer panel is open — so global F2/Delete don't act on
    *  the explorer selection while the transfer pane owns those keys. */
   transferOpen: boolean;
+  /** The fuzzy file finder (Ctrl+P) overlay. */
+  finderOpen: boolean;
+  /** The search-in-files (Ctrl+Shift+F) overlay. */
+  searchOpen: boolean;
+  /** The port-forwarding overlay. */
+  portsOpen: boolean;
+  /** A line to reveal once a file's editor model is ready (from search). */
+  revealTarget: { connId: string; path: string; line: number } | null;
   sidebarVisible: boolean;
   terminalVisible: boolean;
   /** User preference for which workspace a new terminal opens on. */
@@ -274,6 +282,10 @@ interface AppState {
   setDialogOpen: (open: boolean) => void;
   openDialog: (prefill?: SshHostEntry | null, note?: string | null) => void;
   setTransferOpen: (open: boolean) => void;
+  setFinderOpen: (open: boolean) => void;
+  setSearchOpen: (open: boolean) => void;
+  setPortsOpen: (open: boolean) => void;
+  setRevealTarget: (t: { connId: string; path: string; line: number } | null) => void;
   toggleSidebar: () => void;
   setSidebarVisible: (visible: boolean) => void;
   toggleTerminal: () => void;
@@ -390,6 +402,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
   dialogPrefill: null,
   dialogNote: null,
   transferOpen: false,
+  finderOpen: false,
+  searchOpen: false,
+  portsOpen: false,
+  revealTarget: null,
   sidebarVisible: true,
   terminalVisible: true,
   newTerminalTarget: loadTermTarget(),
@@ -544,6 +560,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
   openDialog: (prefill = null, note = null) =>
     set({ dialogOpen: true, dialogPrefill: prefill, dialogNote: note }),
   setTransferOpen: (transferOpen) => set({ transferOpen }),
+  setFinderOpen: (finderOpen) => set({ finderOpen }),
+  setSearchOpen: (searchOpen) => set({ searchOpen }),
+  setPortsOpen: (portsOpen) => set({ portsOpen }),
+  setRevealTarget: (revealTarget) => set({ revealTarget }),
   toggleSidebar: () => set((s) => ({ sidebarVisible: !s.sidebarVisible })),
   setSidebarVisible: (sidebarVisible) => set({ sidebarVisible }),
   toggleTerminal: () => set((s) => ({ terminalVisible: !s.terminalVisible })),

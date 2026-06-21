@@ -145,6 +145,27 @@ export function fsListDir(connId: string, path: string): Promise<DirListing> {
   return invoke("fs_list_dir", { connId, path });
 }
 
+/** List files under `root` (relative paths) for the fuzzy file finder. */
+export function fsFind(connId: string, root: string): Promise<string[]> {
+  return invoke("fs_find", { connId, root });
+}
+
+/** One search hit (path relative to root). */
+export interface SearchMatch {
+  path: string;
+  line: number;
+  text: string;
+}
+
+/** Literal, case-sensitive search under `root`. */
+export function fsSearch(
+  connId: string,
+  root: string,
+  query: string,
+): Promise<SearchMatch[]> {
+  return invoke("fs_search", { connId, root, query });
+}
+
 export function fsReadFile(connId: string, path: string): Promise<FileContent> {
   return invoke("fs_read_file", { connId, path });
 }
@@ -436,6 +457,82 @@ export function vcsDiscard(
   paths: string[],
 ): Promise<void> {
   return invoke("vcs_discard", { connId, root, backend, paths });
+}
+
+/** A branch (git) or bookmark (jj). */
+export interface VcsBranch {
+  name: string;
+  current: boolean;
+}
+
+export function vcsBranches(
+  connId: string,
+  root: string,
+  backend: string,
+): Promise<VcsBranch[]> {
+  return invoke("vcs_branches", { connId, root, backend });
+}
+
+export function vcsSwitch(
+  connId: string,
+  root: string,
+  backend: string,
+  target: string,
+): Promise<void> {
+  return invoke("vcs_switch", { connId, root, backend, target });
+}
+
+export function vcsCreateBranch(
+  connId: string,
+  root: string,
+  backend: string,
+  name: string,
+): Promise<void> {
+  return invoke("vcs_create_branch", { connId, root, backend, name });
+}
+
+/** Amend the last commit (git only). */
+export function vcsAmend(connId: string, root: string, message: string): Promise<void> {
+  return invoke("vcs_amend", { connId, root, message });
+}
+
+/** git stash (git only): op = "push" | "pop" | "list". Returns the output. */
+export function vcsStash(
+  connId: string,
+  root: string,
+  op: "push" | "pop" | "list",
+  message: string,
+): Promise<string> {
+  return invoke("vcs_stash", { connId, root, op, message });
+}
+
+// ---------------------------------------------------------------------------
+// Port forwarding
+// ---------------------------------------------------------------------------
+
+export interface ForwardInfo {
+  id: string;
+  connId: string;
+  localPort: number;
+  remoteHost: string;
+  remotePort: number;
+}
+
+export function portForwardStart(
+  connId: string,
+  localPort: number,
+  remoteHost: string,
+  remotePort: number,
+): Promise<ForwardInfo> {
+  return invoke("port_forward_start", { connId, localPort, remoteHost, remotePort });
+}
+
+export function portForwardStop(id: string): Promise<void> {
+  return invoke("port_forward_stop", { id });
+}
+
+export function portForwardList(): Promise<ForwardInfo[]> {
+  return invoke("port_forward_list");
 }
 
 // ---------------------------------------------------------------------------

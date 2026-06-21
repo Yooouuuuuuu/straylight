@@ -6,6 +6,8 @@
 
 export type ShortcutAction =
   | "saveFile"
+  | "quickOpen"
+  | "searchInFiles"
   | "nextTab"
   | "prevTab"
   | "renameSelected"
@@ -37,6 +39,21 @@ export const SHORTCUTS: Shortcut[] = [
     ctrl: true,
     description: "Save the current file",
     label: "Ctrl+S",
+  },
+  {
+    action: "quickOpen",
+    key: "p",
+    ctrl: true,
+    description: "Quick-open a file by name",
+    label: "Ctrl+P",
+  },
+  {
+    action: "searchInFiles",
+    key: "f",
+    ctrl: true,
+    shift: true,
+    description: "Search across files",
+    label: "Ctrl+Shift+F",
   },
   {
     action: "nextTab",

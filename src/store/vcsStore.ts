@@ -10,12 +10,16 @@ import { create } from "zustand";
 import { basename } from "../lib/format";
 import {
   fsRemove,
+  vcsAmend,
   vcsCommit,
+  vcsCreateBranch,
   vcsDiscard,
   vcsOpen,
   vcsRemote,
   vcsStage,
+  vcsStash,
   vcsStatus,
+  vcsSwitch,
   vcsUnstage,
   type VcsChange,
   type VcsStatus,
@@ -61,6 +65,10 @@ interface VcsState {
   requestDiscard: (connKey: string, root: string, changes: VcsChange[]) => void;
   confirmDiscard: () => Promise<void>;
   cancelDiscard: () => void;
+  switchBranch: (connKey: string, root: string, target: string) => Promise<void>;
+  createBranch: (connKey: string, root: string, name: string) => Promise<void>;
+  amend: (connKey: string, root: string, message: string) => Promise<boolean>;
+  stash: (connKey: string, root: string, op: "push" | "pop", message: string) => Promise<void>;
   /** Re-resolve each repo's live connId from the active connections. */
   resolveConns: () => void;
   /** A file changed under `connId`: refresh eager repos that contain it. */
@@ -358,6 +366,60 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       set((s) => ({
         repos: mapRepo(s.repos, connKey, root, (r) => ({ ...r, remoteBusy: null })),
       }));
+    }
+    await get().refreshRepo(connKey, root);
+  },
+
+  switchBranch: async (connKey, root, target) => {
+    const repo = get().repos.find((r) => r.connKey === connKey && r.root === root);
+    const connId = repo?.connId;
+    if (!repo || !connId) return;
+    try {
+      await vcsSwitch(connId, root, repo.backend, target);
+      useAppStore.getState().pushNotice("info", `Switched to ${target}`);
+    } catch (e) {
+      useAppStore.getState().pushNotice("error", `Switch failed: ${String(e)}`);
+    }
+    await get().refreshRepo(connKey, root);
+  },
+
+  createBranch: async (connKey, root, name) => {
+    const repo = get().repos.find((r) => r.connKey === connKey && r.root === root);
+    const connId = repo?.connId;
+    if (!repo || !connId) return;
+    try {
+      await vcsCreateBranch(connId, root, repo.backend, name);
+      useAppStore.getState().pushNotice("info", `Created ${name}`);
+    } catch (e) {
+      useAppStore.getState().pushNotice("error", `Create failed: ${String(e)}`);
+    }
+    await get().refreshRepo(connKey, root);
+  },
+
+  amend: async (connKey, root, message) => {
+    const repo = get().repos.find((r) => r.connKey === connKey && r.root === root);
+    const connId = repo?.connId;
+    if (!repo || !connId) return false;
+    try {
+      await vcsAmend(connId, root, message);
+    } catch (e) {
+      useAppStore.getState().pushNotice("error", `Amend failed: ${String(e)}`);
+      return false;
+    }
+    useAppStore.getState().pushNotice("info", "Amended last commit.");
+    await get().refreshRepo(connKey, root);
+    return true;
+  },
+
+  stash: async (connKey, root, op, message) => {
+    const repo = get().repos.find((r) => r.connKey === connKey && r.root === root);
+    const connId = repo?.connId;
+    if (!repo || !connId) return;
+    try {
+      const out = await vcsStash(connId, root, op, message);
+      useAppStore.getState().pushNotice("info", out || `stash ${op} ok`);
+    } catch (e) {
+      useAppStore.getState().pushNotice("error", `Stash failed: ${String(e)}`);
     }
     await get().refreshRepo(connKey, root);
   },

@@ -4,6 +4,8 @@
 //! a WSL distro (also reached over SSH — see [`wsl`]), or the local filesystem.
 //! File operations go through the transport-agnostic [`transport::FileTransport`].
 
+pub mod exec;
+pub mod forward;
 pub mod ssh;
 pub mod transport;
 pub mod vcs;
@@ -39,6 +41,8 @@ pub struct AppState {
     /// Per-repo locks (keyed by `connId::root`) serializing VCS mutations so two
     /// commits/stages can't race on git's `index.lock`.
     pub vcs_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// Active local port forwards, keyed by forward id (task + its info).
+    pub forwards: Mutex<HashMap<String, (tokio::task::JoinHandle<()>, forward::ForwardInfo)>>,
 }
 
 impl AppState {
@@ -48,6 +52,7 @@ impl AppState {
             ptys: Mutex::new(HashMap::new()),
             transfers: Mutex::new(HashMap::new()),
             vcs_locks: Mutex::new(HashMap::new()),
+            forwards: Mutex::new(HashMap::new()),
         }
     }
 
@@ -97,6 +102,8 @@ pub fn run() {
             ssh::connection::ssh_get_status,
             transport::local_connect,
             transport::list_drives,
+            transport::fs_find,
+            transport::fs_search,
             transport::fs_list_dir,
             transport::fs_read_file,
             transport::fs_stat,
@@ -118,6 +125,9 @@ pub fn run() {
             ssh::pty::list_terminal_profiles,
             wsl::wsl_list_distros,
             wsl::wsl_connect,
+            forward::port_forward_start,
+            forward::port_forward_stop,
+            forward::port_forward_list,
             vcs::vcs_open,
             vcs::vcs_status,
             vcs::vcs_file_base,
@@ -129,6 +139,11 @@ pub fn run() {
             vcs::vcs_commit_files,
             vcs::vcs_file_at,
             vcs::vcs_discard,
+            vcs::vcs_branches,
+            vcs::vcs_switch,
+            vcs::vcs_create_branch,
+            vcs::vcs_amend,
+            vcs::vcs_stash,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Straylight application");

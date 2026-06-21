@@ -64,6 +64,17 @@ export async function openRemoteFile(
   }
 }
 
+/** Open a file and reveal a specific line (used by search-in-files). */
+export async function openFileAtLine(
+  connId: string,
+  path: string,
+  name: string,
+  line: number,
+): Promise<void> {
+  await openFileByPath(connId, path, name);
+  useAppStore.getState().setRevealTarget({ connId, path, line });
+}
+
 /** Open a file by path (used for e.g. the SSH config). */
 export async function openFileByPath(
   connId: string,

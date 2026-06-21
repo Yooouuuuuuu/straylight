@@ -752,6 +752,263 @@ pub fn list_drives() -> Vec<String> {
     vec!["/".to_string()]
 }
 
+/// Directory names skipped when listing files for the finder.
+const IGNORE_DIRS: &[&str] = &[
+    ".git",
+    ".jj",
+    "node_modules",
+    "target",
+    "dist",
+    ".next",
+    "build",
+    ".svn",
+    "vendor",
+];
+/// Cap on how many file paths the finder returns per root.
+const FIND_LIMIT: usize = 50_000;
+
+/// List files under `root` (relative, forward-slash), for the fuzzy file finder.
+/// Local walks the filesystem; SSH/WSL runs `find` (one round trip). Common build
+/// / VCS directories are skipped.
+#[tauri::command]
+pub async fn fs_find(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+) -> Result<Vec<String>, String> {
+    let is_local = {
+        let sessions = state.sessions.lock().await;
+        matches!(sessions.get(&conn_id), Some(crate::Session::Local))
+    };
+    if is_local {
+        find_local(root).await
+    } else {
+        find_remote(&state, &conn_id, &root).await
+    }
+}
+
+async fn find_local(root: String) -> Result<Vec<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let base = std::path::PathBuf::from(&root);
+        let mut out: Vec<String> = Vec::new();
+        let mut stack = vec![base.clone()];
+        while let Some(dir) = stack.pop() {
+            if out.len() >= FIND_LIMIT {
+                break;
+            }
+            let rd = match std::fs::read_dir(&dir) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            for entry in rd.flatten() {
+                let ft = match entry.file_type() {
+                    Ok(f) => f,
+                    Err(_) => continue,
+                };
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if ft.is_dir() {
+                    if !IGNORE_DIRS.contains(&name.as_ref()) {
+                        stack.push(entry.path());
+                    }
+                } else if ft.is_file() {
+                    if let Ok(rel) = entry.path().strip_prefix(&base) {
+                        out.push(rel.to_string_lossy().replace('\\', "/"));
+                        if out.len() >= FIND_LIMIT {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        out
+    })
+    .await
+    .map_err(|e| format!("could not list files: {e}"))
+}
+
+async fn find_remote(
+    state: &AppState,
+    conn_id: &str,
+    root: &str,
+) -> Result<Vec<String>, String> {
+    let mut argv: Vec<&str> = vec!["find", ".", "("];
+    let mut first = true;
+    for &d in IGNORE_DIRS {
+        if !first {
+            argv.push("-o");
+        }
+        argv.push("-name");
+        argv.push(d);
+        first = false;
+    }
+    argv.extend(["-prune", ")", "-o", "-type", "f", "-print"]);
+    let out = crate::exec::run_command(state, conn_id, root, &argv).await?;
+    if out.code != 0 && out.stdout.is_empty() {
+        let msg = out.stderr.trim();
+        return Err(if msg.is_empty() {
+            "could not list files".into()
+        } else {
+            msg.to_string()
+        });
+    }
+    Ok(out
+        .stdout
+        .lines()
+        .map(|l| l.strip_prefix("./").unwrap_or(l))
+        .filter(|l| !l.is_empty())
+        .take(FIND_LIMIT)
+        .map(String::from)
+        .collect())
+}
+
+/// One search hit.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchMatch {
+    /// Path relative to the searched root (forward-slash).
+    pub path: String,
+    pub line: u32,
+    pub text: String,
+}
+
+const SEARCH_LIMIT: usize = 2000;
+const SEARCH_MAX_FILE: u64 = 2 * 1024 * 1024;
+
+/// Literal, case-sensitive search for `query` under `root`. Local scans files in
+/// Rust (portable); SSH/WSL runs `grep`. Skips the same dirs as the finder.
+#[tauri::command]
+pub async fn fs_search(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    query: String,
+) -> Result<Vec<SearchMatch>, String> {
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let is_local = {
+        let sessions = state.sessions.lock().await;
+        matches!(sessions.get(&conn_id), Some(crate::Session::Local))
+    };
+    if is_local {
+        search_local(root, query).await
+    } else {
+        search_remote(&state, &conn_id, &root, &query).await
+    }
+}
+
+async fn search_local(root: String, query: String) -> Result<Vec<SearchMatch>, String> {
+    tokio::task::spawn_blocking(move || {
+        let base = std::path::PathBuf::from(&root);
+        let mut matches: Vec<SearchMatch> = Vec::new();
+        let mut stack = vec![base.clone()];
+        while let Some(dir) = stack.pop() {
+            if matches.len() >= SEARCH_LIMIT {
+                break;
+            }
+            let rd = match std::fs::read_dir(&dir) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            for entry in rd.flatten() {
+                let ft = match entry.file_type() {
+                    Ok(f) => f,
+                    Err(_) => continue,
+                };
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if ft.is_dir() {
+                    if !IGNORE_DIRS.contains(&name.as_ref()) {
+                        stack.push(entry.path());
+                    }
+                    continue;
+                }
+                if !ft.is_file() {
+                    continue;
+                }
+                let path = entry.path();
+                if path.metadata().map(|m| m.len()).unwrap_or(0) > SEARCH_MAX_FILE {
+                    continue;
+                }
+                let content = match std::fs::read(&path) {
+                    Ok(b) => b,
+                    Err(_) => continue,
+                };
+                if looks_binary(&content) {
+                    continue;
+                }
+                let text = String::from_utf8_lossy(&content);
+                let rel = match path.strip_prefix(&base) {
+                    Ok(r) => r.to_string_lossy().replace('\\', "/"),
+                    Err(_) => continue,
+                };
+                for (i, line) in text.lines().enumerate() {
+                    if line.contains(&query) {
+                        matches.push(SearchMatch {
+                            path: rel.clone(),
+                            line: (i + 1) as u32,
+                            text: line.chars().take(300).collect(),
+                        });
+                        if matches.len() >= SEARCH_LIMIT {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        matches
+    })
+    .await
+    .map_err(|e| format!("search failed: {e}"))
+}
+
+async fn search_remote(
+    state: &AppState,
+    conn_id: &str,
+    root: &str,
+    query: &str,
+) -> Result<Vec<SearchMatch>, String> {
+    let mut owned: Vec<String> = vec!["grep".into(), "-rnIF".into()];
+    for &d in IGNORE_DIRS {
+        owned.push(format!("--exclude-dir={d}"));
+    }
+    owned.push("-e".into());
+    owned.push(query.to_string());
+    owned.push(".".into());
+    let argv: Vec<&str> = owned.iter().map(String::as_str).collect();
+
+    let out = crate::exec::run_command(state, conn_id, root, &argv).await?;
+    // grep: 0 = matches, 1 = none, >1 = error.
+    if out.code > 1 {
+        let msg = out.stderr.trim();
+        return Err(if msg.is_empty() {
+            "search failed".into()
+        } else {
+            msg.to_string()
+        });
+    }
+    let mut matches = Vec::new();
+    for line in out.stdout.lines() {
+        if matches.len() >= SEARCH_LIMIT {
+            break;
+        }
+        let line = line.strip_prefix("./").unwrap_or(line);
+        if let Some((path, rest)) = line.split_once(':') {
+            if let Some((num, text)) = rest.split_once(':') {
+                if let Ok(n) = num.parse::<u32>() {
+                    matches.push(SearchMatch {
+                        path: path.to_string(),
+                        line: n,
+                        text: text.chars().take(300).collect(),
+                    });
+                }
+            }
+        }
+    }
+    Ok(matches)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
