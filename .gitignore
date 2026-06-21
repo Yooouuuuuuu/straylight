@@ -26,3 +26,6 @@ src-tauri/gen/schemas
 # Logs
 *.log
 npm-debug.log*
+
+# jj
+.jj/

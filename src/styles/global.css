@@ -214,6 +214,195 @@
   background: var(--bg-tertiary);
 }
 
+/* ------------------------------------------------------------- Version control */
+
+/* Change-kind colors, shared by the tree badge and the SCM panel. */
+.vcs--modified { color: var(--orange); }
+.vcs--added { color: var(--green); }
+.vcs--untracked { color: var(--green); }
+.vcs--deleted { color: var(--red); }
+.vcs--renamed { color: var(--purple); }
+.vcs--copied { color: var(--cyan); }
+.vcs--typechange { color: var(--yellow); }
+.vcs--conflicted { color: var(--red); font-weight: 700; }
+.vcs--child { color: var(--fg-secondary); }
+
+/* Tree-row badge (a letter at the right of a changed file's row). */
+.file-node__vcs {
+  flex: 0 0 auto;
+  min-width: 12px;
+  text-align: center;
+  font-family: var(--font-code);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  margin-left: var(--space-2);
+}
+
+/* Source Control panel */
+.scm {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.scm__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.scm__title {
+  flex: 1 1 auto;
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-secondary);
+}
+
+.scm__body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: var(--space-3);
+}
+
+.scm__empty {
+  padding: var(--space-5);
+  color: var(--fg-secondary);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+.scm__picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.scm__picker-label {
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+}
+
+.scm__picker-item {
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.scm__picker-item:hover {
+  border-color: var(--border-focus);
+  background: var(--bg-tertiary);
+}
+
+/* Per-repo card */
+.repo-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+  margin-bottom: var(--space-3);
+  overflow: hidden;
+}
+
+.repo-card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.repo-card__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.repo-card__head .icon-btn {
+  flex: 0 0 auto;
+}
+
+.repo-card__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-xs);
+}
+
+.repo-card__branch {
+  color: var(--purple);
+  font-family: var(--font-code);
+}
+
+.repo-card__ab {
+  color: var(--fg-secondary);
+  font-family: var(--font-code);
+}
+
+.repo-card__count,
+.repo-card__offline {
+  color: var(--fg-secondary);
+}
+
+.repo-card__error {
+  padding: var(--space-2) var(--space-4);
+  color: var(--red);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-code);
+  word-break: break-word;
+}
+
+.repo-card__changes {
+  max-height: 240px;
+  overflow: auto;
+  padding: var(--space-1) 0;
+  border-top: 1px solid var(--border);
+}
+
+.change-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 1px var(--space-4);
+  font-size: var(--font-size-xs);
+}
+
+.change-row:hover {
+  background: var(--bg-tertiary);
+}
+
+.change-row__badge {
+  flex: 0 0 12px;
+  text-align: center;
+  font-family: var(--font-code);
+  font-weight: 700;
+}
+
+.change-row__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-primary);
+}
+
+.repo-card__stamp {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+}
+
 /* Connection state dot */
 .dot {
   width: 8px;

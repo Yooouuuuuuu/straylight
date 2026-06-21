@@ -13,6 +13,7 @@ import {
 
 import { localConnect, onSshStatus, onTransferProgress } from "./lib/ipc";
 import { useAppStore } from "./store/appStore";
+import { useVcsStore } from "./store/vcsStore";
 import { initSessionPersistence, restoreSession } from "./lib/session";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { useSSH } from "./hooks/useSSH";
@@ -21,6 +22,7 @@ import { Sidebar } from "./components/layout/Sidebar";
 import { EditorArea } from "./components/layout/EditorArea";
 import { TerminalPanel } from "./components/layout/TerminalPanel";
 import { StatusBar } from "./components/layout/StatusBar";
+import { ScmPanel } from "./components/vcs/ScmPanel";
 import { ConnectionDialog } from "./components/connection/ConnectionDialog";
 import { ConflictDialog } from "./components/editor/ConflictDialog";
 import { CloseConfirmDialog } from "./components/editor/CloseConfirmDialog";
@@ -39,8 +41,14 @@ export default function App() {
   const setSidebarVisible = useAppStore((s) => s.setSidebarVisible);
   const setTerminalVisible = useAppStore((s) => s.setTerminalVisible);
 
+  const remoteConnId = useAppStore((s) => s.remote?.connId ?? null);
+  const wslConnId = useAppStore((s) => s.wsl?.connId ?? null);
+  const scmVisible = useVcsStore((s) => s.scmVisible);
+  const setScmVisible = useVcsStore((s) => s.setScmVisible);
+
   const sidebarPanel = useRef<ImperativePanelHandle>(null);
   const terminalPanel = useRef<ImperativePanelHandle>(null);
+  const scmPanel = useRef<ImperativePanelHandle>(null);
   const restored = useRef(false);
 
   const { connect } = useSSH();
@@ -117,6 +125,20 @@ export default function App() {
     };
   }, []);
 
+  // Re-resolve tracked repos' live connId whenever the active connections change
+  // (connect / disconnect / reconnect) — cached decorations then light up.
+  useEffect(() => {
+    useVcsStore.getState().resolveConns();
+  }, [localConnId, remoteConnId, wslConnId]);
+
+  // Drive the Source Control panel's collapse from the store.
+  useEffect(() => {
+    const panel = scmPanel.current;
+    if (!panel) return;
+    if (scmVisible && panel.isCollapsed()) panel.expand();
+    else if (!scmVisible && !panel.isCollapsed()) panel.collapse();
+  }, [scmVisible]);
+
   // Drive the sidebar panel's collapse state from the store.
   useEffect(() => {
     const panel = sidebarPanel.current;
@@ -190,6 +212,21 @@ export default function App() {
                 </>
               )}
             </PanelGroup>
+          </Panel>
+          <PanelResizeHandle className="resize-handle" />
+          <Panel
+            id="scm"
+            order={3}
+            ref={scmPanel}
+            collapsible
+            collapsedSize={0}
+            defaultSize={22}
+            minSize={14}
+            maxSize={40}
+            onCollapse={() => setScmVisible(false)}
+            onExpand={() => setScmVisible(true)}
+          >
+            <ScmPanel />
           </Panel>
         </PanelGroup>
       </div>

@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   an inline field (e.g. on the "Connect to a server" button).
 - **Auto-refresh** (optional): a filesystem watch for the local tree; SSH would
   poll (opt-in).
-- **Re-evaluate the explorer / sidebar UX once git status lands** — fitting git
-  state into the tree and the section bars may force a sizable rework.
+- **Version control, continued:** diff viewer (click a change → Monaco diff),
+  stage/commit (git) and describe/new (jj), then log / blame / push-pull.
 - **Transfer polish (later):** drag directly between the sidebar trees (folding
   the three panel buttons into one), OS drag-in/out, and multi cut/copy/paste in
   the explorer.
@@ -24,8 +24,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 - Terminal tab reordering.
-- **Phase 3:** git status / blame / log / diff, Podman containers, fuzzy finder,
-  search-in-files, port forwarding, Markdown preview, and auto-update.
+- **Phase 3 (continued):** Podman containers, fuzzy finder, search-in-files, port
+  forwarding, Markdown preview, and auto-update.
+
+## [0.8.0] - 2026-06-21
+
+Phase 3 begins: see your repositories' status — for **git** and **Jujutsu (jj)**.
+
+### Added
+
+- **Source Control panel** (right-side, collapsible). Open a repository explicitly
+  (validated as a real repo, else rejected) on any connection — local, WSL, or
+  remote. Each repo shows its branch/bookmark, ahead/behind, and changed files,
+  with a manual **refresh** and an **eager** toggle for live updates. Repos persist
+  per connection identity, so they return on reconnect/relaunch with cached status.
+- **File-tree decorations.** Changed files are colored with a status letter
+  (M/A/D/R/U…); folders containing changes get a marker.
+- **Status-bar branch hint** for the file you're editing.
+- **git + jj backends.** VCS commands run on the host that owns the repo (an SSH
+  exec channel for remote/WSL, a local process for local) — there's no local clone,
+  so commits use the host's real identity, hooks, and config. A colocated repo is
+  detected as jj. Design + the jj command spike: `docs/version-control.md`.
+- Ignore `.jj/` in `.gitignore`.
+
+### Notes
+
+- This release is **read-only** (status, decorations, branch). Diff, stage/commit,
+  and push/pull come next. jj on a *remote* needs `jj` on the exec PATH; detection
+  falls back to git otherwise.
 
 ## [0.7.2] - 2026-06-20
 

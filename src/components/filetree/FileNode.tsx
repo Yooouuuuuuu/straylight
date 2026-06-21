@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { formatSize, formatTimestamp } from "../../lib/format";
 import type { FileEntry } from "../../lib/ipc";
+import { useVcsStore } from "../../store/vcsStore";
+import { vcsClass, vcsLetter } from "../../lib/vcsDecorations";
 import { IconChevron } from "../icons";
 import { FileIcon } from "./FileIcons";
 
@@ -98,6 +100,9 @@ export function FileNode({
   onCancelRename: () => void;
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
+  // VCS decoration for this path (tracked repos publish a normalized map).
+  const vcsKind = useVcsStore((s) => s.decorations[entry.path.replace(/\\/g, "/")]);
+  const vcsDirect = vcsKind && vcsKind !== "child" ? vcsKind : null;
 
   // Keep the selected row visible when the selection moves by keyboard.
   useEffect(() => {
@@ -148,7 +153,9 @@ export function FileNode({
       ) : (
         <>
           <span
-            className={`file-node__name ${entry.isDir ? "file-node__name--dir" : ""}`}
+            className={`file-node__name ${entry.isDir ? "file-node__name--dir" : ""} ${
+              vcsKind ? vcsClass(vcsKind) : ""
+            }`}
           >
             {entry.name}
           </span>
@@ -160,6 +167,13 @@ export function FileNode({
               ↪
             </span>
           )}
+          {vcsDirect ? (
+            <span className={`file-node__vcs ${vcsClass(vcsDirect)}`}>
+              {vcsLetter(vcsDirect)}
+            </span>
+          ) : vcsKind === "child" ? (
+            <span className="file-node__vcs vcs--child">•</span>
+          ) : null}
           {loading ? (
             <span className="file-node__spinner">
               <span className="spinner spinner--sm" />

@@ -79,6 +79,14 @@ under "Active roadmap."
 - [ ] Trim the Monaco bundle to a language subset (it currently ships every
       language).
 
+### Docs — for the future README rewrite
+- [ ] **Version-control panel guidance:** repos are opened explicitly into the
+      right-side VC panel and don't auto-refresh until toggled "eager"; there's no
+      hard cap, but recommend keeping **fewer than ~5 repos eager at once** for
+      snappy updates (each eager repo re-runs `git`/`jj status` on changes, which
+      costs an SSH round trip per refresh). Note the per-repo activity indicator
+      and manual refresh as the way to spot/limit an expensive repo.
+
 ### Cleanup (deferred — one full sweep after Phase 3)
 Rather than trimming piecemeal mid-feature, batch a single unused-code / dependency
 audit once Phase 3 lands.

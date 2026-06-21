@@ -296,6 +296,46 @@ export function fsTransferCheck(
 }
 
 // ---------------------------------------------------------------------------
+// Version control (git; jj later)
+// ---------------------------------------------------------------------------
+
+export interface VcsRepoInfo {
+  backend: string;
+  root: string;
+}
+
+export interface VcsChange {
+  /** Path relative to the repo root, forward-slash separated. */
+  path: string;
+  oldPath: string | null;
+  /** modified | added | deleted | renamed | copied | typechange | conflicted | untracked */
+  kind: string;
+  staged: boolean;
+}
+
+export interface VcsStatus {
+  backend: string;
+  ref: string;
+  ahead: number | null;
+  behind: number | null;
+  changes: VcsChange[];
+}
+
+/** Validate that `dir` is a repository; returns its backend + root, or errors. */
+export function vcsOpen(connId: string, dir: string): Promise<VcsRepoInfo> {
+  return invoke("vcs_open", { connId, dir });
+}
+
+/** Run status for a repo root and return the normalized result. */
+export function vcsStatus(
+  connId: string,
+  root: string,
+  backend: string,
+): Promise<VcsStatus> {
+  return invoke("vcs_status", { connId, root, backend });
+}
+
+// ---------------------------------------------------------------------------
 // WSL
 // ---------------------------------------------------------------------------
 

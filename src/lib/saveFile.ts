@@ -6,6 +6,7 @@ import {
   markTabSavedVersion,
 } from "./activeEditor";
 import { useAppStore } from "../store/appStore";
+import { useVcsStore } from "../store/vcsStore";
 
 export type SaveOutcome = "saved" | "conflict" | "noop" | "error";
 
@@ -30,6 +31,8 @@ export async function saveTab(tabId: string): Promise<SaveOutcome> {
     }
     store.markTabSaved(tab.id, result.modified);
     if (versionId !== null) markTabSavedVersion(tab.id, versionId);
+    // An eager repo containing this file re-checks its status.
+    useVcsStore.getState().onFileChanged(tab.connId, tab.path);
     return "saved";
   } catch (error) {
     store.pushNotice("error", `Couldn't save ${tab.name}: ${String(error)}`);
@@ -57,6 +60,7 @@ export async function overwritePendingFile(): Promise<void> {
     const result = await fsWriteFile(tab.connId, tab.path, pending.content, null);
     store.markTabSaved(tab.id, result.modified);
     if (versionId !== null) markTabSavedVersion(tab.id, versionId);
+    useVcsStore.getState().onFileChanged(tab.connId, tab.path);
   } catch (error) {
     store.pushNotice("error", `Couldn't save ${tab.name}: ${String(error)}`);
     store.clearConflict();

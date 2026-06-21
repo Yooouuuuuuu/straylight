@@ -4,6 +4,7 @@ import { basename, dirname } from "./format";
 import { fsCopy, fsCreate, fsMove, fsRemove, fsRename } from "./ipc";
 import { openFileByPath } from "./openFile";
 import { useAppStore } from "../store/appStore";
+import { useVcsStore } from "../store/vcsStore";
 
 export async function commitRename(
   connId: string,
@@ -20,6 +21,7 @@ export async function commitRename(
     const newPath = await fsRename(connId, oldPath, trimmed);
     store.applyRename(connId, oldPath, newPath);
     store.refreshConn(connId);
+    useVcsStore.getState().onFileChanged(connId, newPath);
   } catch (error) {
     store.pushNotice("error", `Couldn't rename: ${String(error)}`);
   }
@@ -40,6 +42,7 @@ export async function createEntry(
   try {
     const newPath = await fsCreate(connId, parent, trimmed, isDir);
     store.refreshConn(connId);
+    useVcsStore.getState().onFileChanged(connId, newPath);
     if (!isDir) {
       await openFileByPath(connId, newPath, trimmed);
     }
@@ -58,6 +61,7 @@ export async function deleteEntry(connId: string, path: string): Promise<void> {
     await fsRemove(connId, path);
     store.applyDelete(connId, path);
     store.refreshConn(connId);
+    useVcsStore.getState().onFileChanged(connId, path);
   } catch (error) {
     store.pushNotice("error", `Couldn't delete: ${String(error)}`);
   }
@@ -75,6 +79,7 @@ export async function deleteEntries(
       await fsRemove(n.connId, n.path);
       store.applyDelete(n.connId, n.path);
       conns.add(n.connId);
+      useVcsStore.getState().onFileChanged(n.connId, n.path);
     } catch (error) {
       store.pushNotice("error", `Couldn't delete ${n.name}: ${String(error)}`);
     }
@@ -110,6 +115,7 @@ export async function pasteInto(connId: string, destDir: string): Promise<void> 
       store.clearClipboard();
     }
     store.refreshConn(connId);
+    useVcsStore.getState().onFileChanged(connId, newPath);
     store.setSelected({
       connId,
       path: newPath,

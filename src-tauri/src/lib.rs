@@ -6,6 +6,7 @@
 
 pub mod ssh;
 pub mod transport;
+pub mod vcs;
 pub mod wsl;
 
 use std::collections::HashMap;
@@ -113,6 +114,8 @@ pub fn run() {
             ssh::pty::list_terminal_profiles,
             wsl::wsl_list_distros,
             wsl::wsl_connect,
+            vcs::vcs_open,
+            vcs::vcs_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Straylight application");
