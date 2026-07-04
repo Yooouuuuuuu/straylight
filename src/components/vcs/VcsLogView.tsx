@@ -2,7 +2,7 @@
  *  rail of dots with each commit's refs, subject, author, and time. Works for
  *  git and jj (the backend differs only in how the log is fetched). Full
  *  multi-lane graph rendering is a later UX pass. */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   vcsCommitFiles,
@@ -12,6 +12,7 @@ import {
 } from "../../lib/ipc";
 import { openCommitDiff } from "../../lib/openDiff";
 import { vcsClass, vcsLetter } from "../../lib/vcsDecorations";
+import { useVcsStore } from "../../store/vcsStore";
 import { RelativeTime } from "../RelativeTime";
 
 type FileState = VcsChange[] | "loading" | "error";
@@ -27,23 +28,46 @@ export function VcsLogView({
 }) {
   const [commits, setCommits] = useState<VcsCommit[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [files, setFiles] = useState<Record<string, FileState>>({});
   const isJj = backend === "jj";
 
+  // The history has no refresh of its own: it re-fetches whenever its repo's
+  // status refreshes (watcher / focus / manual / mutation — one policy).
+  const lastUpdated = useVcsStore(
+    (s) => s.repos.find((r) => r.connId === connId && r.root === root)?.lastUpdated ?? null,
+  );
+  const repoKey = `${connId}::${root}::${backend}`;
+  const prevKeyRef = useRef(repoKey);
+
   useEffect(() => {
+    // Only blank the view when it's a different repo — a same-repo re-fetch
+    // keeps the old list on screen until the new one lands (no flash).
+    if (prevKeyRef.current !== repoKey) {
+      prevKeyRef.current = repoKey;
+      setCommits(null);
+      setExpanded(new Set());
+      setFiles({});
+    }
     let active = true;
-    setCommits(null);
     setError(null);
-    setExpanded(new Set());
-    setFiles({});
+    setSyncing(true);
     vcsLog(connId, root, backend, 200)
-      .then((c) => active && setCommits(c))
-      .catch((e) => active && setError(String(e)));
+      .then((c) => {
+        if (!active) return;
+        setCommits(c);
+        setSyncing(false);
+      })
+      .catch((e) => {
+        if (!active) return;
+        setError(String(e));
+        setSyncing(false);
+      });
     return () => {
       active = false;
     };
-  }, [connId, root, backend]);
+  }, [repoKey, connId, root, backend, lastUpdated]);
 
   const toggle = (id: string) => {
     setExpanded((prev) => {
@@ -74,6 +98,11 @@ export function VcsLogView({
         <div className="vcs-log__msg">No commits.</div>
       ) : (
         <div className="vcs-log__list">
+          {syncing && (
+            <div className="vcs-log__sync">
+              <span className="spinner spinner--sm" /> syncing…
+            </div>
+          )}
           {commits.map((c, i) => {
             const open = expanded.has(c.id);
             const fs = files[c.id];

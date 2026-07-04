@@ -31,7 +31,6 @@ export function StatusBar() {
   const toggleTerminal = useAppStore((s) => s.toggleTerminal);
   const vcsRepos = useVcsStore((s) => s.repos);
   const toggleScm = useVcsStore((s) => s.toggleScm);
-  const wsl = useAppStore((s) => s.wsl);
   const setPortsOpen = useAppStore((s) => s.setPortsOpen);
   const { reconnect } = useSSH();
 
@@ -106,15 +105,13 @@ export function StatusBar() {
         </span>
       )}
 
-      {(remote || wsl) && (
-        <span
-          className="statusbar__item statusbar__item--button"
-          onClick={() => setPortsOpen(true)}
-          title="Forward a port over SSH"
-        >
-          Ports
-        </span>
-      )}
+      <span
+        className="statusbar__item statusbar__item--button"
+        onClick={() => setPortsOpen(true)}
+        title="Forward a port over SSH"
+      >
+        Ports
+      </span>
 
       {(remote || localConnId) && (
         <span

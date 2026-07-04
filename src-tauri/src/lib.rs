@@ -9,6 +9,7 @@ pub mod forward;
 pub mod ssh;
 pub mod transport;
 pub mod vcs;
+pub mod watch;
 pub mod wsl;
 
 use std::collections::HashMap;
@@ -43,6 +44,8 @@ pub struct AppState {
     pub vcs_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     /// Active local port forwards, keyed by forward id (task + its info).
     pub forwards: Mutex<HashMap<String, (tokio::task::JoinHandle<()>, forward::ForwardInfo)>>,
+    /// Filesystem watchers on local repos, keyed by `connId::root`.
+    pub repo_watchers: Mutex<HashMap<String, watch::RepoWatcher>>,
 }
 
 impl AppState {
@@ -53,6 +56,7 @@ impl AppState {
             transfers: Mutex::new(HashMap::new()),
             vcs_locks: Mutex::new(HashMap::new()),
             forwards: Mutex::new(HashMap::new()),
+            repo_watchers: Mutex::new(HashMap::new()),
         }
     }
 
@@ -144,6 +148,11 @@ pub fn run() {
             vcs::vcs_create_branch,
             vcs::vcs_amend,
             vcs::vcs_stash,
+            vcs::vcs_update,
+            vcs::vcs_describe,
+            vcs::vcs_squash,
+            watch::vcs_watch,
+            watch::vcs_unwatch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Straylight application");

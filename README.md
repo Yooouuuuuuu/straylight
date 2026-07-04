@@ -7,14 +7,15 @@ backend) and React (frontend). The goal is the VS Code Remote-SSH experience at
 
 **Status:** connect to a server, a **WSL distro**, or work locally; browse and
 **edit + save** files in a tabbed Monaco editor (local *and* remote), manage files
-(incl. cut/copy/paste and full keyboard navigation), and run **multiple
-terminals** — all in one Dracula-themed window that can show local folders, a WSL
-distro, and one remote at the same time. Dropped connections auto-reconnect, and
-your workspace is restored on relaunch.
+(cut/copy/paste, transfers between machines, full keyboard navigation), use
+**source control for git *and* Jujutsu (jj)**, **quick-open** and **search across
+files**, **forward ports**, and run **multiple terminals** — all in one
+Dracula-themed window that can show local folders, a WSL distro, and one remote at
+the same time. Dropped connections auto-reconnect, and your workspace is restored on
+relaunch.
 
 **License:** MIT OR Apache-2.0 (dual). See [LICENSE-MIT](LICENSE-MIT) and
 [LICENSE-APACHE](LICENSE-APACHE).
-
 
 ---
 
@@ -43,14 +44,33 @@ your workspace is restored on relaunch.
   and **full keyboard navigation** (arrows, Enter, Home/End, PageUp/PageDown to
   jump between roots).
 - **File operations** — F2 inline rename, **cut / copy / paste** (`Ctrl+X/C/V`,
-  in-tree), and a right-click menu: New File, New Folder, Cut, Copy, Paste,
-  Rename, Delete, Copy Path.
+  in-tree), multi-select delete, a **Properties** dialog (recursive size, counts,
+  permissions, owner/group), and a right-click menu: New File, New Folder, Cut,
+  Copy, Paste, Rename, Delete, Copy Path, Properties.
+- **Transfers between machines** — drag (or copy/paste) files and folders across
+  connections (local ⇄ WSL ⇄ remote). **Streamed** with no size cap, a live progress
+  bar (shown in the status bar too) and Cancel.
+- **Version control — git and Jujutsu (jj)** — open repos into a right-side Source
+  Control panel: **live status** (local repos are file-watched; remote/WSL refresh
+  on window focus) with **tree decorations**, side-by-side **diffs**, **stage /
+  commit / amend** (jj: describe + commit, fix-last-message, squash), a **live
+  commit history** above the explorer (click a commit to browse its files),
+  **branch/bookmark switching**, **stash** (git), **discard**, marker-based
+  **conflict resolution** (Accept Current / Incoming / Both), and **fetch / update
+  / push** — fetch is always safe; anything that mutates the tree or publishes
+  asks first. The VCS binary runs *on the host that owns the repo* — no local
+  clone — so commits use the host's real identity, config, and hooks. See
+  [docs/version-control.md](docs/version-control.md).
+- **Quick-open & search** — `Ctrl+P` fuzzy-opens a file across your pinned folders;
+  `Ctrl+Shift+F` searches across files (grouped by file) and jumps to the line.
+- **Port forwarding** — forward a local `127.0.0.1` port to a service reachable from
+  the SSH server, over a tunnel on the existing connection.
 - **Editing** — a tabbed Monaco editor; edit and **save** (`Ctrl+S`) local *and*
   remote files, with per-tab dirty state and save-conflict detection. Binary files
   show an info card; very large files open in a lightweight mode.
 - **Terminals** — multiple, with a shell picker; see [Terminal](#terminal) below.
-- **Status bar** — connection state, file path, language, encoding, line ending,
-  and cursor position.
+- **Status bar** — connection state, file path, git branch, language, encoding, line
+  ending, and cursor position, plus Source Control / Ports / terminal toggles.
 
 ### Terminal
 
@@ -129,7 +149,7 @@ If the fonts are missing the UI falls back to the system monospace stack.
 | `npm run typecheck` | Type-check only. |
 | `npm run tauri dev` | Full app with hot reload. |
 | `npm run tauri build` | Build native installers. |
-| `cargo test --manifest-path src-tauri/Cargo.toml` | Run the Rust unit tests (config parsing, permission formatting). |
+| `cargo test --manifest-path src-tauri/Cargo.toml` | Run the Rust unit tests (config parsing, permission formatting, git/jj status parsers). |
 
 ---
 
@@ -138,6 +158,9 @@ If the fonts are missing the UI falls back to the system monospace stack.
 | Shortcut | Action |
 |----------|--------|
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save the current file |
+| <kbd>Ctrl</kbd>+<kbd>P</kbd> | Quick-open a file by name (fuzzy) |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> | Search across files |
+| <kbd>F5</kbd> / <kbd>Ctrl</kbd>+<kbd>R</kbd> | Refresh everything (explorer, repos, open files — dirty tabs untouched) |
 | <kbd>Ctrl</kbd>+<kbd>W</kbd> | Close the current tab |
 | <kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd> | Next / previous tab |
 | <kbd>Ctrl</kbd>+<kbd>`</kbd> | Toggle the terminal panel |
@@ -169,21 +192,35 @@ Tauri v2 shell (native window, custom title bar)
 │   └── Typed IPC wrappers — lib/ipc.ts
 └── Rust backend (src-tauri/src/)
     ├── transport/         — FileTransport trait (list/read/write/rename/remove/copy/move)
-    │   ├── mod.rs         — shared types + transport-agnostic fs_* commands
+    │   ├── mod.rs         — shared types + fs_* commands (incl. fs_find / fs_search,
+    │   │                    streaming transfers, Properties)
     │   └── local.rs       — local filesystem (std::fs / tokio::fs)
+    ├── exec.rs            — host command-runner (SSH exec channel / local process),
+    │                        shared by VCS, the file finder, and search
+    ├── vcs.rs             — git + jj: status, diff, commit, log, branch, stash, …
+    ├── forward.rs         — local SSH port forwarding (direct-tcpip tunnels)
     ├── wsl.rs             — WSL: list distros, provision sshd, connect over localhost SSH
     └── ssh/
-        ├── connection.rs  — connect, auth, ProxyJump, status events
+        ├── connection.rs  — connect, auth, ProxyJump, status events, direct-tcpip
         ├── config.rs      — ~/.ssh/config parser
         ├── sftp.rs        — SFTP as a FileTransport (read + write + copy/move)
         └── pty.rs         — PTY shell: SSH channel, or local ConPTY
 ```
 
 File operations go through a transport-agnostic `FileTransport` (SFTP for SSH
-sessions, `std::fs` for local). A connection is one SSH link multiplexed into
-channels — an SFTP subsystem channel plus one session channel per terminal — or
-a local session backed by the filesystem and a ConPTY shell. PTY output streams
-to the frontend via Tauri events; input/resize/close go back through `pty_*`.
+sessions, `std::fs` for local). **Version control, file finding, and search run the
+real binary (`git` / `jj` / `find` / `grep`) on the host** via the `exec` runner —
+there is no local clone, so commits use the host's identity and config. A connection
+is one SSH link multiplexed into channels — an SFTP subsystem channel, one session
+channel per terminal, an exec channel per command, and a direct-tcpip channel per
+forwarded connection — or a local session backed by the filesystem and a ConPTY
+shell. PTY output streams to the frontend via Tauri events; input/resize/close go
+back through `pty_*`.
+
+The frontend keeps two Zustand stores: `store/appStore.ts` (tabs, connections,
+files, transfers, dialogs) and `store/vcsStore.ts` (tracked repos, decorations,
+history) — the Source Control panel and its history live in a collapsible right-side
+"VC region".
 
 **IPC contract.** Rust structs serialize with `camelCase`; the typed wrappers in
 `src/lib/ipc.ts` mirror them exactly. Command arguments are written in camelCase
@@ -202,6 +239,14 @@ on the JS side and Tauri maps them to the snake_case Rust parameters.
   chained `ProxyJump` is used.
 - **Host keys** are currently trusted on first use (`check_server_key` returns
   `Ok(true)`); `known_hosts` verification is planned.
+- **Version control** runs the host's `git`/`jj`. A colocated repo (`.jj` + `.git`)
+  is driven as jj. Repos are opened explicitly; **local** repos then live-update via
+  a filesystem watcher, while **remote/WSL** repos refresh on window focus, manual
+  refresh, or F5 (keep **fewer than ~5 eager** for snappy updates over SSH).
+  **fetch/update/push** use the host's credentials over a no-TTY channel, so an
+  interactive prompt (key passphrase, 2FA, HTTPS password) will hang — run those in
+  the terminal. On a *remote*, `jj` must be on the exec PATH (it works locally;
+  otherwise it falls back to git).
 - The Monaco bundle is large (it ships every language). Trimming it to a language
   subset is a deliberate later optimization.
 
@@ -212,18 +257,24 @@ on the JS side and Tauri maps them to the snake_case Rust parameters.
 ```
 straylight/
 ├── src/                    # React frontend
-│   ├── components/         # layout, connection, filetree, editor, terminal
+│   ├── components/         # layout, connection, filetree, editor, transfer, vcs,
+│   │                       #   Finder / SearchInFiles / PortForwards overlays
 │   ├── hooks/              # useSSH, useTerminal, useKeyboard
-│   ├── lib/                # ipc, monaco, language, fileIcons, format, …
-│   ├── store/appStore.ts   # Zustand global state
+│   ├── lib/                # ipc, monaco, language, openDiff, vcsDecorations, …
+│   ├── store/              # appStore.ts + vcsStore.ts (Zustand)
 │   └── theme/, styles/     # Dracula variables, tokens, fonts, component CSS
 ├── src-tauri/              # Rust backend
 │   ├── src/ssh/            # connection, config, sftp, pty
+│   ├── src/exec.rs         # host command-runner (shared)
+│   ├── src/vcs.rs          # git + jj source control
+│   ├── src/forward.rs      # port forwarding
+│   ├── src/transport/      # FileTransport (mod.rs, local.rs) + fs_* commands
 │   ├── src/wsl.rs          # WSL distro discovery + sshd provisioning
 │   ├── capabilities/       # Tauri v2 permission capabilities
 │   ├── icons/              # generated app icons
 │   ├── Cargo.toml
 │   └── tauri.conf.json
+├── docs/                   # architecture, version-control, handoff, test plan, …
 ├── public/fonts/           # Fira Code woff2
 └── scripts/fetch-fonts.mjs
 ```

@@ -25,6 +25,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 - Terminal tab reordering.
+## [0.8.5] - 2026-07-04
+
+Version control goes live-updating, learns to resolve conflicts, and gets a
+calmer panel — the post-Phase-3 rework, batches 1–2.
+
+### Added
+
+- **Live status.** Local repos are **file-watched** (`.git`/`.jj` and the working
+  tree) — the panel, tree decorations, and history update by themselves after
+  terminal git/jj ops or external edits. Remote/WSL repos refresh on **window
+  focus**; every repo populates once on startup/reconnect.
+- **F5 / Ctrl+R = Refresh All.** Instead of reloading the app (WebView reload is
+  now blocked), they refresh every explorer section and repo and reload **clean**
+  open file tabs from disk — dirty tabs keep their edits. Ctrl+R still reaches the
+  shell in a terminal.
+- **Conflict resolution.** Conflicted files show in a red group; opening one
+  highlights each conflict and offers **Accept Current / Incoming / Both** inline
+  (git-style markers), with **Mark resolved** on the card. A conflicted stash pop
+  shows a banner with **Drop stash**.
+- **Update replaces Pull.** Fetch is always safe and silent; when behind, a
+  contextual **Update** (git: merge upstream) / **Rebase** (jj) appears. Update,
+  Rebase, Pop, and **Push** confirm first; amend confirms only when the last
+  commit is already pushed.
+- **jj parity.** The commit box has modes — git: `Commit | Amend`; jj:
+  `Commit | Describe | Fix last msg` — plus **Squash into last** (`jj squash`).
+  Amend now also works with staged changes and no message (keeps the message).
+- **A calmer repo card.** Header: ⎇ history · ◉ live-update · ⟳ refresh · ×
+  unpin (asks first). The branch line carries **✎** (commit box, opens right
+  under it) and **⋯** (an actions dropdown: fetch / update / push / stash / pop —
+  jj: fetch / rebase / push / squash). Cards are framed in their **connection's
+  color**; full identity on hover.
+- **History above the explorer.** Its own panel on top of the file tree (the
+  editor stays free for comparing), opened/closed by the ⎇ toggle, always in sync
+  with the repo — a "syncing…" line shows each live refresh.
+- **Copyable toasts** — text is selectable, a copy button, and hovering pauses
+  auto-dismiss.
+
+### Fixed
+
+- Native `<select>` dropdowns were white-on-white (dark-styled control, white
+  native popup); form controls now follow the dark theme.
+- The **Ports** button vanished without a remote/WSL connection — it's always in
+  the status bar now.
+
 ## [0.8.4] - 2026-06-22
 
 Round out version control, and add quick-open, search, and port forwarding.

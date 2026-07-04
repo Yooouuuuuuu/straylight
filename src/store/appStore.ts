@@ -337,6 +337,17 @@ interface AppState {
   forceCloseTab: (id: string) => void;
   setTabDirty: (id: string, dirty: boolean) => void;
   markTabSaved: (id: string, modified: number) => void;
+  /** Replace a clean tab's content after an external reload (App Refresh). */
+  reloadTabContent: (
+    id: string,
+    file: {
+      content: string;
+      size: number;
+      modified: number;
+      encoding: string;
+      truncated: boolean;
+    },
+  ) => void;
   setTabCursor: (id: string, cursor: CursorPosition) => void;
   setBusyPath: (path: string | null) => void;
 
@@ -772,6 +783,24 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === id ? { ...t, dirty: false, modified } : t)),
       conflict: s.conflict?.tabId === id ? null : s.conflict,
+    })),
+
+  reloadTabContent: (id, file) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) =>
+        t.id === id
+          ? {
+              ...t,
+              content: file.content,
+              size: file.size,
+              modified: file.modified,
+              encoding: file.encoding,
+              truncated: file.truncated,
+              lineEnding: file.content.includes("\r\n") ? ("CRLF" as const) : ("LF" as const),
+              dirty: false,
+            }
+          : t,
+      ),
     })),
 
   setTabCursor: (id, cursor) =>

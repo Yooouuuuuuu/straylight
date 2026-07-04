@@ -29,3 +29,6 @@ npm-debug.log*
 
 # jj
 .jj/
+
+# Working docs (session handoffs, test scripts, in-flight plans — not design docs)
+docs/dev/

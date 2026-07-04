@@ -1,6 +1,6 @@
 /** Transient notifications (large-file warnings, errors). Auto-dismiss after a
- *  few seconds; errors linger longer. */
-import { useEffect } from "react";
+ *  few seconds — paused while hovered so the text can be selected or copied. */
+import { useEffect, useState } from "react";
 
 import { useAppStore, type Notice } from "../store/appStore";
 import { IconClose } from "./icons";
@@ -12,17 +12,42 @@ function ToastItem({
   notice: Notice;
   onClose: (id: number) => void;
 }) {
+  const [hovered, setHovered] = useState(false);
+  const [copied, setCopied] = useState(false);
+
   useEffect(() => {
+    if (hovered) return; // pause auto-dismiss while the user is on it
     const timeout = window.setTimeout(
       () => onClose(notice.id),
       notice.kind === "error" ? 8000 : 5000,
     );
     return () => window.clearTimeout(timeout);
-  }, [notice.id, notice.kind, onClose]);
+  }, [notice.id, notice.kind, onClose, hovered]);
+
+  const copy = () => {
+    navigator.clipboard
+      .writeText(notice.text)
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {});
+  };
 
   return (
-    <div className={`toast toast--${notice.kind}`}>
+    <div
+      className={`toast toast--${notice.kind}`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       <span className="toast__text">{notice.text}</span>
+      <button
+        className="toast__close"
+        onClick={copy}
+        title={copied ? "Copied" : "Copy message"}
+      >
+        {copied ? "✓" : "⧉"}
+      </button>
       <button
         className="toast__close"
         onClick={() => onClose(notice.id)}

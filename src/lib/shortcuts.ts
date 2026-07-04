@@ -8,6 +8,7 @@ export type ShortcutAction =
   | "saveFile"
   | "quickOpen"
   | "searchInFiles"
+  | "appRefresh"
   | "nextTab"
   | "prevTab"
   | "renameSelected"
@@ -54,6 +55,20 @@ export const SHORTCUTS: Shortcut[] = [
     shift: true,
     description: "Search across files",
     label: "Ctrl+Shift+F",
+  },
+  // Replaces the WebView page reload: refresh explorer + repos + open files.
+  {
+    action: "appRefresh",
+    key: "F5",
+    description: "Refresh everything (explorer, repos, open files)",
+    label: "F5",
+  },
+  {
+    action: "appRefresh",
+    key: "r",
+    ctrl: true,
+    description: "Refresh everything (explorer, repos, open files)",
+    label: "Ctrl+R",
   },
   {
     action: "nextTab",

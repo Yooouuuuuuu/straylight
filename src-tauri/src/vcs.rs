@@ -466,6 +466,7 @@ pub async fn vcs_stash(
         "push" if message.trim().is_empty() => vec!["git", "stash", "push"],
         "push" => vec!["git", "stash", "push", "-m", &message],
         "pop" => vec!["git", "stash", "pop"],
+        "drop" => vec!["git", "stash", "drop"],
         "list" => vec!["git", "stash", "list", "--format=%gd: %s"],
         _ => return Err(format!("unknown stash op '{op}'")),
     };
@@ -479,6 +480,71 @@ pub async fn vcs_stash(
         });
     }
     Ok(out.stdout.trim().to_string())
+}
+
+/// Bring the local line up to date with the remote (run after a fetch): git
+/// merges `@{u}`; jj rebases the working-copy branch onto `<bookmark>@origin`.
+/// Mutates the working tree — the UI confirms first.
+#[tauri::command]
+pub async fn vcs_update(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    backend: String,
+    target: String,
+) -> Result<String, String> {
+    let lock = repo_guard(&state, &conn_id, &root).await;
+    let _held = lock.lock().await;
+    let out = if backend == "jj" {
+        let dest = format!("{target}@origin");
+        run_command(&state, &conn_id, &root, &["jj", "rebase", "-d", &dest]).await?
+    } else {
+        run_command(&state, &conn_id, &root, &["git", "merge", "--no-edit", "@{u}"]).await?
+    };
+    let msg = format!("{}\n{}", out.stdout.trim(), out.stderr.trim())
+        .trim()
+        .to_string();
+    if out.code != 0 {
+        return Err(if msg.is_empty() { "update failed".into() } else { msg });
+    }
+    Ok(if msg.is_empty() { "Up to date.".into() } else { msg })
+}
+
+/// jj: set a change's description without finishing it. rev `@` names the
+/// current WIP change; `@-` rewrites the last commit's message.
+#[tauri::command]
+pub async fn vcs_describe(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    rev: String,
+    message: String,
+) -> Result<(), String> {
+    let lock = repo_guard(&state, &conn_id, &root).await;
+    let _held = lock.lock().await;
+    let out = run_command(
+        &state,
+        &conn_id,
+        &root,
+        &["jj", "describe", "-r", &rev, "-m", &message],
+    )
+    .await?;
+    ok_or_stderr(out, "describe")
+}
+
+/// jj: fold the working copy's changes into the last commit — the equivalent of
+/// git stage-everything + `--amend --no-edit`. `-u` keeps the destination's
+/// message, so no editor can ever open on the no-TTY channel.
+#[tauri::command]
+pub async fn vcs_squash(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+) -> Result<(), String> {
+    let lock = repo_guard(&state, &conn_id, &root).await;
+    let _held = lock.lock().await;
+    let out = run_command(&state, &conn_id, &root, &["jj", "squash", "-u"]).await?;
+    ok_or_stderr(out, "squash")
 }
 
 /// Fetch / pull / push (jj: `jj git fetch` / `jj git push`; jj "pull" maps to
@@ -752,7 +818,31 @@ async fn jj_status(state: &AppState, conn_id: &str, root: &str) -> Result<VcsSta
             msg.to_string()
         });
     }
-    let changes = parse_jj_summary(&diff.stdout);
+    let mut changes = parse_jj_summary(&diff.stdout);
+
+    // Conflicted paths (spike-verified on jj 0.42): `jj resolve --list` prints
+    // `path    2-sided conflict` per line and exits 0; with no conflicts it
+    // exits 2. Conflicts appear in the summary as a plain `M`, so upgrade them.
+    let resolve = run_command(
+        state,
+        conn_id,
+        root,
+        &["jj", "--color", "never", "resolve", "--list"],
+    )
+    .await?;
+    if resolve.code == 0 {
+        for path in parse_jj_resolve_list(&resolve.stdout) {
+            match changes.iter_mut().find(|c| c.path == path) {
+                Some(c) => c.kind = "conflicted".into(),
+                None => changes.push(VcsChange {
+                    path,
+                    old_path: None,
+                    kind: "conflicted".into(),
+                    staged: false,
+                }),
+            }
+        }
+    }
 
     // `@` bookmark / change id / description (tab-delimited), and `@-` bookmark.
     let at = run_command(
@@ -801,6 +891,19 @@ async fn jj_status(state: &AppState, conn_id: &str, root: &str) -> Result<VcsSta
         behind: None,
         changes,
     })
+}
+
+/// Parse `jj resolve --list`: one `path<2+ spaces>N-sided conflict` per line.
+fn parse_jj_resolve_list(data: &str) -> Vec<String> {
+    data.lines()
+        .filter_map(|line| {
+            let line = line.trim_end();
+            if line.is_empty() {
+                return None;
+            }
+            Some(line.split("  ").next().unwrap_or(line).trim_end().to_string())
+        })
+        .collect()
 }
 
 /// Expand git/jj brace-rename notation (`dir/{old => new}/x`) into (old, new).
@@ -1022,6 +1125,15 @@ mod tests {
         assert_eq!(s.changes.len(), 2);
         assert!(s.changes[0].staged && s.changes[0].kind == "modified");
         assert!(!s.changes[1].staged && s.changes[1].kind == "modified");
+    }
+
+    #[test]
+    fn parses_jj_resolve_list() {
+        let data = "a.txt    2-sided conflict\nsrc/my file.rs    3-sided conflict\n";
+        assert_eq!(
+            parse_jj_resolve_list(data),
+            vec!["a.txt".to_string(), "src/my file.rs".to_string()]
+        );
     }
 
     #[test]

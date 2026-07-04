@@ -7,7 +7,10 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { useAppStore } from "../../store/appStore";
 import { useVcsStore, type TrackedRepo } from "../../store/vcsStore";
+import { colorForName } from "../../lib/connectionColor";
+import { basename } from "../../lib/format";
 import { openDiff } from "../../lib/openDiff";
+import { openFileByPath } from "../../lib/openFile";
 import { vcsBranches, type VcsBranch } from "../../lib/ipc";
 import { vcsClass, vcsLetter } from "../../lib/vcsDecorations";
 import { FolderBrowser } from "../FolderBrowser";
@@ -123,6 +126,10 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   const toggleEager = useVcsStore((s) => s.toggleEager);
   const removeRepo = useVcsStore((s) => s.removeRepo);
   const showHistory = useVcsStore((s) => s.showHistory);
+  const closeHistory = useVcsStore((s) => s.closeHistory);
+  const historyShown = useVcsStore(
+    (s) => s.historyRepo?.connKey === repo.connKey && s.historyRepo?.root === repo.root,
+  );
   const stage = useVcsStore((s) => s.stage);
   const unstage = useVcsStore((s) => s.unstage);
   const commit = useVcsStore((s) => s.commit);
@@ -130,34 +137,78 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   const requestDiscard = useVcsStore((s) => s.requestDiscard);
   const amend = useVcsStore((s) => s.amend);
   const stash = useVcsStore((s) => s.stash);
+  const updateFromRemote = useVcsStore((s) => s.updateFromRemote);
+  const describe = useVcsStore((s) => s.describe);
+  const squash = useVcsStore((s) => s.squash);
+  const toggleCommitOpen = useVcsStore((s) => s.toggleCommitOpen);
+  const askConfirm = useVcsStore((s) => s.askConfirm);
   const [message, setMessage] = useState("");
   const [committing, setCommitting] = useState(false);
   const [amendMode, setAmendMode] = useState(false);
+  const [describeMode, setDescribeMode] = useState<"@" | "@-" | null>(null);
   const [branchOpen, setBranchOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
 
   const st = repo.status;
   const inactive = !repo.connId;
   const loading = repo.activity === "loading";
   const isGit = repo.backend !== "jj";
   const changes = st?.changes ?? [];
-  const staged = changes.filter((c) => c.staged);
-  const unstaged = changes.filter((c) => !c.staged);
+  const conflicted = changes.filter((c) => c.kind === "conflicted");
+  const staged = changes.filter((c) => c.staged && c.kind !== "conflicted");
+  const unstaged = changes.filter((c) => !c.staged && c.kind !== "conflicted");
+  const jjChanges = changes.filter((c) => c.kind !== "conflicted");
+
+  const commitBoxOpen = !inactive && !!st && !!repo.uiCommitOpen;
   const canCommit =
     !inactive &&
-    (amendMode
-      ? message.trim().length > 0
-      : message.trim().length > 0 && (isGit ? staged.length > 0 : changes.length > 0));
+    (isGit
+      ? amendMode
+        ? message.trim().length > 0 || staged.length > 0
+        : message.trim().length > 0 && staged.length > 0
+      : describeMode !== null
+        ? message.trim().length > 0
+        : message.trim().length > 0 && jjChanges.length > 0);
 
-  const doCommit = async () => {
+  const exitModes = () => {
+    setAmendMode(false);
+    setDescribeMode(null);
+  };
+
+  const runCommit = async () => {
     setCommitting(true);
-    const ok = amendMode
-      ? await amend(repo.connKey, repo.root, message.trim())
-      : await commit(repo.connKey, repo.root, message.trim());
+    let ok: boolean;
+    if (isGit && amendMode) {
+      ok = await amend(repo.connKey, repo.root, message.trim());
+    } else if (!isGit && describeMode !== null) {
+      ok = await describe(repo.connKey, repo.root, describeMode, message.trim());
+    } else {
+      ok = await commit(repo.connKey, repo.root, message.trim());
+    }
     setCommitting(false);
     if (ok) {
       setMessage("");
-      setAmendMode(false);
+      exitModes();
     }
+  };
+
+  const doCommit = () => {
+    // Amending a commit that's already upstream rewrites published history.
+    if (isGit && amendMode && st?.ahead === 0) {
+      askConfirm(
+        "Amend a pushed commit?",
+        "The last commit is already on the remote — amending rewrites published history.",
+        () => void runCommit(),
+      );
+    } else {
+      void runCommit();
+    }
+  };
+
+  const openConflictFile = (path: string) => {
+    if (!repo.connId) return;
+    const root = repo.root.replace(/\\/g, "/").replace(/\/+$/, "");
+    void openFileByPath(repo.connId, `${root}/${path}`, basename(path));
   };
 
   const changeRow = (c: (typeof changes)[number], action: ReactNode) => (
@@ -185,19 +236,12 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
     </div>
   );
 
-  const remoteBtn = (op: "fetch" | "pull" | "push", label: string) => (
-    <button
-      className="repo-card__remote-btn"
-      disabled={inactive || repo.remoteBusy != null}
-      onClick={() => void remoteOp(repo.connKey, repo.root, op)}
-      title={label}
-    >
-      {repo.remoteBusy === op ? "…" : label}
-    </button>
-  );
-
   return (
-    <div className="repo-card">
+    <div
+      className="repo-card"
+      style={{ borderColor: colorForName(repo.connKey) }}
+      title={`${repo.connKey} — ${repo.root}`}
+    >
       <div className="repo-card__head">
         <span
           className={`repo-card__backend repo-card__backend--${repo.backend}`}
@@ -208,6 +252,23 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
         <span className="repo-card__name" title={repo.root}>
           {repo.label}
         </span>
+        <button
+          className={`icon-btn ${historyShown ? "icon-btn--active" : ""}`}
+          title={historyShown ? "Hide history" : "Commit history (live)"}
+          disabled={inactive}
+          onClick={() =>
+            historyShown ? closeHistory() : showHistory(repo.connKey, repo.root)
+          }
+        >
+          ⎇
+        </button>
+        <button
+          className={`icon-btn ${repo.eager ? "icon-btn--active" : ""}`}
+          title={repo.eager ? "Live updates on — click to pause" : "Live updates off"}
+          onClick={() => toggleEager(repo.connKey, repo.root)}
+        >
+          {repo.eager ? "◉" : "○"}
+        </button>
         {loading ? (
           <button
             className="icon-btn"
@@ -227,24 +288,15 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
           </button>
         )}
         <button
-          className="icon-btn"
-          title="Commit history"
-          disabled={inactive}
-          onClick={() => showHistory(repo.connKey, repo.root)}
-        >
-          ⎇
-        </button>
-        <button
-          className={`icon-btn ${repo.eager ? "icon-btn--active" : ""}`}
-          title={repo.eager ? "Live updates on — click to pause" : "Live updates off"}
-          onClick={() => toggleEager(repo.connKey, repo.root)}
-        >
-          {repo.eager ? "◉" : "○"}
-        </button>
-        <button
           className="icon-btn icon-btn--danger"
           title="Remove from Source Control"
-          onClick={() => removeRepo(repo.connKey, repo.root)}
+          onClick={() =>
+            askConfirm(
+              "Remove repository?",
+              `Remove "${repo.label}" from Source Control? Nothing on disk is touched — you can re-add it any time.`,
+              () => removeRepo(repo.connKey, repo.root),
+            )
+          }
         >
           <IconClose />
         </button>
@@ -258,7 +310,10 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
             <span
               className="repo-card__branch repo-card__branch--btn"
               title="Switch / create branch"
-              onClick={() => setBranchOpen((o) => !o)}
+              onClick={() => {
+                setActionsOpen(false);
+                setBranchOpen((o) => !o);
+              }}
             >
               {st.ref || "—"} ▾
             </span>
@@ -269,6 +324,28 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
               </span>
             )}
             <span className="repo-card__count">{summarize(repo)}</span>
+            <span className="repo-card__meta-btns">
+              <button
+                className={`icon-btn ${commitBoxOpen ? "icon-btn--active" : ""}`}
+                title="Commit / amend"
+                onClick={() => {
+                  if (commitBoxOpen) exitModes();
+                  toggleCommitOpen(repo.connKey, repo.root);
+                }}
+              >
+                ✎
+              </button>
+              <button
+                className={`icon-btn ${actionsOpen ? "icon-btn--active" : ""}`}
+                title="More actions (fetch, push, stash…)"
+                onClick={() => {
+                  setBranchOpen(false);
+                  setActionsOpen((o) => !o);
+                }}
+              >
+                {repo.remoteBusy ? <span className="spinner spinner--sm" /> : "⋯"}
+              </button>
+            </span>
           </>
         ) : (
           <span className="repo-card__count">not loaded</span>
@@ -279,71 +356,238 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
         <BranchMenu repo={repo} onClose={() => setBranchOpen(false)} />
       )}
 
-      {repo.error && <div className="repo-card__error">{repo.error}</div>}
-
-      {!inactive && st && (
-        <div className="repo-card__remote">
-          {remoteBtn("fetch", "Fetch")}
-          {isGit && remoteBtn("pull", "Pull")}
-          {remoteBtn("push", "Push")}
+      {actionsOpen && !inactive && st && (
+        <div className="action-menu">
+          <button
+            className="action-menu__item"
+            onClick={() => {
+              setActionsOpen(false);
+              void remoteOp(repo.connKey, repo.root, "fetch");
+            }}
+          >
+            Fetch <span className="action-menu__hint">safe — updates remote refs</span>
+          </button>
+          {isGit && !!st.behind && (
+            <button
+              className="action-menu__item"
+              onClick={() => {
+                setActionsOpen(false);
+                askConfirm(
+                  "Merge remote changes?",
+                  `Merge the fetched upstream into ${st.ref || "the current branch"}? This modifies your working tree.`,
+                  () => void updateFromRemote(repo.connKey, repo.root),
+                );
+              }}
+            >
+              Update <span className="action-menu__hint">merge ↓{st.behind}</span>
+            </button>
+          )}
+          {!isGit && !!st.ref && (
+            <button
+              className="action-menu__item"
+              onClick={() => {
+                setActionsOpen(false);
+                askConfirm(
+                  "Rebase onto the remote?",
+                  `Rebase your work onto ${st.ref}@origin? This rewrites the local commits' parents.`,
+                  () => void updateFromRemote(repo.connKey, repo.root),
+                );
+              }}
+            >
+              Rebase <span className="action-menu__hint">onto {st.ref}@origin</span>
+            </button>
+          )}
+          <button
+            className="action-menu__item"
+            onClick={() => {
+              setActionsOpen(false);
+              askConfirm(
+                "Push to the remote?",
+                isGit
+                  ? `Push ${st.ahead ? `${st.ahead} commit${st.ahead === 1 ? "" : "s"}` : "your commits"} upstream?`
+                  : "Push bookmarks to the remote (jj git push)?",
+                () => void remoteOp(repo.connKey, repo.root, "push"),
+              );
+            }}
+          >
+            Push{isGit && st.ahead ? ` ↑${st.ahead}` : ""}
+          </button>
           {isGit && (
             <button
-              className="repo-card__remote-btn"
-              onClick={() => void stash(repo.connKey, repo.root, "push", message.trim())}
-              title="Stash all changes"
+              className="action-menu__item"
+              disabled={changes.length === 0}
+              onClick={() => {
+                setActionsOpen(false);
+                void stash(repo.connKey, repo.root, "push", "");
+              }}
             >
-              Stash
+              Stash <span className="action-menu__hint">set changes aside</span>
             </button>
           )}
           {isGit && (
             <button
-              className="repo-card__remote-btn"
-              onClick={() => void stash(repo.connKey, repo.root, "pop", "")}
-              title="Pop the latest stash"
+              className="action-menu__item"
+              onClick={() => {
+                setActionsOpen(false);
+                askConfirm(
+                  "Pop the latest stash?",
+                  "Apply the most recent stash to your working tree? Conflicts are possible.",
+                  () => void stash(repo.connKey, repo.root, "pop", ""),
+                );
+              }}
             >
-              Pop
+              Pop stash
+            </button>
+          )}
+          {!isGit && (
+            <button
+              className="action-menu__item"
+              disabled={jjChanges.length === 0}
+              onClick={() => {
+                setActionsOpen(false);
+                askConfirm(
+                  "Squash into the last commit?",
+                  "Fold all working-copy changes into the last commit? Its message is kept.",
+                  () => void squash(repo.connKey, repo.root),
+                );
+              }}
+            >
+              Squash <span className="action-menu__hint">fold changes into last</span>
             </button>
           )}
         </div>
       )}
 
-      {!inactive && st && (changes.length > 0 || isGit) && (
+      {repo.error && <div className="repo-card__error">{repo.error}</div>}
+
+      {commitBoxOpen && (
         <div className="repo-card__commit">
+          <div className="repo-card__mode-switch">
+            {isGit ? (
+              <>
+                <button
+                  className={`repo-card__mode-btn ${!amendMode ? "repo-card__mode-btn--active" : ""}`}
+                  onClick={() => setAmendMode(false)}
+                >
+                  Commit
+                </button>
+                <button
+                  className={`repo-card__mode-btn ${amendMode ? "repo-card__mode-btn--active" : ""}`}
+                  title="Amend the last commit (message and/or staged changes)"
+                  onClick={() => setAmendMode(true)}
+                >
+                  Amend
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  className={`repo-card__mode-btn ${describeMode === null ? "repo-card__mode-btn--active" : ""}`}
+                  onClick={() => setDescribeMode(null)}
+                >
+                  Commit
+                </button>
+                <button
+                  className={`repo-card__mode-btn ${describeMode === "@" ? "repo-card__mode-btn--active" : ""}`}
+                  title="Set the current change's message without committing"
+                  onClick={() => setDescribeMode("@")}
+                >
+                  Describe
+                </button>
+                <button
+                  className={`repo-card__mode-btn ${describeMode === "@-" ? "repo-card__mode-btn--active" : ""}`}
+                  title="Rewrite the last commit's message"
+                  onClick={() => setDescribeMode("@-")}
+                >
+                  Fix last msg
+                </button>
+              </>
+            )}
+          </div>
           <textarea
             className="repo-card__msg input--mono"
             rows={2}
             placeholder={
-              isGit ? "Commit message (staged changes)" : "Describe & commit this change"
+              isGit
+                ? amendMode
+                  ? "New message (leave empty to keep the current one)"
+                  : "Commit message (staged changes)"
+                : describeMode === "@-"
+                  ? "New message for the last commit"
+                  : describeMode === "@"
+                    ? "Message for the current change (no commit)"
+                    : "Describe & commit this change"
             }
             value={message}
             onChange={(e) => setMessage(e.target.value)}
           />
-          {isGit && (
-            <label className="repo-card__amend">
-              <input
-                type="checkbox"
-                checked={amendMode}
-                onChange={(e) => setAmendMode(e.target.checked)}
-              />
-              Amend last commit
-            </label>
-          )}
           <button
             className="btn btn--primary btn--block"
             disabled={!canCommit || committing}
-            onClick={() => void doCommit()}
+            onClick={doCommit}
             title={
-              !amendMode && isGit && staged.length === 0 ? "Stage changes first" : "Commit"
+              isGit && !amendMode && staged.length === 0
+                ? "Stage changes first"
+                : "Commit"
             }
           >
             {committing
-              ? amendMode
-                ? "Amending…"
-                : "Committing…"
-              : amendMode
-                ? "Amend"
-                : "Commit"}
+              ? "Working…"
+              : isGit
+                ? amendMode
+                  ? "Amend"
+                  : "Commit"
+                : describeMode === "@-"
+                  ? "Update message"
+                  : describeMode === "@"
+                    ? "Describe"
+                    : "Commit"}
           </button>
+        </div>
+      )}
+
+      {repo.stashConflict && !inactive && (
+        <div className="repo-card__banner">
+          <span>Stash pop hit conflicts — resolve them, then drop the stash.</span>
+          <button
+            className="repo-card__group-act"
+            onClick={() => void stash(repo.connKey, repo.root, "drop", "")}
+          >
+            Drop stash
+          </button>
+        </div>
+      )}
+
+      {conflicted.length > 0 && (
+        <div className="repo-card__group">
+          <div className="repo-card__group-head repo-card__group-head--conflict">
+            <span>⚠ Conflicts ({conflicted.length})</span>
+          </div>
+          <div className="repo-card__changes">
+            {conflicted.map((c) => (
+              <div
+                className="change-row"
+                key={c.path}
+                title={`${c.path} — open to resolve the conflict markers`}
+                onClick={() => openConflictFile(c.path)}
+              >
+                <span className={`change-row__badge ${vcsClass(c.kind)}`}>!</span>
+                <span className="change-row__path">{c.path}</span>
+                {isGit && (
+                  <button
+                    className="change-row__act"
+                    title="Mark resolved (stage)"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void stage(repo.connKey, repo.root, [c.path]);
+                    }}
+                  >
+                    ✓
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -415,9 +659,9 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
           )}
         </>
       ) : (
-        changes.length > 0 && (
+        jjChanges.length > 0 && (
           <div className="repo-card__changes">
-            {changes.map((c) => changeRow(c, null))}
+            {jjChanges.map((c) => changeRow(c, null))}
           </div>
         )
       )}

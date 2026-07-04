@@ -7,6 +7,10 @@
 import { useEffect, useRef } from "react";
 
 import { setEditorBridge } from "../../lib/activeEditor";
+import {
+  conflictDecorations,
+  setupMergeConflictActions,
+} from "../../lib/mergeConflicts";
 import { DRACULA_THEME, monaco, setupMonaco } from "../../lib/monaco";
 import { useAppStore } from "../../store/appStore";
 
@@ -29,6 +33,7 @@ export function MonacoWrapper() {
   // Create the editor once.
   useEffect(() => {
     setupMonaco();
+    setupMergeConflictActions();
     const host = hostRef.current;
     if (!host) return;
 
@@ -69,7 +74,25 @@ export function MonacoWrapper() {
         savedVersions.set(id, versionId);
         recomputeDirty(id);
       },
+      setContent: (id, content) => {
+        const model = models.get(id);
+        if (!model) return; // never activated — the store's tab.content seeds it
+        const active = editor.getModel() === model;
+        const viewState = active ? editor.saveViewState() : null;
+        model.setValue(content);
+        savedVersions.set(id, model.getAlternativeVersionId());
+        recomputeDirty(id);
+        if (active && viewState) editor.restoreViewState(viewState);
+      },
     });
+
+    // Highlight the two sides of any merge-conflict region in the active model
+    // (the accept actions themselves are CodeLenses from setupMergeConflictActions).
+    const conflictDecos = editor.createDecorationsCollection();
+    const updateConflictDecos = () => {
+      const model = editor.getModel();
+      conflictDecos.set(model ? conflictDecorations(model) : []);
+    };
 
     const cursorSub = editor.onDidChangeCursorPosition((event) => {
       const id = useAppStore.getState().activeTabId;
@@ -83,11 +106,14 @@ export function MonacoWrapper() {
     const changeSub = editor.onDidChangeModelContent(() => {
       const id = useAppStore.getState().activeTabId;
       if (id) recomputeDirty(id);
+      updateConflictDecos();
     });
+    const modelSub = editor.onDidChangeModel(() => updateConflictDecos());
 
     return () => {
       cursorSub.dispose();
       changeSub.dispose();
+      modelSub.dispose();
       setEditorBridge(null);
       models.forEach((model) => model.dispose());
       models.clear();

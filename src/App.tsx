@@ -11,7 +11,12 @@ import {
   type ImperativePanelHandle,
 } from "react-resizable-panels";
 
-import { localConnect, onSshStatus, onTransferProgress } from "./lib/ipc";
+import {
+  localConnect,
+  onSshStatus,
+  onTransferProgress,
+  onVcsFsChange,
+} from "./lib/ipc";
 import { useAppStore } from "./store/appStore";
 import { useVcsStore } from "./store/vcsStore";
 import { initSessionPersistence, restoreSession } from "./lib/session";
@@ -32,6 +37,7 @@ import { NewEntryDialog } from "./components/filetree/NewEntryDialog";
 import { DeleteConfirmDialog } from "./components/filetree/DeleteConfirmDialog";
 import { PropertiesDialog } from "./components/filetree/PropertiesDialog";
 import { DiscardDialog } from "./components/vcs/DiscardDialog";
+import { VcsConfirmDialog } from "./components/vcs/VcsConfirmDialog";
 import { Finder } from "./components/Finder";
 import { SearchInFiles } from "./components/SearchInFiles";
 import { PortForwards } from "./components/PortForwards";
@@ -132,10 +138,29 @@ export default function App() {
   }, []);
 
   // Re-resolve tracked repos' live connId whenever the active connections change
-  // (connect / disconnect / reconnect) — cached decorations then light up.
+  // (connect / disconnect / reconnect) — cached decorations then light up, local
+  // repos get their fs watcher, and newly-online repos populate once.
   useEffect(() => {
     useVcsStore.getState().resolveConns();
   }, [localConnId, remoteConnId, wslConnId]);
+
+  // A watched local repo changed on disk (terminal git ops, external edits).
+  useEffect(() => {
+    const unlistenPromise = onVcsFsChange((c) =>
+      useVcsStore.getState().onFsChange(c.connId, c.root),
+    );
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  // Remote/WSL repos have no watcher — catch up when the window regains focus
+  // (e.g. after git ops in an external terminal), throttled per repo.
+  useEffect(() => {
+    const onFocus = () => useVcsStore.getState().refreshAll(5_000);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
 
   // Drive the Source Control panel's collapse from the store.
   useEffect(() => {
@@ -145,14 +170,14 @@ export default function App() {
     else if (!scmVisible && !panel.isCollapsed()) panel.collapse();
   }, [scmVisible]);
 
-  // When history appends inside the VC panel, make sure that panel is open and
-  // wide enough to hold both the history and the cards.
+  // The history panel sits on top of the explorer in the sidebar column (the
+  // explorer is usually idle while browsing history, and this keeps the editor
+  // free for comparing). It's mounted only while open — driving it through
+  // collapse/expand instead caused spurious onCollapse events that closed it
+  // right after opening. Opening also reveals the sidebar if it's hidden.
   useEffect(() => {
-    const panel = scmPanel.current;
-    if (!panel || !historyOpen) return;
-    if (panel.isCollapsed()) panel.expand();
-    if (panel.getSize() < 40) panel.resize(44);
-  }, [historyOpen]);
+    if (historyOpen) setSidebarVisible(true);
+  }, [historyOpen, setSidebarVisible]);
 
   // Drive the sidebar panel's collapse state from the store.
   useEffect(() => {
@@ -196,7 +221,19 @@ export default function App() {
             onCollapse={() => setSidebarVisible(false)}
             onExpand={() => setSidebarVisible(true)}
           >
-            <Sidebar />
+            <PanelGroup direction="vertical" autoSaveId="straylight.layout.sidebar">
+              {historyOpen && (
+                <>
+                  <Panel id="history" order={1} defaultSize={45} minSize={15} maxSize={80}>
+                    <HistoryPanel />
+                  </Panel>
+                  <PanelResizeHandle className="resize-handle" />
+                </>
+              )}
+              <Panel id="explorer" order={2} minSize={20}>
+                <Sidebar />
+              </Panel>
+            </PanelGroup>
           </Panel>
           <PanelResizeHandle className="resize-handle" />
           <Panel id="main" order={2} minSize={30}>
@@ -237,14 +274,11 @@ export default function App() {
             collapsedSize={0}
             defaultSize={22}
             minSize={14}
-            maxSize={60}
+            maxSize={40}
             onCollapse={() => setScmVisible(false)}
             onExpand={() => setScmVisible(true)}
           >
-            <div className="vc-region">
-              {historyOpen && <HistoryPanel />}
-              <ScmPanel />
-            </div>
+            <ScmPanel />
           </Panel>
         </PanelGroup>
       </div>
@@ -256,6 +290,7 @@ export default function App() {
       <DeleteConfirmDialog />
       <PropertiesDialog />
       <DiscardDialog />
+      <VcsConfirmDialog />
       <Finder />
       <SearchInFiles />
       <PortForwards />

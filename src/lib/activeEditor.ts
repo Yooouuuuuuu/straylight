@@ -10,6 +10,9 @@ export interface EditorBridge {
   getVersionId(tabId: string): number | null;
   /** Record `versionId` as this tab's saved state and re-evaluate its dirty flag. */
   markSavedVersion(tabId: string, versionId: number): void;
+  /** Replace a tab's model content in place (external reload) and mark it saved.
+   *  Preserves the view state when the tab is the active one. */
+  setContent(tabId: string, content: string): void;
 }
 
 let bridge: EditorBridge | null = null;
@@ -28,4 +31,8 @@ export function getTabVersionId(tabId: string): number | null {
 
 export function markTabSavedVersion(tabId: string, versionId: number): void {
   bridge?.markSavedVersion(tabId, versionId);
+}
+
+export function setTabContentInPlace(tabId: string, content: string): void {
+  bridge?.setContent(tabId, content);
 }

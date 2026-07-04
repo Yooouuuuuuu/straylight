@@ -20,6 +20,16 @@ under "Active roadmap."
   the status bar too) + Cancel; partial files are cleaned up on failure/cancel.
   Shipped alongside a **Properties** right-click dialog. Design:
   [streaming-transfers.md](streaming-transfers.md).
+- **0.8.5 — Post-Phase-3 rework, batches 1–2. _Done._** Live VC refresh (local
+  `.git`/`.jj` filesystem watcher + focus refresh for remote/WSL + startup
+  populate; **F5/Ctrl+R = app-wide refresh** instead of a WebView reload),
+  redesigned repo cards (✎ commit box with a `Commit | Amend` mode switch —
+  jj: `Commit | Describe | Fix last msg` — a ⋯ actions dropdown, colored
+  connection frames, confirm tiers, **Update replaces Pull**), marker-based
+  **conflict resolution** (Accept Current/Incoming/Both + drop-stash flow),
+  jj squash, a live **history panel above the explorer**, copyable toasts, and
+  the dark-theme fix for native form controls. Batches 3–4 (finder/search
+  scoping + streaming, ports polish, context-menu suppression) are next.
 - **0.8.x — Version control (Phase 3 core). _Done (git + jj)._** Status + tree
   decorations + branch/bookmark hint, Monaco diff (base vs working), stage/unstage
   + commit (jj: describe+commit), and a commit-history view (the ⎇ panel appended
@@ -31,16 +41,31 @@ under "Active roadmap."
 ## Non-priority backlog
 
 ### Version control (Phase 3, later)
-- [ ] **Push / pull** UI (for now: use the terminal — real PTY + host credentials;
-      our exec channel has no TTY for passphrase/2FA prompts).
+- Fetch/pull/push UI, refresh-on-focus + a local `.git`/`.jj` watcher, and a
+  marker-based conflict flow are **done or in the current rework** (see the
+  post-Phase-3 rework plan in `docs/dev/`) — the items below are what remains.
 - [ ] **Multi-lane commit graph** — the history rail is single-lane today.
-- [ ] **Blame**, **conflict-resolution editor**, **ignored-file dimming**.
+- [ ] **3-way merge editor** (base | ours | theirs | result) — level B of the
+      conflict flow; Monaco has no built-in widget for it, so it's a custom UI.
+- [ ] **Blame**, **ignored-file dimming**, **per-hunk staging**.
 - [ ] **jj on a remote** — resolve `jj` on the exec PATH (login shell / cached
       absolute path); today it works locally and falls back to git otherwise.
-- [ ] Refresh git status on window focus, so terminal-side git ops (e.g.
-      `git add` in the terminal) reflect without a manual refresh.
-- [ ] Partially-staged files now show in both Staged + Changes (fixed); revisit
-      if the per-side rendering needs more nuance (e.g. per-hunk staging).
+- [ ] **Push/pull interactivity** — the exec channel has no TTY, so an
+      interactive auth prompt (passphrase/2FA) hangs with no cancel; needs a
+      cancel button and/or askpass-style prompting.
+
+### Theming
+- [ ] **Global connection-color customization** — `lib/connectionColor.ts` hashes
+      a name to a 7-color Dracula palette (collisions possible). Make the palette
+      a user setting, and feed every surface that identifies a connection (title
+      bar, tree roots, terminal list, VC card frames) from the same source.
+
+### Editor
+- [ ] **Auto-reload open files on external change** (watch logs like VS Code):
+      non-dirty open editors reload when the file changes on disk; dirty editors
+      keep edits and conflict on save. Local = the same `notify` watcher infra as
+      the VCS one; remote = no watcher without an agent → opt-in mtime polling of
+      open tabs, or recheck on focus. Needs its own design pass first.
 
 ### Explorer & transfer
 - [ ] Fold the transfer panel into the sidebar — drag directly between the trees;
@@ -98,20 +123,21 @@ under "Active roadmap."
 - [ ] Trim the Monaco bundle to a language subset (it currently ships every
       language).
 
-### Docs — for the future README rewrite
-- [ ] **Version-control panel guidance:** repos are opened explicitly into the
-      right-side VC panel and don't auto-refresh until toggled "eager"; there's no
-      hard cap, but recommend keeping **fewer than ~5 repos eager at once** for
-      snappy updates (each eager repo re-runs `git`/`jj status` on changes, which
-      costs an SSH round trip per refresh). Note the per-repo activity indicator
-      and manual refresh as the way to spot/limit an expensive repo.
+### Docs
+- README rewritten through **0.8.4** (transfers, version control, finder, search,
+  port forwarding, the eager-repos guidance).
+- Working docs (session handoff, the Phase-3 manual test script, the post-Phase-3
+  rework plan) live in **`docs/dev/`, which is gitignored** — they're session
+  material, not design docs, so they stay out of the repo.
+- [`version-control.md`](version-control.md) still describes the *original* design —
+  two of its runner "must-haves" (binary PATH resolution, the ~2 concurrency cap)
+  were **deferred, not built**.
 
 ### Cleanup (deferred — one full sweep after Phase 3)
 Rather than trimming piecemeal mid-feature, batch a single unused-code / dependency
 audit once Phase 3 lands.
-- [ ] `fuse.js` — npm dep reserved for the Phase-3 fuzzy finder; drop it if that
-      feature never ships.
-- [ ] Sweep for other unused npm deps, Tauri commands, capability permissions, and
-      dead modules.
+- `fuse.js` is now **used** (the Ctrl+P fuzzy finder) — no longer a candidate to drop.
+- [ ] Sweep for unused npm deps, Tauri commands, capability permissions, and dead
+      modules.
 - Already removed in 0.7.1 (were verified dead, so kept out): the unused
   `tauri-plugin-dialog` + `tauri-plugin-fs` plugins and their capability grants.

@@ -3,6 +3,7 @@
  *  don't interfere with typing. */
 import { useEffect } from "react";
 
+import { refreshApp } from "../lib/appRefresh";
 import { saveActiveFile } from "../lib/saveFile";
 import { matchShortcut } from "../lib/shortcuts";
 import { focusTerminal } from "../lib/terminalFocus";
@@ -14,6 +15,14 @@ export function useKeyboard() {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const action = matchShortcut(event);
+
+      // Any modifier combo of F5 (Ctrl+F5, Shift+F5, …) must never reach the
+      // WebView (it would reload the whole app). Plain F5 matches "appRefresh"
+      // below; the variants are swallowed here.
+      if (!action && event.key === "F5") {
+        event.preventDefault();
+        return;
+      }
       if (!action) return;
 
       const target = event.target as HTMLElement | null;
@@ -41,6 +50,14 @@ export function useKeyboard() {
         case "searchInFiles":
           if (!inTerminal) {
             store.setSearchOpen(true);
+            event.preventDefault();
+          }
+          break;
+        case "appRefresh":
+          // Ctrl+R stays readline reverse-search in a terminal (xterm consumes
+          // it, so the WebView never sees it either).
+          if (!inTerminal) {
+            void refreshApp();
             event.preventDefault();
           }
           break;

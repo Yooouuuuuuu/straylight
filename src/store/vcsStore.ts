@@ -13,14 +13,19 @@ import {
   vcsAmend,
   vcsCommit,
   vcsCreateBranch,
+  vcsDescribe,
   vcsDiscard,
   vcsOpen,
   vcsRemote,
+  vcsSquash,
   vcsStage,
   vcsStash,
   vcsStatus,
   vcsSwitch,
   vcsUnstage,
+  vcsUnwatch,
+  vcsUpdate,
+  vcsWatch,
   type VcsChange,
   type VcsStatus,
 } from "../lib/ipc";
@@ -39,8 +44,12 @@ export interface TrackedRepo {
   activity: "idle" | "loading" | "error";
   error: string | null;
   lastUpdated: number | null;
-  /** The fetch/pull/push op currently running, or null. */
-  remoteBusy?: "fetch" | "pull" | "push" | null;
+  /** The remote op currently running, or null. */
+  remoteBusy?: "fetch" | "pull" | "push" | "update" | null;
+  /** UI: the commit box is expanded (persisted per repo). */
+  uiCommitOpen?: boolean;
+  /** A stash pop hit conflicts — offer "drop stash" once resolved (transient). */
+  stashConflict?: boolean;
 }
 
 interface VcsState {
@@ -50,6 +59,8 @@ interface VcsState {
   historyRepo: { connKey: string; root: string } | null;
   /** Pending discard awaiting confirmation. */
   pendingDiscard: { connKey: string; root: string; changes: VcsChange[] } | null;
+  /** A VC action awaiting user confirmation (update/push/pop/amend-pushed…). */
+  vcsConfirm: { title: string; body: string; run: () => void } | null;
   /** Normalized absolute path → change kind ("child" marks an ancestor folder). */
   decorations: Record<string, string>;
 
@@ -68,11 +79,27 @@ interface VcsState {
   switchBranch: (connKey: string, root: string, target: string) => Promise<void>;
   createBranch: (connKey: string, root: string, name: string) => Promise<void>;
   amend: (connKey: string, root: string, message: string) => Promise<boolean>;
-  stash: (connKey: string, root: string, op: "push" | "pop", message: string) => Promise<void>;
+  stash: (connKey: string, root: string, op: "push" | "pop" | "drop", message: string) => Promise<void>;
+  /** Merge (git) / rebase (jj) onto the fetched remote. Confirmed by the UI. */
+  updateFromRemote: (connKey: string, root: string) => Promise<void>;
+  /** jj: describe a change. rev "@" = current WIP, "@-" = last commit message. */
+  describe: (connKey: string, root: string, rev: string, message: string) => Promise<boolean>;
+  /** jj: fold working-copy changes into the last commit. */
+  squash: (connKey: string, root: string) => Promise<void>;
+  toggleCommitOpen: (connKey: string, root: string) => void;
+  askConfirm: (title: string, body: string, run: () => void) => void;
+  clearConfirm: () => void;
   /** Re-resolve each repo's live connId from the active connections. */
   resolveConns: () => void;
   /** A file changed under `connId`: refresh eager repos that contain it. */
   onFileChanged: (connId: string, path: string) => void;
+  /** Refresh every connected repo. `throttleMs` skips repos refreshed more
+   *  recently than that (0 = force). */
+  refreshAll: (throttleMs: number) => void;
+  /** A watched local repo's files changed on disk (debounced burst). */
+  onFsChange: (connId: string, root: string) => void;
+  /** Start/stop backend filesystem watchers to match the tracked local repos. */
+  syncWatchers: () => void;
   setScmVisible: (v: boolean) => void;
   toggleScm: () => void;
   showHistory: (connKey: string, root: string) => void;
@@ -116,6 +143,7 @@ function persist(repos: TrackedRepo[]): void {
           eager: r.eager,
           status: r.status,
           lastUpdated: r.lastUpdated,
+          uiCommitOpen: r.uiCommitOpen,
         })),
       ),
     );
@@ -139,6 +167,7 @@ function load(): TrackedRepo[] {
       activity: "idle" as const,
       error: null,
       lastUpdated: d.lastUpdated ?? null,
+      uiCommitOpen: !!d.uiCommitOpen,
     }));
   } catch {
     return [];
@@ -189,11 +218,15 @@ const mapRepo = (
 // or a cancel) discards its result. This is the frontend-side "cancel".
 const tokens = new Map<string, number>();
 
+// Repo keys (`connId::root`) currently watched by the backend fs watcher.
+const watchedRepos = new Set<string>();
+
 export const useVcsStore = create<VcsState>()((set, get) => ({
   repos: load(),
   scmVisible: false,
   historyRepo: null,
   pendingDiscard: null,
+  vcsConfirm: null,
   decorations: {},
 
   openRepo: async (connId, dir) => {
@@ -233,15 +266,20 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       persist(repos);
       return { repos, scmVisible: true };
     });
-    if (added) await get().refreshRepo(connKey, root); // first populate
+    if (added) {
+      get().syncWatchers();
+      await get().refreshRepo(connKey, root); // first populate
+    }
   },
 
-  removeRepo: (connKey, root) =>
+  removeRepo: (connKey, root) => {
     set((s) => {
       const repos = s.repos.filter((r) => !(r.connKey === connKey && r.root === root));
       persist(repos);
       return { repos, decorations: buildDecorations(repos) };
-    }),
+    });
+    get().syncWatchers();
+  },
 
   toggleEager: (connKey, root) => {
     set((s) => {
@@ -418,11 +456,88 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
     try {
       const out = await vcsStash(connId, root, op, message);
       useAppStore.getState().pushNotice("info", out || `stash ${op} ok`);
+      if (op === "pop" || op === "drop") {
+        set((s) => ({
+          repos: mapRepo(s.repos, connKey, root, (r) => ({ ...r, stashConflict: false })),
+        }));
+      }
     } catch (e) {
-      useAppStore.getState().pushNotice("error", `Stash failed: ${String(e)}`);
+      const msg = String(e);
+      useAppStore.getState().pushNotice("error", `Stash ${op} failed: ${msg}`);
+      if (op === "pop" && /conflict/i.test(msg)) {
+        // git keeps the stash on a conflicted pop; the card offers Drop once
+        // the conflicts are resolved.
+        set((s) => ({
+          repos: mapRepo(s.repos, connKey, root, (r) => ({ ...r, stashConflict: true })),
+        }));
+      }
     }
     await get().refreshRepo(connKey, root);
   },
+
+  updateFromRemote: async (connKey, root) => {
+    const repo = get().repos.find((r) => r.connKey === connKey && r.root === root);
+    const connId = repo?.connId;
+    if (!repo || !connId) return;
+    set((s) => ({
+      repos: mapRepo(s.repos, connKey, root, (r) => ({ ...r, remoteBusy: "update" })),
+    }));
+    try {
+      const msg = await vcsUpdate(connId, root, repo.backend, repo.status?.ref ?? "");
+      const first = msg.split("\n").find((l) => l.trim()) ?? "Updated.";
+      useAppStore.getState().pushNotice("info", first);
+    } catch (e) {
+      useAppStore.getState().pushNotice("error", `Update failed: ${String(e)}`);
+    } finally {
+      set((s) => ({
+        repos: mapRepo(s.repos, connKey, root, (r) => ({ ...r, remoteBusy: null })),
+      }));
+    }
+    await get().refreshRepo(connKey, root);
+  },
+
+  describe: async (connKey, root, rev, message) => {
+    const repo = get().repos.find((r) => r.connKey === connKey && r.root === root);
+    const connId = repo?.connId;
+    if (!repo || !connId) return false;
+    try {
+      await vcsDescribe(connId, root, rev, message);
+    } catch (e) {
+      useAppStore.getState().pushNotice("error", `Describe failed: ${String(e)}`);
+      return false;
+    }
+    useAppStore
+      .getState()
+      .pushNotice("info", rev === "@-" ? "Last commit message updated." : "Description saved.");
+    await get().refreshRepo(connKey, root);
+    return true;
+  },
+
+  squash: async (connKey, root) => {
+    const repo = get().repos.find((r) => r.connKey === connKey && r.root === root);
+    const connId = repo?.connId;
+    if (!repo || !connId) return;
+    try {
+      await vcsSquash(connId, root);
+      useAppStore.getState().pushNotice("info", "Squashed into the last commit.");
+    } catch (e) {
+      useAppStore.getState().pushNotice("error", `Squash failed: ${String(e)}`);
+    }
+    await get().refreshRepo(connKey, root);
+  },
+
+  toggleCommitOpen: (connKey, root) =>
+    set((s) => {
+      const repos = mapRepo(s.repos, connKey, root, (r) => ({
+        ...r,
+        uiCommitOpen: !r.uiCommitOpen,
+      }));
+      persist(repos);
+      return { repos };
+    }),
+
+  askConfirm: (title, body, run) => set({ vcsConfirm: { title, body, run } }),
+  clearConfirm: () => set({ vcsConfirm: null }),
 
   requestDiscard: (connKey, root, changes) =>
     set({ pendingDiscard: { connKey, root, changes } }),
@@ -471,11 +586,69 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
     await get().refreshRepo(pd.connKey, pd.root);
   },
 
-  resolveConns: () =>
-    set((s) => {
-      const repos = s.repos.map((r) => ({ ...r, connId: connIdForKey(r.connKey) }));
-      return { repos, decorations: buildDecorations(repos) };
-    }),
+  resolveConns: () => {
+    const newlyConnected: { connKey: string; root: string }[] = [];
+    const repos = get().repos.map((r) => {
+      const connId = connIdForKey(r.connKey);
+      if (connId && !r.connId) newlyConnected.push({ connKey: r.connKey, root: r.root });
+      return { ...r, connId };
+    });
+    set({ repos, decorations: buildDecorations(repos) });
+    get().syncWatchers();
+    // Populate repos that just came online (startup / reconnect), unless their
+    // cache is seconds old (e.g. a quick relaunch).
+    for (const n of newlyConnected) {
+      const r = get().repos.find((x) => x.connKey === n.connKey && x.root === n.root);
+      if (r && (!r.lastUpdated || Date.now() - r.lastUpdated > 5_000))
+        void get().refreshRepo(n.connKey, n.root);
+    }
+  },
+
+  refreshAll: (throttleMs) => {
+    const now = Date.now();
+    for (const r of get().repos) {
+      if (!r.connId) continue;
+      if (r.activity === "loading") continue;
+      if (throttleMs > 0 && r.lastUpdated && now - r.lastUpdated < throttleMs) continue;
+      void get().refreshRepo(r.connKey, r.root);
+    }
+  },
+
+  onFsChange: (connId, root) => {
+    const target = norm(root).replace(/\/+$/, "");
+    const r = get().repos.find(
+      (x) => x.connId === connId && norm(x.root).replace(/\/+$/, "") === target,
+    );
+    if (!r || r.activity === "loading") return;
+    // Our own status call touches `.git/index` (stat-cache refresh) right after
+    // it completes — ignore the echo so watch → refresh can't self-loop.
+    if (r.lastUpdated && Date.now() - r.lastUpdated < 1_000) return;
+    void get().refreshRepo(r.connKey, r.root);
+  },
+
+  syncWatchers: () => {
+    const localId = useAppStore.getState().localConnId;
+    const desired = new Map<string, { connId: string; root: string }>();
+    if (localId) {
+      for (const r of get().repos) {
+        if (r.connId === localId)
+          desired.set(`${r.connId}::${r.root}`, { connId: r.connId, root: r.root });
+      }
+    }
+    for (const key of [...watchedRepos]) {
+      if (!desired.has(key)) {
+        watchedRepos.delete(key);
+        const sep = key.indexOf("::");
+        void vcsUnwatch(key.slice(0, sep), key.slice(sep + 2)).catch(() => {});
+      }
+    }
+    for (const [key, v] of desired) {
+      if (!watchedRepos.has(key)) {
+        watchedRepos.add(key);
+        vcsWatch(v.connId, v.root).catch(() => watchedRepos.delete(key));
+      }
+    }
+  },
 
   onFileChanged: (connId, path) => {
     const np = norm(path);

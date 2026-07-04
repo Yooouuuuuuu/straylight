@@ -459,6 +459,27 @@ export function vcsDiscard(
   return invoke("vcs_discard", { connId, root, backend, paths });
 }
 
+/** Watch a **local** repo root for filesystem changes (live status). */
+export function vcsWatch(connId: string, root: string): Promise<void> {
+  return invoke("vcs_watch", { connId, root });
+}
+
+export function vcsUnwatch(connId: string, root: string): Promise<void> {
+  return invoke("vcs_unwatch", { connId, root });
+}
+
+/** Debounced burst of filesystem changes under a watched repo root. */
+export interface VcsFsChange {
+  connId: string;
+  root: string;
+}
+
+export function onVcsFsChange(
+  handler: (change: VcsFsChange) => void,
+): Promise<UnlistenFn> {
+  return listen<VcsFsChange>("vcs-fs-change", (event) => handler(event.payload));
+}
+
 /** A branch (git) or bookmark (jj). */
 export interface VcsBranch {
   name: string;
@@ -496,14 +517,39 @@ export function vcsAmend(connId: string, root: string, message: string): Promise
   return invoke("vcs_amend", { connId, root, message });
 }
 
-/** git stash (git only): op = "push" | "pop" | "list". Returns the output. */
+/** git stash (git only). Returns the output. */
 export function vcsStash(
   connId: string,
   root: string,
-  op: "push" | "pop" | "list",
+  op: "push" | "pop" | "drop" | "list",
   message: string,
 ): Promise<string> {
   return invoke("vcs_stash", { connId, root, op, message });
+}
+
+/** After a fetch: git merges `@{u}`; jj rebases onto `<target>@origin`. */
+export function vcsUpdate(
+  connId: string,
+  root: string,
+  backend: string,
+  target: string,
+): Promise<string> {
+  return invoke("vcs_update", { connId, root, backend, target });
+}
+
+/** jj: set a change's description. rev "@" = current WIP, "@-" = last commit. */
+export function vcsDescribe(
+  connId: string,
+  root: string,
+  rev: string,
+  message: string,
+): Promise<void> {
+  return invoke("vcs_describe", { connId, root, rev, message });
+}
+
+/** jj: fold working-copy changes into the last commit (keeps its message). */
+export function vcsSquash(connId: string, root: string): Promise<void> {
+  return invoke("vcs_squash", { connId, root });
 }
 
 // ---------------------------------------------------------------------------
