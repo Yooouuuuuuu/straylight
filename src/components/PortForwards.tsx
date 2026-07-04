@@ -43,14 +43,21 @@ function PortsModal({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    portForwardList()
-      .then(setForwards)
-      .catch(() => {});
+    const refresh = () =>
+      portForwardList()
+        .then(setForwards)
+        .catch(() => {});
+    refresh();
+    // Keep the list fresh while open, so per-forward tunnel errors show up.
+    const timer = window.setInterval(refresh, 2000);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("keydown", onKey);
+    };
   }, [onClose]);
 
   const labelFor = (id: string) =>
@@ -61,6 +68,10 @@ function PortsModal({ onClose }: { onClose: () => void }) {
     const rp = Number(remotePort);
     if (!connId || !Number.isInteger(lp) || lp <= 0 || !Number.isInteger(rp) || rp <= 0) {
       pushNotice("error", "Enter a valid local and remote port.");
+      return;
+    }
+    if (forwards.some((f) => f.localPort === lp)) {
+      pushNotice("error", `127.0.0.1:${lp} is already being forwarded.`);
       return;
     }
     setBusy(true);
@@ -164,10 +175,20 @@ function PortsModal({ onClose }: { onClose: () => void }) {
                   <div className="ports-list__empty">No active forwards.</div>
                 ) : (
                   forwards.map((f) => (
-                    <div className="ports-item" key={f.id}>
-                      <span className="ports-item__route mono">
-                        127.0.0.1:{f.localPort} → {f.remoteHost}:{f.remotePort}
-                      </span>
+                    <div
+                      className={`ports-item ${f.lastError ? "ports-item--error" : ""}`}
+                      key={f.id}
+                    >
+                      <div className="ports-item__main">
+                        <span className="ports-item__route mono">
+                          127.0.0.1:{f.localPort} → {f.remoteHost}:{f.remotePort}
+                        </span>
+                        {f.lastError && (
+                          <span className="ports-item__err" title={f.lastError}>
+                            {f.lastError}
+                          </span>
+                        )}
+                      </div>
                       <span className="ports-item__conn">{labelFor(f.connId)}</span>
                       <button
                         className="btn btn--ghost"

@@ -25,6 +25,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 - Terminal tab reordering.
+## [0.8.6] - 2026-07-04
+
+Scoped quick-open & search, and the last of the rework polish — batches 3–4.
+
+### Added
+
+- **Pick where to look, first.** `Ctrl+P` and `Ctrl+Shift+F` open with a host
+  picker — `1 Local / 2 WSL / 3 Remote / 4 All`, chosen by number key, ↑↓ +
+  Enter, or mouse (last choice remembered) — then show that host's **pinned
+  folders as tabs**: `All pins` or one pin, switched with **Tab** or a click.
+  Esc always closes. Both tools search pinned folders only.
+- **Streaming results.** Every pin indexes/searches independently, with a
+  per-pin status line ("straylight: 12 hits · notes: searching…") — one slow
+  host can't block or hide the others.
+- **Port forwarding polish.** Duplicate local ports are rejected; a failing
+  tunnel (e.g. nothing listening on the remote port) turns the forward **red
+  with the reason** and raises a toast; bind errors explain Windows'
+  reserved-port ranges.
+- **Tree roots that fail to list** show "Folder unavailable — may have been
+  removed" with a **Retry** button (plus a 10 s timeout backstop) instead of
+  loading forever.
+
+### Fixed
+
+- **WSL search ran "forever".** Two causes: search read *through*
+  `.cargo` / `.rustup` / `.cache` / `.npm` / `.venv` / `__pycache__` … — those
+  are now excluded (the finder skips them too); and GNU grep exits 2 when it
+  merely hit an unreadable file *even with matches found* — those results were
+  wrongly discarded.
+- The native WebView right-click menu (重新整理/列印/檢查) no longer appears;
+  text inputs keep native paste, and Monaco/xterm/tree menus are unaffected.
+
 ## [0.8.5] - 2026-07-04
 
 Version control goes live-updating, learns to resolve conflicts, and gets a

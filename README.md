@@ -61,8 +61,10 @@ relaunch.
   asks first. The VCS binary runs *on the host that owns the repo* — no local
   clone — so commits use the host's real identity, config, and hooks. See
   [docs/version-control.md](docs/version-control.md).
-- **Quick-open & search** — `Ctrl+P` fuzzy-opens a file across your pinned folders;
-  `Ctrl+Shift+F` searches across files (grouped by file) and jumps to the line.
+- **Quick-open & search** — `Ctrl+P` fuzzy-opens a file by name; `Ctrl+Shift+F`
+  searches file contents (grouped by file) and jumps to the line. Both start with
+  a host picker (Local / WSL / Remote / All) and look in that host's **pinned
+  folders** — Tab switches between pins, and results stream in per pin.
 - **Port forwarding** — forward a local `127.0.0.1` port to a service reachable from
   the SSH server, over a tunnel on the existing connection.
 - **Editing** — a tabbed Monaco editor; edit and **save** (`Ctrl+S`) local *and*

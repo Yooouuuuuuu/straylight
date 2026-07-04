@@ -1208,6 +1208,153 @@
   font-size: var(--font-size-xs);
 }
 
+.ports-item__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ports-item--error {
+  border-color: var(--red);
+}
+
+.ports-item__err {
+  color: var(--red);
+  font-size: var(--font-size-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Stacked message (error + detail + retry) in a tree root */
+.filetree__message--stack {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.filetree__error-detail {
+  color: var(--fg-secondary);
+  font-size: var(--font-size-xs);
+  word-break: break-word;
+}
+
+/* ------------------------------------------------- Search scope chips (P / F) */
+
+.scope-chip__num {
+  color: var(--fg-secondary);
+  font-size: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+}
+
+/* Step-1 scope picker (Ctrl+Shift+F) */
+.scope-picker {
+  position: absolute;
+  top: 18vh;
+  width: min(340px, 90vw);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  outline: none;
+}
+
+.scope-picker__title {
+  padding: 0 var(--space-3) var(--space-2);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-secondary);
+}
+
+.scope-picker__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--fg-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.scope-picker__item--active {
+  background: var(--bg-selected);
+}
+
+.scope-picker__item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.scope-picker__off {
+  margin-left: auto;
+  color: var(--fg-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.scope-picker__hint {
+  padding: var(--space-2) var(--space-3) 0;
+  color: var(--fg-secondary);
+  font-size: var(--font-size-xs);
+}
+
+/* Step-2 pin tabs above the search bar */
+.pin-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5) 0;
+  flex-wrap: wrap;
+}
+
+.pin-tabs__scope {
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--fg-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.pin-tabs__scope:hover {
+  color: var(--fg-primary);
+  background: var(--bg-tertiary);
+}
+
+.pin-tab {
+  padding: 2px var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  border-bottom: none;
+  background: var(--bg-primary);
+  color: var(--fg-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.pin-tab--active {
+  color: var(--fg-primary);
+  border-color: var(--purple);
+}
+
+.search-panel__status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-5);
+  color: var(--fg-secondary);
+  font-size: var(--font-size-xs);
+  border-bottom: 1px solid var(--border);
+}
+
 /* --------------------------------------------------------- Fuzzy file finder */
 
 .finder {

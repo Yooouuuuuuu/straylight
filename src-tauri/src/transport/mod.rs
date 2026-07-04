@@ -752,7 +752,9 @@ pub fn list_drives() -> Vec<String> {
     vec!["/".to_string()]
 }
 
-/// Directory names skipped when listing files for the finder.
+/// Directory names skipped by the finder and search-in-files, at any depth.
+/// Includes the big per-user tool/cache trees — a home-dir pin would otherwise
+/// make `grep -r` read gigabytes of toolchain text ("search runs forever").
 const IGNORE_DIRS: &[&str] = &[
     ".git",
     ".jj",
@@ -763,6 +765,15 @@ const IGNORE_DIRS: &[&str] = &[
     "build",
     ".svn",
     "vendor",
+    ".cargo",
+    ".rustup",
+    ".cache",
+    ".npm",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".m2",
+    ".gradle",
 ];
 /// Cap on how many file paths the finder returns per root.
 const FIND_LIMIT: usize = 50_000;
@@ -969,7 +980,9 @@ async fn search_remote(
     root: &str,
     query: &str,
 ) -> Result<Vec<SearchMatch>, String> {
-    let mut owned: Vec<String> = vec!["grep".into(), "-rnIF".into()];
+    // `-s` silences per-file "Permission denied" spam (it still exits 2 on such
+    // errors, which is why matches-with-code-2 is accepted below).
+    let mut owned: Vec<String> = vec!["grep".into(), "-rnIFs".into()];
     for &d in IGNORE_DIRS {
         owned.push(format!("--exclude-dir={d}"));
     }
@@ -979,8 +992,10 @@ async fn search_remote(
     let argv: Vec<&str> = owned.iter().map(String::as_str).collect();
 
     let out = crate::exec::run_command(state, conn_id, root, &argv).await?;
-    // grep: 0 = matches, 1 = none, >1 = error.
-    if out.code > 1 {
+    // grep: 0 = matches, 1 = none, >1 = error. BUT grep also exits 2 when it
+    // merely *hit* an unreadable file while still finding matches — so only
+    // treat >1 as failure when there's no output to show.
+    if out.code > 1 && out.stdout.trim().is_empty() {
         let msg = out.stderr.trim();
         return Err(if msg.is_empty() {
             "search failed".into()

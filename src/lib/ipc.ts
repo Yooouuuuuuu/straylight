@@ -562,6 +562,17 @@ export interface ForwardInfo {
   localPort: number;
   remoteHost: string;
   remotePort: number;
+  /** The most recent tunnel failure for this forward, if any. */
+  lastError?: string | null;
+}
+
+/** A live tunnel failure on an active forward (also stored on the forward). */
+export function onPortForwardError(
+  handler: (e: { id: string; message: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ id: string; message: string }>("port-forward-error", (event) =>
+    handler(event.payload),
+  );
 }
 
 export function portForwardStart(

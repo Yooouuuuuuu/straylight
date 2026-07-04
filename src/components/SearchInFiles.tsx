@@ -1,19 +1,31 @@
-/** Search-in-files (Ctrl+Shift+F). Runs a literal search across every pinned
- *  folder on the active connections (local scans in Rust; remote/WSL use grep),
- *  groups hits by file, and opens a hit at its line. */
-import { useEffect, useMemo, useState } from "react";
+/** Search-in-files (Ctrl+Shift+F), in two steps:
+ *  1. Pick the scope — Local / WSL / Remote / All, top-down. Number keys 1–4,
+ *     ↑/↓ + Enter, or the mouse.
+ *  2. Search that scope's **pinned folders**. The row above the search bar
+ *     lists the pins — Tab (or click) switches between "All pins" and one pin.
+ *  Each pin searches independently and its hits stream in as they arrive, with
+ *  a per-pin status line. Esc steps back, then closes. */
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { basename } from "../lib/format";
 import { fsSearch, type SearchMatch } from "../lib/ipc";
 import { openFileAtLine } from "../lib/openFile";
+import {
+  collectRoots,
+  loadScope,
+  rootsForScope,
+  saveScope,
+  SCOPES,
+  type SearchRoot,
+  type SearchScope,
+} from "../lib/searchScope";
 import { useAppStore } from "../store/appStore";
+import { ScopePicker } from "./ScopePicker";
 
-interface Root {
-  connId: string;
-  root: string;
-  tag: string;
-}
-type Hit = Root & SearchMatch;
+type Hit = SearchRoot & SearchMatch;
+type RootState = "searching" | "done" | "failed";
+
+const rootKey = (r: SearchRoot) => `${r.connId}::${r.root}`;
 
 export function SearchInFiles() {
   const open = useAppStore((s) => s.searchOpen);
@@ -23,69 +35,86 @@ export function SearchInFiles() {
 }
 
 function SearchModal({ onClose }: { onClose: () => void }) {
-  const localConnId = useAppStore((s) => s.localConnId);
-  const pinnedFolders = useAppStore((s) => s.pinnedFolders);
-  const remote = useAppStore((s) => s.remote);
-  const remotePins = useAppStore((s) => s.remotePins);
-  const wsl = useAppStore((s) => s.wsl);
-  const wslPins = useAppStore((s) => s.wslPins);
+  const allRoots = useMemo(() => collectRoots(), []);
 
+  const [step, setStep] = useState<"scope" | "search">("scope");
+  const [scope, setScope] = useState<SearchScope>(loadScope);
+
+  const [pinIdx, setPinIdx] = useState(0); // 0 = all pins, 1..n = one pin
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Hit[] | null>(null);
-  const [searching, setSearching] = useState(false);
+  const [hits, setHits] = useState<Hit[]>([]);
+  const [rootStates, setRootStates] = useState<Record<string, RootState>>({});
+  const runRef = useRef(0);
 
-  const roots = useMemo<Root[]>(() => {
-    const r: Root[] = [];
-    const add = (connId: string | null | undefined, pins: string[]) => {
-      if (!connId) return;
-      for (const p of pins) r.push({ connId, root: p, tag: basename(p) || p });
-    };
-    add(localConnId, pinnedFolders);
-    add(remote?.connId, remotePins);
-    add(wsl?.connId, wslPins);
-    return r;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const scopeRoots = useMemo(() => rootsForScope(allRoots, scope), [allRoots, scope]);
+  const activeRoots = useMemo(
+    () =>
+      pinIdx > 0 && scopeRoots[pinIdx - 1] ? [scopeRoots[pinIdx - 1]] : scopeRoots,
+    [scopeRoots, pinIdx],
+  );
 
+  // Debounced, streaming search over the active pins: every root runs
+  // independently and appends its hits when it finishes; a bumped run id
+  // discards stale results.
   useEffect(() => {
     const q = query.trim();
-    if (!q) {
-      setResults(null);
-      return;
-    }
-    let alive = true;
+    runRef.current += 1;
+    const run = runRef.current;
+    setHits([]);
+    setRootStates({});
+    if (!q || step !== "search") return;
     const handle = window.setTimeout(() => {
-      setSearching(true);
-      Promise.all(
-        roots.map((r) =>
-          fsSearch(r.connId, r.root, q)
-            .then((ms) => ms.map((m) => ({ ...r, ...m })))
-            .catch(() => [] as Hit[]),
+      setRootStates(
+        Object.fromEntries(
+          activeRoots.map((r) => [rootKey(r), "searching" as RootState]),
         ),
-      ).then((lists) => {
-        if (!alive) return;
-        setResults(lists.flat());
-        setSearching(false);
-      });
+      );
+      for (const r of activeRoots) {
+        fsSearch(r.connId, r.root, q)
+          .then((ms) => {
+            if (runRef.current !== run) return;
+            setHits((h) => [...h, ...ms.map((m) => ({ ...r, ...m }))]);
+            setRootStates((s) => ({ ...s, [rootKey(r)]: "done" }));
+          })
+          .catch(() => {
+            if (runRef.current !== run) return;
+            setRootStates((s) => ({ ...s, [rootKey(r)]: "failed" }));
+          });
+      }
     }, 300);
-    return () => {
-      alive = false;
-      window.clearTimeout(handle);
-    };
-  }, [query, roots]);
+    return () => window.clearTimeout(handle);
+  }, [query, activeRoots, step]);
+
+  const searching = Object.values(rootStates).some((s) => s === "searching");
+
+  /** Per-pin progress, e.g. "straylight: 12 hits · notes: searching…". */
+  const statusLine = useMemo(() => {
+    if (!query.trim() || activeRoots.length === 0) return null;
+    return activeRoots
+      .map((r) => {
+        const st = rootStates[rootKey(r)];
+        const n = hits.filter((h) => rootKey(h) === rootKey(r)).length;
+        const label = scope === "all" ? `${r.tag}·${r.kind}` : r.tag;
+        return `${label}: ${
+          st === "searching"
+            ? "searching…"
+            : st === "failed"
+              ? "failed"
+              : `${n} hit${n === 1 ? "" : "s"}`
+        }`;
+      })
+      .join(" · ");
+  }, [query, activeRoots, rootStates, hits, scope]);
 
   const groups = useMemo(() => {
-    if (!results) return [];
     const map = new Map<string, { hit: Hit; hits: Hit[] }>();
-    for (const h of results) {
+    for (const h of hits) {
       const key = `${h.connId}:${h.root}:${h.path}`;
       if (!map.has(key)) map.set(key, { hit: h, hits: [] });
       map.get(key)!.hits.push(h);
     }
     return [...map.values()];
-  }, [results]);
-
-  const total = results?.length ?? 0;
+  }, [hits]);
 
   const openHit = (h: Hit) => {
     const root = h.root.replace(/\\/g, "/").replace(/\/+$/, "");
@@ -93,6 +122,28 @@ function SearchModal({ onClose }: { onClose: () => void }) {
     onClose();
   };
 
+  const cyclePin = (dir: 1 | -1) => {
+    const n = scopeRoots.length + 1; // "All pins" + each pin
+    setPinIdx((i) => (i + dir + n) % n);
+  };
+
+  // ---- Step 1: scope picker ------------------------------------------------
+  if (step === "scope") {
+    return (
+      <ScopePicker
+        title="Search where?"
+        onPick={(s) => {
+          setScope(s);
+          saveScope(s);
+          setPinIdx(0);
+          setStep("search");
+        }}
+        onClose={onClose}
+      />
+    );
+  }
+
+  // ---- Step 2: the search --------------------------------------------------
   return (
     <div
       className="modal-overlay"
@@ -101,32 +152,73 @@ function SearchModal({ onClose }: { onClose: () => void }) {
       }}
     >
       <div className="search-panel" role="dialog" aria-modal="true">
+        <div className="pin-tabs">
+          <button
+            className="pin-tabs__scope"
+            title="Change scope"
+            onClick={() => setStep("scope")}
+          >
+            ‹ {scope === "all" ? "All hosts" : SCOPES.find((s) => s.id === scope)?.label}
+          </button>
+          <button
+            className={`pin-tab ${pinIdx === 0 ? "pin-tab--active" : ""}`}
+            onClick={() => setPinIdx(0)}
+          >
+            All pins ({scopeRoots.length})
+          </button>
+          {scopeRoots.map((r, i) => (
+            <button
+              key={rootKey(r)}
+              className={`pin-tab ${pinIdx === i + 1 ? "pin-tab--active" : ""}`}
+              title={r.root}
+              onClick={() => setPinIdx(i + 1)}
+            >
+              {r.tag}
+              {scope === "all" ? ` · ${r.kind}` : ""}
+            </button>
+          ))}
+        </div>
         <div className="search-panel__head">
           <input
             className="search-panel__input"
             autoFocus
             placeholder={
-              roots.length === 0 ? "No pinned folders to search" : "Search in files…"
+              scopeRoots.length === 0
+                ? "No pinned folders in this scope"
+                : pinIdx === 0
+                  ? "Search in all pins…"
+                  : `Search in ${scopeRoots[pinIdx - 1]?.tag}…`
             }
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Escape") {
+              if (e.key === "Tab") {
+                e.preventDefault();
+                cyclePin(e.shiftKey ? -1 : 1);
+              } else if (e.key === "Escape") {
                 e.preventDefault();
                 onClose();
               }
             }}
           />
-          {results && (
+          {query.trim() && !searching && (
             <span className="search-panel__count">
-              {total} in {groups.length} file{groups.length === 1 ? "" : "s"}
+              {hits.length} in {groups.length} file{groups.length === 1 ? "" : "s"}
             </span>
           )}
         </div>
+        {statusLine && (
+          <div className="search-panel__status">
+            {searching && <span className="spinner spinner--sm" />}
+            {statusLine}
+          </div>
+        )}
         <div className="search-panel__results">
           {!query.trim() ? (
-            <div className="search-panel__msg">Type to search across your folders.</div>
-          ) : searching ? (
+            <div className="search-panel__msg">
+              Type to search — Tab switches pins, ‹ changes the host.
+            </div>
+          ) : groups.length === 0 && searching ? (
             <div className="search-panel__msg">
               <span className="spinner spinner--sm" /> Searching…
             </div>

@@ -1,22 +1,31 @@
-/** Fuzzy file finder (Ctrl+P). Indexes the files under every pinned folder
- *  across the active connections, fuzzy-matches with Fuse.js, and opens the
- *  pick. Arrow keys + Enter; Esc closes. */
+/** Fuzzy file finder (Ctrl+P), in two steps like search-in-files:
+ *  1. Pick the host scope (ScopePicker — digits / arrows / mouse).
+ *  2. Fuzzy-find by name across that scope's **pinned folders**; the row above
+ *     the input lists the pins ("All pins" + each one) — Tab or mouse switches.
+ *  Roots index independently and stream in. Arrows + Enter open; Esc closes. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import Fuse from "fuse.js";
 
 import { basename } from "../lib/format";
 import { fsFind } from "../lib/ipc";
 import { openFileByPath } from "../lib/openFile";
+import {
+  collectRoots,
+  loadScope,
+  rootsForScope,
+  saveScope,
+  SCOPES,
+  type SearchRoot,
+  type SearchScope,
+} from "../lib/searchScope";
 import { useAppStore } from "../store/appStore";
+import { ScopePicker } from "./ScopePicker";
 
-interface Root {
-  connId: string;
-  root: string;
-  tag: string;
-}
-interface Entry extends Root {
+interface Entry extends SearchRoot {
   rel: string;
 }
+
+const rootKey = (r: SearchRoot) => `${r.connId}::${r.root}`;
 
 export function Finder() {
   const open = useAppStore((s) => s.finderOpen);
@@ -26,62 +35,67 @@ export function Finder() {
 }
 
 function FinderModal({ onClose }: { onClose: () => void }) {
-  const localConnId = useAppStore((s) => s.localConnId);
-  const pinnedFolders = useAppStore((s) => s.pinnedFolders);
-  const remote = useAppStore((s) => s.remote);
-  const remotePins = useAppStore((s) => s.remotePins);
-  const wsl = useAppStore((s) => s.wsl);
-  const wslPins = useAppStore((s) => s.wslPins);
-
-  const [entries, setEntries] = useState<Entry[] | null>(null);
+  const allRoots = useMemo(() => collectRoots(), []);
+  const [step, setStep] = useState<"scope" | "find">("scope");
+  const [scope, setScope] = useState<SearchScope>(loadScope);
+  const [pinIdx, setPinIdx] = useState(0); // 0 = all pins, 1..n = one pin
+  const [indexed, setIndexed] = useState<Record<string, Entry[]>>({});
+  const [failed, setFailed] = useState<Record<string, boolean>>({});
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const roots = useMemo<Root[]>(() => {
-    const r: Root[] = [];
-    const add = (connId: string | null | undefined, pins: string[]) => {
-      if (!connId) return;
-      for (const p of pins) r.push({ connId, root: p, tag: basename(p) || p });
-    };
-    add(localConnId, pinnedFolders);
-    add(remote?.connId, remotePins);
-    add(wsl?.connId, wslPins);
-    return r;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const scopeRoots = useMemo(() => rootsForScope(allRoots, scope), [allRoots, scope]);
+  const activeRoots = useMemo(
+    () =>
+      pinIdx > 0 && scopeRoots[pinIdx - 1] ? [scopeRoots[pinIdx - 1]] : scopeRoots,
+    [scopeRoots, pinIdx],
+  );
 
+  // Index each active root that hasn't been indexed yet (per-root streaming —
+  // one slow host doesn't block the others; switching pins reuses the cache).
   useEffect(() => {
+    if (step !== "find") return;
     let alive = true;
-    Promise.all(
-      roots.map((r) =>
-        fsFind(r.connId, r.root)
-          .then((rels) => rels.map((rel) => ({ ...r, rel })))
-          .catch(() => [] as Entry[]),
-      ),
-    ).then((lists) => {
-      if (alive) setEntries(lists.flat());
-    });
+    for (const r of activeRoots) {
+      const key = rootKey(r);
+      if (indexed[key] || failed[key]) continue;
+      fsFind(r.connId, r.root)
+        .then((rels) => {
+          if (!alive) return;
+          setIndexed((m) => ({ ...m, [key]: rels.map((rel) => ({ ...r, rel })) }));
+        })
+        .catch(() => {
+          if (!alive) return;
+          setFailed((m) => ({ ...m, [key]: true }));
+        });
+    }
     return () => {
       alive = false;
     };
-  }, [roots]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoots, step]);
+
+  const pending = activeRoots.filter(
+    (r) => !indexed[rootKey(r)] && !failed[rootKey(r)],
+  ).length;
+
+  const entries = useMemo<Entry[]>(
+    () => activeRoots.flatMap((r) => indexed[rootKey(r)] ?? []),
+    [activeRoots, indexed],
+  );
 
   const fuse = useMemo(
-    () =>
-      entries
-        ? new Fuse(entries, { keys: ["rel"], threshold: 0.4, ignoreLocation: true })
-        : null,
+    () => new Fuse(entries, { keys: ["rel"], threshold: 0.4, ignoreLocation: true }),
     [entries],
   );
 
   const results = useMemo<Entry[]>(() => {
-    if (!entries) return [];
     if (!query.trim()) return entries.slice(0, 200);
-    return fuse!.search(query).slice(0, 200).map((x) => x.item);
+    return fuse.search(query).slice(0, 200).map((x) => x.item);
   }, [entries, fuse, query]);
 
-  useEffect(() => setActive(0), [query]);
+  useEffect(() => setActive(0), [query, pinIdx]);
   useEffect(() => {
     listRef.current
       ?.querySelector(".finder__item--active")
@@ -95,6 +109,26 @@ function FinderModal({ onClose }: { onClose: () => void }) {
     onClose();
   };
 
+  const cyclePin = (dir: 1 | -1) => {
+    const n = scopeRoots.length + 1;
+    setPinIdx((i) => (i + dir + n) % n);
+  };
+
+  if (step === "scope") {
+    return (
+      <ScopePicker
+        title="Open a file from…"
+        onPick={(s) => {
+          setScope(s);
+          saveScope(s);
+          setPinIdx(0);
+          setStep("find");
+        }}
+        onClose={onClose}
+      />
+    );
+  }
+
   return (
     <div
       className="modal-overlay"
@@ -103,20 +137,49 @@ function FinderModal({ onClose }: { onClose: () => void }) {
       }}
     >
       <div className="finder" role="dialog" aria-modal="true">
+        <div className="pin-tabs">
+          <button
+            className="pin-tabs__scope"
+            title="Change scope"
+            onClick={() => setStep("scope")}
+          >
+            ‹ {scope === "all" ? "All hosts" : SCOPES.find((s) => s.id === scope)?.label}
+          </button>
+          <button
+            className={`pin-tab ${pinIdx === 0 ? "pin-tab--active" : ""}`}
+            onClick={() => setPinIdx(0)}
+          >
+            All pins ({scopeRoots.length})
+          </button>
+          {scopeRoots.map((r, i) => (
+            <button
+              key={rootKey(r)}
+              className={`pin-tab ${pinIdx === i + 1 ? "pin-tab--active" : ""}`}
+              title={r.root}
+              onClick={() => setPinIdx(i + 1)}
+            >
+              {r.tag}
+              {scope === "all" ? ` · ${r.kind}` : ""}
+            </button>
+          ))}
+        </div>
         <input
           className="finder__input"
           autoFocus
           placeholder={
-            roots.length === 0
-              ? "No pinned folders to search"
-              : entries === null
-                ? "Indexing files…"
-                : "Search files by name…"
+            scopeRoots.length === 0
+              ? "No pinned folders in this scope"
+              : pinIdx === 0
+                ? "Search files by name…"
+                : `Search in ${scopeRoots[pinIdx - 1]?.tag}…`
           }
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "ArrowDown") {
+            if (e.key === "Tab") {
+              e.preventDefault();
+              cyclePin(e.shiftKey ? -1 : 1);
+            } else if (e.key === "ArrowDown") {
               e.preventDefault();
               setActive((a) => Math.min(a + 1, results.length - 1));
             } else if (e.key === "ArrowUp") {
@@ -132,13 +195,19 @@ function FinderModal({ onClose }: { onClose: () => void }) {
           }}
         />
         <div className="finder__list" ref={listRef}>
-          {entries === null ? (
+          {pending > 0 && (
             <div className="finder__msg">
-              <span className="spinner spinner--sm" /> Indexing files…
+              <span className="spinner spinner--sm" /> Indexing
+              {pending === activeRoots.length
+                ? "…"
+                : ` (${activeRoots.length - pending}/${activeRoots.length} folders ready)…`}
             </div>
-          ) : results.length === 0 ? (
+          )}
+          {results.length === 0 && pending === 0 ? (
             <div className="finder__msg">
-              {roots.length === 0 ? "Pin a folder to search it." : "No matches."}
+              {activeRoots.length === 0
+                ? "Pin a folder in this scope to search it."
+                : "No matches."}
             </div>
           ) : (
             results.map((e, i) => {

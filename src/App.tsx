@@ -13,6 +13,7 @@ import {
 
 import {
   localConnect,
+  onPortForwardError,
   onSshStatus,
   onTransferProgress,
   onVcsFsChange,
@@ -160,6 +161,29 @@ export default function App() {
     const onFocus = () => useVcsStore.getState().refreshAll(5_000);
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
+  // A port forward's tunnel failed (e.g. nothing listening on the remote port)
+  // — surface it even when the Ports dialog is closed.
+  useEffect(() => {
+    const unlistenPromise = onPortForwardError((e) =>
+      useAppStore.getState().pushNotice("error", e.message),
+    );
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  // Suppress WebView2's native context menu (重新整理/列印/檢查…) everywhere
+  // except text fields — Monaco, xterm, and the file tree bring their own menus.
+  useEffect(() => {
+    const onContextMenu = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input, textarea, [contenteditable=true]")) return;
+      e.preventDefault();
+    };
+    window.addEventListener("contextmenu", onContextMenu);
+    return () => window.removeEventListener("contextmenu", onContextMenu);
   }, []);
 
   // Drive the Source Control panel's collapse from the store.

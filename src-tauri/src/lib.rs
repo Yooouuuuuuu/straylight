@@ -42,8 +42,8 @@ pub struct AppState {
     /// Per-repo locks (keyed by `connId::root`) serializing VCS mutations so two
     /// commits/stages can't race on git's `index.lock`.
     pub vcs_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
-    /// Active local port forwards, keyed by forward id (task + its info).
-    pub forwards: Mutex<HashMap<String, (tokio::task::JoinHandle<()>, forward::ForwardInfo)>>,
+    /// Active local port forwards, keyed by forward id.
+    pub forwards: Mutex<HashMap<String, forward::ForwardEntry>>,
     /// Filesystem watchers on local repos, keyed by `connId::root`.
     pub repo_watchers: Mutex<HashMap<String, watch::RepoWatcher>>,
 }

@@ -81,7 +81,17 @@ export function RootTree({
         [path]: { entries: prev[path]?.entries ?? null, loading: true, error: null },
       }));
       try {
-        const listing = await fsListDir(connId, path);
+        // 10s backstop so a hung listing (dead share, removed folder holding a
+        // lock, unresponsive host) can't spin forever.
+        const listing = await Promise.race([
+          fsListDir(connId, path),
+          new Promise<never>((_, reject) =>
+            window.setTimeout(
+              () => reject(new Error("timed out after 10 s")),
+              10_000,
+            ),
+          ),
+        ]);
         setDirs((prev) => ({
           ...prev,
           [path]: { entries: listing.entries, loading: false, error: null },
@@ -337,7 +347,17 @@ export function RootTree({
               <span className="spinner spinner--sm" /> Loading…
             </div>
           ) : rootState.error ? (
-            <div className="filetree__message">{rootState.error}</div>
+            <div className="filetree__message filetree__message--stack">
+              <span>Folder unavailable — it may have been removed, or the host
+              isn't responding.</span>
+              <span className="filetree__error-detail">{rootState.error}</span>
+              <button
+                className="btn btn--ghost"
+                onClick={() => void loadDir(rootPath)}
+              >
+                Retry
+              </button>
+            </div>
           ) : (
             renderDir(rootPath, 0)
           )}
