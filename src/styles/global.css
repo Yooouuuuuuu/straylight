@@ -2307,6 +2307,28 @@ select option {
   background: var(--bg-selected);
 }
 
+/* Ignored files/dirs (and their contents) dim, VS Code-style — no badge */
+.file-node__name.vcs--ignored {
+  color: var(--fg-secondary);
+  opacity: 0.55;
+}
+
+/* The ⑂ source-control button on a root header (shares the remove styling,
+ * but hovers purple and stays visible once the repo is tracked) */
+.root-tree__vcs {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.root-tree__vcs:hover {
+  color: var(--purple);
+}
+
+.root-tree__vcs--tracked {
+  opacity: 1;
+  color: var(--purple);
+}
+
 .root-tree__body {
   padding-bottom: var(--space-2);
 }

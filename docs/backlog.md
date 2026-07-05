@@ -54,7 +54,11 @@ under "Active roadmap."
       accept-all buttons, and **Complete merge** = save + stage (git; jj just
       saves) + close. Git-marker conflicts only (jj's own format stays
       hand-edit).
-- [ ] **Blame**, **ignored-file dimming**, **per-hunk staging**.
+- [x] **Ignored-file dimming** — *done for git* (`status --ignored` → `!`
+      records; explorer dims the entry and everything inside an ignored dir,
+      no badge, filtered out of the panel). jj repos don't dim yet (no cheap
+      "list ignored" without touching git in a colocated repo).
+- [ ] **Blame**, **per-hunk staging**.
 - [x] **jj on a remote** — *done*: `jj` is probed once per SSH connection
       (default PATH → `~/.cargo/bin` / `~/.local/bin` / `/usr/local/bin` →
       login shell) and the absolute path is cached and substituted; a repo
@@ -137,6 +141,19 @@ under "Active roadmap."
 - [ ] **Auto-update** — deferred (user decision 2026-07-05): needs a signing
       keypair + hosted releases (GitHub Releases), which only pays off once
       installers are distributed to other people; today the app runs from source.
+- [ ] **Run tasks / "debug run" (OPTIONAL — not committed to).** Full debugging
+      (DAP: breakpoints, stepping, variables) is explicitly out of scope — debug
+      via the real terminal (`pdb`/`gdb`/`dlv`…). The only candidate is a light
+      "run command / run current file" that opens a terminal on the right host
+      and types the command (the Containers-tab `initialInput` mechanism).
+      **Discuss first; do it only if it stays this light, otherwise ignore.**
+- [ ] **API client / Bruno-adjacent (RESEARCH FIRST).** No Postman/Bruno clone —
+      off-the-shelf Bruno + our port forwarding already covers local use. Before
+      deciding anything: **evaluate the Bruno app and the Bruno VS Code extension**
+      to see what (if anything) belongs in Straylight. The differentiating
+      candidate: a `.http`-file runner executed **via curl on the host that owns
+      the file** (requests originate inside the server's network — hits
+      localhost/internal DNS that desktop clients can't reach). Post-1.0.
 - [ ] Containers, later ideas: container **file browsing** (a new transport),
       logs view, start/stop actions — the Containers tab currently lists running
       containers and opens exec shells.

@@ -66,6 +66,9 @@ interface VcsState {
   decorations: Record<string, string>;
 
   openRepo: (connId: string, dir: string) => Promise<void>;
+  /** Explorer ⑂ button: reveal the panel if the folder's repo is tracked,
+   *  else confirm and add it. */
+  openRepoFromExplorer: (connId: string, path: string) => void;
   removeRepo: (connKey: string, root: string) => void;
   toggleEager: (connKey: string, root: string) => void;
   refreshRepo: (connKey: string, root: string) => Promise<void>;
@@ -192,11 +195,13 @@ function buildDecorations(repos: TrackedRepo[]): Record<string, string> {
     const root = norm(r.root).replace(/\/+$/, "");
     for (const c of r.status.changes) map[`${root}/${c.path}`] = c.kind;
   }
-  // Mark ancestor folders that aren't themselves a direct change.
+  // Mark ancestor folders that aren't themselves a direct change. Ignored
+  // entries don't roll up — a folder full of ignored files isn't "changed".
   for (const r of repos) {
     if (!r.connId || !r.status) continue;
     const root = norm(r.root).replace(/\/+$/, "");
     for (const c of r.status.changes) {
+      if (c.kind === "ignored") continue;
       let p = parentDir(`${root}/${c.path}`);
       while (p.length > root.length) {
         if (!map[p]) map[p] = "child";
@@ -208,6 +213,23 @@ function buildDecorations(repos: TrackedRepo[]): Record<string, string> {
 }
 
 // ---- helpers --------------------------------------------------------------
+
+const stripSlash = (p: string) => norm(p).replace(/\/+$/, "");
+
+/** The tracked repo containing `path` on `connId` (or containing/contained-by —
+ *  a pin may sit above or below the resolved repo root), if any. */
+export function findRepoForPath(
+  repos: TrackedRepo[],
+  connId: string,
+  path: string,
+): TrackedRepo | undefined {
+  const p = stripSlash(path);
+  return repos.find((r) => {
+    if (r.connId !== connId) return false;
+    const root = stripSlash(r.root);
+    return p === root || p.startsWith(`${root}/`) || root.startsWith(`${p}/`);
+  });
+}
 
 const repoId = (connKey: string, root: string) => `${connKey}::${root}`;
 const mapRepo = (
@@ -273,6 +295,19 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       get().syncWatchers();
       await get().refreshRepo(connKey, root); // first populate
     }
+  },
+
+  openRepoFromExplorer: (connId, path) => {
+    const existing = findRepoForPath(get().repos, connId, path);
+    if (existing) {
+      set({ scmVisible: true });
+      return;
+    }
+    get().askConfirm(
+      "Add to Source Control?",
+      `Track "${basename(path)}" in the Source Control panel? It must be a git or jj repository; its status will then show in the explorer.`,
+      () => void get().openRepo(connId, path),
+    );
   },
 
   removeRepo: (connKey, root) => {

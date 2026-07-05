@@ -101,8 +101,22 @@ export function FileNode({
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
   // VCS decoration for this path (tracked repos publish a normalized map).
-  const vcsKind = useVcsStore((s) => s.decorations[entry.path.replace(/\\/g, "/")]);
-  const vcsDirect = vcsKind && vcsKind !== "child" ? vcsKind : null;
+  // Ignored state is inherited: anything inside an ignored directory dims too
+  // (git collapses fully-ignored dirs to a single entry).
+  const vcsKind = useVcsStore((s) => {
+    const p = entry.path.replace(/\\/g, "/");
+    const own = s.decorations[p];
+    if (own) return own;
+    let i = p.lastIndexOf("/");
+    while (i > 0) {
+      const parent = p.slice(0, i);
+      if (s.decorations[parent] === "ignored") return "ignored";
+      i = parent.lastIndexOf("/");
+    }
+    return undefined;
+  });
+  const vcsDirect =
+    vcsKind && vcsKind !== "child" && vcsKind !== "ignored" ? vcsKind : null;
 
   // Keep the selected row visible when the selection moves by keyboard.
   useEffect(() => {

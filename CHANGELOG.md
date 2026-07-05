@@ -26,6 +26,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 - Terminal tab reordering.
+## [0.8.8] - 2026-07-05
+
+Explorer ⇄ Source Control, and ignored files dim.
+
+### Added
+
+- **Ignored-file dimming, VS Code-style.** Ignored files and folders (and
+  everything inside an ignored folder) render dimmed in the explorer, with no
+  badge, and never appear in the Source Control lists. Works for git repos and
+  **colocated jj repos** (read via `git --no-optional-locks status --ignored` —
+  guaranteed read-only, so jj can't desync).
+- **⑂ on every explorer root.** Pinned folder headers get a source-control
+  button: already tracked → reveals the panel (the ⑂ stays purple); untracked →
+  a confirm, then it's validated and added like the panel's +.
+- **Unpin asks first.** Removing a pinned folder from the sidebar now confirms
+  (nothing on disk is touched), like the repo-card ×.
+
+### Fixed
+
+- **jj on Windows emits backslash paths**, which silently broke tree decorations
+  for nested files in local jj repos (only top-level files got their M/A
+  letters). All jj-parsed paths are now normalized to forward slashes.
+
 ## [0.8.7] - 2026-07-05
 
 The backlog run: seven features and a cleanup sweep.

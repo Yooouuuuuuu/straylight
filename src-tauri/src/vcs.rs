@@ -829,7 +829,9 @@ async fn git_status(state: &AppState, conn_id: &str, root: &str) -> Result<VcsSt
         state,
         conn_id,
         root,
-        &["git", "status", "--porcelain=v2", "--branch", "-z"],
+        // `--ignored` adds `! <path>` records (fully-ignored dirs collapse to
+        // one entry) — the explorer dims them, the panel filters them out.
+        &["git", "status", "--porcelain=v2", "--branch", "--ignored", "-z"],
     )
     .await?;
     if out.code != 0 {
@@ -863,6 +865,35 @@ async fn jj_status(state: &AppState, conn_id: &str, root: &str) -> Result<VcsSta
         });
     }
     let mut changes = parse_jj_summary(&diff.stdout);
+
+    // Ignored files: jj has no "list ignored", but a colocated repo has .git —
+    // read it without taking any lock (`--no-optional-locks` guarantees git
+    // writes nothing, so jj can't desync). Non-colocated repos fail the command
+    // and simply get no dimming.
+    if let Ok(ig) = run_command(
+        state,
+        conn_id,
+        root,
+        &[
+            "git",
+            "--no-optional-locks",
+            "status",
+            "--porcelain=v2",
+            "--ignored",
+            "-z",
+        ],
+    )
+    .await
+    {
+        if ig.code == 0 {
+            changes.extend(
+                parse_porcelain_v2(&ig.stdout)
+                    .changes
+                    .into_iter()
+                    .filter(|c| c.kind == "ignored"),
+            );
+        }
+    }
 
     // Conflicted paths (spike-verified on jj 0.42): `jj resolve --list` prints
     // `path    2-sided conflict` per line and exits 0; with no conflicts it
@@ -945,7 +976,13 @@ fn parse_jj_resolve_list(data: &str) -> Vec<String> {
             if line.is_empty() {
                 return None;
             }
-            Some(line.split("  ").next().unwrap_or(line).trim_end().to_string())
+            Some(
+                line.split("  ")
+                    .next()
+                    .unwrap_or(line)
+                    .trim_end()
+                    .replace('\\', "/"),
+            )
         })
         .collect()
 }
@@ -990,14 +1027,16 @@ fn parse_jj_summary(data: &str) -> Vec<VcsChange> {
         if code == "R" || code == "C" {
             let (old, new) = expand_rename(rest);
             out.push(VcsChange {
-                path: new,
-                old_path: Some(old),
+                path: new.replace('\\', "/"),
+                old_path: Some(old.replace('\\', "/")),
                 kind: kind.into(),
                 staged: false,
             });
         } else {
+            // jj on Windows emits backslash paths — normalize so decoration
+            // keys and diff/stage calls line up with the git convention.
             out.push(VcsChange {
-                path: rest.to_string(),
+                path: rest.replace('\\', "/"),
                 old_path: None,
                 kind: kind.into(),
                 staged: false,
@@ -1115,8 +1154,15 @@ fn parse_porcelain_v2(data: &str) -> VcsStatus {
                 kind: "untracked".into(),
                 staged: false,
             });
+        } else if let Some(rest) = t.strip_prefix("! ") {
+            // Ignored file or fully-ignored directory (trailing slash).
+            changes.push(VcsChange {
+                path: rest.trim_end_matches('/').to_string(),
+                old_path: None,
+                kind: "ignored".into(),
+                staged: false,
+            });
         }
-        // "! " ignored entries and other headers are skipped.
         i += 1;
     }
 
@@ -1159,6 +1205,25 @@ mod tests {
         assert_eq!(s.changes[1].kind, "renamed");
         assert_eq!(s.changes[1].path, "new.txt");
         assert_eq!(s.changes[1].old_path.as_deref(), Some("old.txt"));
+    }
+
+    #[test]
+    fn jj_summary_normalizes_windows_paths() {
+        let data = "M docs\\backlog.md\nA src\\lib\\new.ts\n";
+        let c = parse_jj_summary(data);
+        assert_eq!(c[0].path, "docs/backlog.md");
+        assert_eq!(c[1].path, "src/lib/new.ts");
+    }
+
+    #[test]
+    fn parses_ignored_entries() {
+        let data = "# branch.head main\0! node_modules/\0! secret.env\0? new.txt\0";
+        let s = parse_porcelain_v2(data);
+        assert_eq!(s.changes.len(), 3);
+        assert_eq!(s.changes[0].kind, "ignored");
+        assert_eq!(s.changes[0].path, "node_modules"); // trailing slash stripped
+        assert_eq!(s.changes[1].path, "secret.env");
+        assert_eq!(s.changes[2].kind, "untracked");
     }
 
     #[test]

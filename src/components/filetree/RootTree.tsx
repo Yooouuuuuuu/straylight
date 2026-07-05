@@ -21,6 +21,7 @@ import {
   type TreeRow,
 } from "../../lib/treeNav";
 import { useAppStore } from "../../store/appStore";
+import { findRepoForPath, useVcsStore } from "../../store/vcsStore";
 import { FileNode } from "./FileNode";
 import { IconChevron, IconClose } from "../icons";
 
@@ -73,6 +74,12 @@ export function RootTree({
   const [collapsed, setCollapsed] = useState(defaultCollapsed ?? false);
   const [dirs, setDirs] = useState<Record<string, DirState>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const openRepoFromExplorer = useVcsStore((s) => s.openRepoFromExplorer);
+  const askConfirm = useVcsStore((s) => s.askConfirm);
+  const repoTracked = useVcsStore(
+    (s) => findRepoForPath(s.repos, connId, rootPath) !== undefined,
+  );
 
   const loadDir = useCallback(
     async (path: string) => {
@@ -326,13 +333,31 @@ export function RootTree({
         <span className="root-tree__label" style={color ? { color } : undefined}>
           {label}
         </span>
+        <button
+          className={`root-tree__remove root-tree__vcs ${repoTracked ? "root-tree__vcs--tracked" : ""}`}
+          title={
+            repoTracked
+              ? "In Source Control — open the panel"
+              : "Add this folder to Source Control…"
+          }
+          onClick={(event) => {
+            event.stopPropagation();
+            openRepoFromExplorer(connId, rootPath);
+          }}
+        >
+          ⑂
+        </button>
         {removable && (
           <button
             className="root-tree__remove"
             title="Remove from sidebar"
             onClick={(event) => {
               event.stopPropagation();
-              onRemove?.();
+              askConfirm(
+                "Unpin folder?",
+                `Remove "${label}" from the sidebar? Nothing on disk is touched — you can pin it again any time.`,
+                () => onRemove?.(),
+              );
             }}
           >
             <IconClose size={13} />

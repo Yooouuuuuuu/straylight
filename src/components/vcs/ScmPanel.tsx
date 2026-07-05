@@ -116,7 +116,7 @@ export function ScmPanel() {
 
 function summarize(repo: TrackedRepo): string {
   if (!repo.status) return "";
-  const n = repo.status.changes.length;
+  const n = repo.status.changes.filter((c) => c.kind !== "ignored").length;
   return n === 0 ? "no changes" : `${n} change${n === 1 ? "" : "s"}`;
 }
 
@@ -157,7 +157,8 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   const inactive = !repo.connId;
   const loading = repo.activity === "loading";
   const isGit = repo.backend !== "jj";
-  const changes = st?.changes ?? [];
+  // Ignored entries exist only to dim the explorer — never in the panel lists.
+  const changes = (st?.changes ?? []).filter((c) => c.kind !== "ignored");
   const conflicted = changes.filter((c) => c.kind === "conflicted");
   const staged = changes.filter((c) => c.staged && c.kind !== "conflicted");
   const unstaged = changes.filter((c) => !c.staged && c.kind !== "conflicted");
