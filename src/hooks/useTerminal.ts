@@ -22,7 +22,7 @@ import {
   registerTerminalFocus,
   unregisterTerminalFocus,
 } from "../lib/terminalFocus";
-import { draculaTermTheme } from "../lib/xtermTheme";
+import { currentTermTheme, registerTerminal, unregisterTerminal } from "../lib/themes";
 import { useAppStore } from "../store/appStore";
 
 export function useTerminal(
@@ -65,7 +65,7 @@ export function useTerminal(
       lineHeight: 1.1,
       cursorBlink: true,
       allowProposedApi: true,
-      theme: draculaTermTheme,
+      theme: currentTermTheme(),
       scrollback: 5000,
       windowsPty,
     });
@@ -74,6 +74,7 @@ export function useTerminal(
     term.loadAddon(fit);
     term.open(container);
     termRef.current = term;
+    registerTerminal(term); // re-themed live when settings.json changes
     fitRef.current = fit;
     if (id) registerTerminalFocus(id, () => term.focus());
 
@@ -187,6 +188,7 @@ export function useTerminal(
       if (unlisten) unlisten();
       if (ptyId) void ptyClose(ptyId);
       if (id) unregisterTerminalFocus(id);
+      unregisterTerminal(term);
       termRef.current = null;
       fitRef.current = null;
       term.dispose();

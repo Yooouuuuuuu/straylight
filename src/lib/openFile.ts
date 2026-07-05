@@ -12,17 +12,19 @@ const LIGHTWEIGHT_BYTES = 50 * 1024 * 1024;
 export async function openRemoteFile(
   connId: string,
   entry: FileEntry,
+  opts?: { preview?: boolean; pinned?: boolean },
 ): Promise<void> {
   if (entry.isDir) return;
 
   const store = useAppStore.getState();
 
-  // Already open → focus its tab.
+  // Already open → focus its tab (a permanent open promotes a preview).
   const existing = store.tabs.find(
     (t) => t.connId === connId && t.path === entry.path,
   );
   if (existing) {
     store.setActiveTab(existing.id);
+    if (!opts?.preview && existing.previewTab) store.promoteTab(existing.id);
     return;
   }
 
@@ -46,7 +48,7 @@ export async function openRemoteFile(
       truncated: file.truncated,
       lineEnding,
     };
-    store.openTab(tab);
+    store.openTab(tab, opts);
 
     if (!file.isBinary) {
       if (file.truncated) {
@@ -80,6 +82,7 @@ export async function openFileByPath(
   connId: string,
   path: string,
   name?: string,
+  opts?: { preview?: boolean; pinned?: boolean },
 ): Promise<void> {
   const entry: FileEntry = {
     name: name ?? basename(path),
@@ -93,5 +96,5 @@ export async function openFileByPath(
     group: "",
     modified: 0,
   };
-  await openRemoteFile(connId, entry);
+  await openRemoteFile(connId, entry, opts);
 }

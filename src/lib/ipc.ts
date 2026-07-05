@@ -576,6 +576,15 @@ export function vcsRemoteCancel(connId: string, root: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Preferences
+// ---------------------------------------------------------------------------
+
+/** Absolute path of settings.json in the app config dir (dir created). */
+export function settingsPath(): Promise<string> {
+  return invoke("settings_path");
+}
+
+// ---------------------------------------------------------------------------
 // Containers
 // ---------------------------------------------------------------------------
 

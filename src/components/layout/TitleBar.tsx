@@ -1,7 +1,13 @@
 /** Custom (decorationless) title bar: brand, connection status, workspace color
- *  accent, and window controls. The center region is a Tauri drag handle. */
+ *  accent, an appearance menu (themes / settings — non-functional preferences
+ *  live here, not in the command palette), and window controls. The center
+ *  region is a Tauri drag handle. */
+import { useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
+import { openFileByPath } from "../../lib/openFile";
+import { settingsFilePath } from "../../lib/settings";
+import { applyThemePreset, THEME_PRESETS } from "../../lib/themes";
 import { useAppStore } from "../../store/appStore";
 import type { ConnectionState } from "../../lib/ipc";
 import { IconClose, IconMaximize, IconMinimize } from "../icons";
@@ -34,9 +40,17 @@ const STATE_LABELS: Record<ConnectionState, string> = {
 export function TitleBar() {
   const remote = useAppStore((s) => s.remote);
   const connState = useAppStore((s) => s.connState);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const appWindow = getCurrentWindow();
   const accent = remote?.color ?? "transparent";
+
+  const openSettingsFile = () => {
+    setMenuOpen(false);
+    const path = settingsFilePath();
+    const localConnId = useAppStore.getState().localConnId;
+    if (path && localConnId) void openFileByPath(localConnId, path, "settings.json");
+  };
 
   return (
     <header className="titlebar" style={{ borderLeftColor: accent }}>
@@ -66,6 +80,39 @@ export function TitleBar() {
         </div>
       </div>
       <div className="titlebar__controls">
+        <button
+          className="titlebar__btn"
+          title="Appearance & settings"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          ⚙
+        </button>
+        {menuOpen && (
+          <>
+            <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />
+            <div className="titlebar__menu" role="menu">
+              <div className="titlebar__menu-label">Color theme</div>
+              {THEME_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  className="terminal-menu__item"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    void applyThemePreset(p);
+                  }}
+                >
+                  {p.title.replace("Theme: ", "")}
+                </button>
+              ))}
+              <div className="terminal-menu__sep" />
+              <button className="terminal-menu__item" onClick={openSettingsFile}>
+                Open settings.json
+              </button>
+            </div>
+          </>
+        )}
         <button
           className="titlebar__btn"
           title="Minimize"

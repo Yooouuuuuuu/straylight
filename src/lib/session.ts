@@ -31,6 +31,10 @@ interface PersistedRemote {
 interface PersistedTab {
   scope: Scope;
   path: string;
+  /** Pinned tabs restore pinned (leftmost, spared by bulk closes). */
+  pinned?: boolean;
+  /** The one preview (italic) tab restores as a preview. */
+  preview?: boolean;
 }
 
 interface PersistedSession {
@@ -64,7 +68,7 @@ function hostKey(host: string, user: string, port: number): string {
 }
 
 // Remote tabs that should reopen once their host connects (auto or manual).
-let pendingRemoteRestore: { hostKey: string; paths: string[] } | null = null;
+let pendingRemoteRestore: { hostKey: string; tabs: PersistedTab[] } | null = null;
 
 // While a restore is in progress, persistence is suppressed so a partial
 // snapshot can't be written mid-restore (e.g. before a slow reconnect lands).
@@ -109,9 +113,16 @@ function writeSnapshot(): void {
   // Only real file tabs persist; diff/log tabs are ephemeral.
   const fileTabs = s.tabs.filter((t) => !t.kind || t.kind === "file");
 
+  const persistTab = (t: (typeof fileTabs)[number], scope: Scope): PersistedTab => ({
+    scope,
+    path: t.path,
+    ...(t.pinned ? { pinned: true } : {}),
+    ...(t.previewTab ? { preview: true } : {}),
+  });
+
   const localTabs: PersistedTab[] = fileTabs
     .filter((t) => t.connId === s.localConnId)
-    .map((t) => ({ scope: "local", path: t.path }));
+    .map((t) => persistTab(t, "local"));
 
   // Remote tabs: the open ones while connected, otherwise the set still waiting
   // to be restored — so an unconnected or failed-to-reconnect remote keeps its
@@ -120,9 +131,9 @@ function writeSnapshot(): void {
   if (s.remote) {
     remoteTabs = fileTabs
       .filter((t) => t.connId === s.remote!.connId)
-      .map((t) => ({ scope: "remote", path: t.path }));
+      .map((t) => persistTab(t, "remote"));
   } else if (pendingRemoteRestore) {
-    remoteTabs = pendingRemoteRestore.paths.map((p) => ({ scope: "remote", path: p }));
+    remoteTabs = pendingRemoteRestore.tabs.map((t) => ({ ...t, scope: "remote" as const }));
   } else {
     remoteTabs = [];
   }
@@ -191,10 +202,13 @@ export async function consumePendingRemoteTabs(
     pendingRemoteRestore = null;
     return;
   }
-  const paths = pendingRemoteRestore.paths;
+  const tabs = pendingRemoteRestore.tabs;
   pendingRemoteRestore = null;
-  for (const path of paths) {
-    await openFileByPath(remote.connId, path);
+  for (const t of tabs) {
+    await openFileByPath(remote.connId, t.path, undefined, {
+      preview: t.preview,
+      pinned: t.pinned,
+    });
   }
   restoreActiveTab();
 }
@@ -228,14 +242,17 @@ export async function restoreSession(
     store.setTerminalVisible(s.terminalVisible);
 
     for (const t of s.tabs.filter((t) => t.scope === "local")) {
-      await openFileByPath(localConnId, t.path);
+      await openFileByPath(localConnId, t.path, undefined, {
+        preview: t.preview,
+        pinned: t.pinned,
+      });
     }
 
     if (s.remote) {
-      const remotePaths = s.tabs.filter((t) => t.scope === "remote").map((t) => t.path);
+      const remoteTabs = s.tabs.filter((t) => t.scope === "remote");
       pendingRemoteRestore = {
         hostKey: hostKey(s.remote.host, s.remote.user, s.remote.port),
-        paths: remotePaths,
+        tabs: remoteTabs,
       };
 
       if (s.remote.authType === "auto") {
@@ -258,10 +275,10 @@ export async function restoreSession(
           identityFile: null,
           proxyJump: s.remote.proxyJump,
         });
-        if (remotePaths.length) {
+        if (remoteTabs.length) {
           store.pushNotice(
             "info",
-            `Reconnect to ${s.remote.name} to restore ${remotePaths.length} tab(s).`,
+            `Reconnect to ${s.remote.name} to restore ${remoteTabs.length} tab(s).`,
           );
         }
       }

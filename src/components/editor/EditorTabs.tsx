@@ -12,6 +12,9 @@ export function EditorTabs() {
   const setActiveTab = useAppStore((s) => s.setActiveTab);
   const closeTab = useAppStore((s) => s.closeTab);
   const openPreviewTab = useAppStore((s) => s.openPreviewTab);
+  const promoteTab = useAppStore((s) => s.promoteTab);
+  const pinTab = useAppStore((s) => s.pinTab);
+  const openTabMenu = useAppStore((s) => s.openTabMenu);
 
   if (tabs.length === 0) return null;
 
@@ -32,6 +35,11 @@ export function EditorTabs() {
             .filter(Boolean)
             .join(" ")}
           onClick={() => setActiveTab(tab.id)}
+          onDoubleClick={() => promoteTab(tab.id)}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            openTabMenu(event.clientX, event.clientY, tab.id);
+          }}
           onMouseDown={(event) => {
             if (event.button === 1) {
               event.preventDefault();
@@ -59,23 +67,38 @@ export function EditorTabs() {
               <FileIcon name={tab.name} isDir={false} isOpen={false} />
             )}
           </span>
-          <span className="editor-tab__name">
+          <span
+            className={`editor-tab__name ${tab.previewTab ? "editor-tab__name--preview" : ""}`}
+          >
             {tab.name}
             {tab.kind === "diff" ? " (changes)" : tab.kind === "merge" ? " (merge)" : ""}
           </span>
-          <button
-            className="editor-tab__close"
-            title="Close"
-            onClick={(event) => {
-              event.stopPropagation();
-              closeTab(tab.id);
-            }}
-          >
-            <span className="editor-tab__dot" />
-            <span className="editor-tab__x">
-              <IconClose size={12} />
-            </span>
-          </button>
+          {tab.pinned ? (
+            <button
+              className="editor-tab__close editor-tab__pin"
+              title="Pinned — click to unpin"
+              onClick={(event) => {
+                event.stopPropagation();
+                pinTab(tab.id, false);
+              }}
+            >
+              ⊙
+            </button>
+          ) : (
+            <button
+              className="editor-tab__close"
+              title="Close"
+              onClick={(event) => {
+                event.stopPropagation();
+                closeTab(tab.id);
+              }}
+            >
+              <span className="editor-tab__dot" />
+              <span className="editor-tab__x">
+                <IconClose size={12} />
+              </span>
+            </button>
+          )}
         </div>
       ))}
       {canPreview && active && (

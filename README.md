@@ -67,6 +67,12 @@ relaunch.
   searches file contents (grouped by file) and jumps to the line. Both start with
   a host picker (Local / WSL / Remote / All) and look in that host's **pinned
   folders** — Tab switches between pins, and results stream in per pin.
+- **Command palette & settings** — `Ctrl+Shift+P` lists every command with its
+  keybinding. One `settings.json` (app config dir) holds zoom, **keybinding
+  overrides** (by command id), and the full **color sections** — the file *is*
+  the theme; presets (Dracula / Nord / Catppuccin Mocha) just fill them in, and
+  every color is individually editable, applied live (UI, editor, terminals).
+  The stability promises are written down in [docs/stability.md](docs/stability.md).
 - **Port forwarding** — forward a local `127.0.0.1` port to a service reachable from
   the SSH server, over a tunnel on the existing connection.
 - **Editing** — a tabbed Monaco editor; edit and **save** (`Ctrl+S`) local *and*
@@ -166,11 +172,15 @@ If the fonts are missing the UI falls back to the system monospace stack.
 
 | Shortcut | Action |
 |----------|--------|
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> | Command palette (all commands) |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save the current file |
 | <kbd>Ctrl</kbd>+<kbd>P</kbd> | Quick-open a file by name (fuzzy) |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> | Search across files |
 | <kbd>F5</kbd> / <kbd>Ctrl</kbd>+<kbd>R</kbd> | Refresh everything (explorer, repos, open files — dirty tabs untouched) |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> | Markdown preview for the current file |
+| <kbd>Ctrl</kbd>+<kbd>=</kbd> / <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>0</kbd> | Zoom in / out / reset |
+| <kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>C</kbd> | Copy path of the explorer selection |
+| <kbd>Alt</kbd>+<kbd>Enter</kbd> | Properties of the explorer selection |
 | <kbd>Ctrl</kbd>+<kbd>W</kbd> | Close the current tab |
 | <kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd> | Next / previous tab |
 | <kbd>Ctrl</kbd>+<kbd>`</kbd> | Toggle the terminal panel |

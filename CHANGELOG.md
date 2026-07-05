@@ -26,6 +26,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 - Terminal tab reordering.
+## [0.8.9] - 2026-07-05
+
+The 1.0 contracts: one settings file, a command palette, themes, zoom, and
+VS Code's tab model. The promises are written down in
+[docs/stability.md](docs/stability.md).
+
+### Added
+
+- **`settings.json`** (app config dir) — the one hand-editable preferences
+  file, watched and re-applied live on save: `zoom`, `keybindings` (stable
+  command id → `"ctrl+alt+f"`-style spec), and the **color sections**
+  (`colors` / `editor` / `terminal`) which *are* the theme — every key
+  individually editable, missing keys fall back to defaults. Problems never
+  fail silently: toast + a warning row in the palette that opens the file.
+- **Command palette** — `Ctrl+Shift+P` or the status-bar **⌘ Commands**: every
+  command (~30, stable ids) with its effective keybinding; fuzzy search; Enter
+  runs. The empty editor screen now shows the core shortcuts.
+- **Themes** — a **⚙ appearance menu in the title bar**: Dracula (default),
+  **Nord**, **Catppuccin Mocha**. A preset just overwrites the settings.json
+  color sections; UI chrome, editor syntax colors, and live terminals restyle
+  instantly.
+- **Window zoom** — `Ctrl+=` / `Ctrl+-` / `Ctrl+0`, native WebView page-zoom
+  (sharp, reflows, terminal/editor refit), persisted.
+- **VS Code's tab model** — single-click opens an *italic preview* tab (the
+  next single-click replaces it); double-click / editing / "Keep Open"
+  promotes. **Pin** a tab (right-click) to keep it leftmost, spared from bulk
+  closes and Ctrl+W. Tab **context menu**: Close / Others / to the Right /
+  Saved / All / Pin / Copy Path — bulk closes use one "save all & close?"
+  dialog. Pinned/preview state survives restarts.
+- **New keys** — `Shift+Alt+C` copy path and `Alt+Enter` properties on the
+  explorer selection; `Editor: Close All / Close Saved Tabs` in the palette.
+
+### Fixed
+
+- Creating any editor no longer resets the global Monaco theme.
+
 ## [0.8.8] - 2026-07-05
 
 Explorer ⇄ Source Control, and ignored files dim.

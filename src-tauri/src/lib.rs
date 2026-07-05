@@ -7,6 +7,7 @@
 pub mod containers;
 pub mod exec;
 pub mod forward;
+pub mod prefs;
 pub mod ssh;
 pub mod transport;
 pub mod vcs;
@@ -144,6 +145,7 @@ pub fn run() {
             forward::port_forward_stop,
             forward::port_forward_list,
             containers::container_list,
+            prefs::settings_path,
             vcs::vcs_open,
             vcs::vcs_status,
             vcs::vcs_file_base,

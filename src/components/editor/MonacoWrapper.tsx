@@ -11,7 +11,7 @@ import {
   conflictDecorations,
   setupMergeConflictActions,
 } from "../../lib/mergeConflicts";
-import { DRACULA_THEME, monaco, setupMonaco } from "../../lib/monaco";
+import { monaco, setupMonaco } from "../../lib/monaco";
 import { useAppStore } from "../../store/appStore";
 
 const LIGHTWEIGHT_BYTES = 50 * 1024 * 1024;
@@ -39,7 +39,6 @@ export function MonacoWrapper() {
 
     const editor = monaco.editor.create(host, {
       model: null,
-      theme: DRACULA_THEME,
       automaticLayout: true,
       fontFamily: "'Fira Code', 'Cascadia Code', monospace",
       fontLigatures: true,

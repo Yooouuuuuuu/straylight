@@ -4,6 +4,7 @@
 import { useEffect } from "react";
 
 import { refreshApp } from "../lib/appRefresh";
+import { allCommands } from "../lib/commands";
 import { saveActiveFile } from "../lib/saveFile";
 import { matchShortcut } from "../lib/shortcuts";
 import { focusTerminal } from "../lib/terminalFocus";
@@ -58,6 +59,40 @@ export function useKeyboard() {
           // it, so the WebView never sees it either).
           if (!inTerminal) {
             void refreshApp();
+            event.preventDefault();
+          }
+          break;
+        case "commandPalette":
+          if (!inTerminal) {
+            store.setPaletteOpen(true);
+            event.preventDefault();
+          }
+          break;
+        case "zoomIn":
+        case "zoomOut":
+        case "zoomReset": {
+          // Ctrl+- can collide with readline undo — zoom stays out of terminals.
+          if (!inTerminal) {
+            const id =
+              action === "zoomIn"
+                ? "view.zoomIn"
+                : action === "zoomOut"
+                  ? "view.zoomOut"
+                  : "view.zoomReset";
+            void allCommands().find((c) => c.id === id)?.run();
+            event.preventDefault();
+          }
+          break;
+        }
+        case "copyPathSelected":
+          if (!inEditable && store.selected) {
+            void allCommands().find((c) => c.id === "explorer.copyPath")?.run();
+            event.preventDefault();
+          }
+          break;
+        case "propertiesSelected":
+          if (!inEditable && (store.selected || store.selection.length)) {
+            void allCommands().find((c) => c.id === "explorer.properties")?.run();
             event.preventDefault();
           }
           break;

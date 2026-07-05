@@ -265,7 +265,7 @@ export function RootTree({
             renaming?.connId === connId && renaming?.path === entry.path
           }
           onToggle={() => toggleDir(entry.path)}
-          onOpen={() => void openRemoteFile(connId, entry)}
+          onOpen={(opts) => void openRemoteFile(connId, entry, opts)}
           onSelect={(mods) => {
             const node = {
               connId,

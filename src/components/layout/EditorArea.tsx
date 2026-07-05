@@ -55,6 +55,24 @@ function EmptyState() {
           Connect to a server
         </button>
       )}
+      <div className="empty-state__keys">
+        <div>
+          <span>Show all commands</span>
+          <kbd>Ctrl+Shift+P</kbd>
+        </div>
+        <div>
+          <span>Quick-open a file</span>
+          <kbd>Ctrl+P</kbd>
+        </div>
+        <div>
+          <span>Search in files</span>
+          <kbd>Ctrl+Shift+F</kbd>
+        </div>
+        <div>
+          <span>Toggle terminal</span>
+          <kbd>Ctrl+`</kbd>
+        </div>
+      </div>
     </div>
   );
 }

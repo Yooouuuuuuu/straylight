@@ -21,6 +21,8 @@ import {
 import { useAppStore } from "./store/appStore";
 import { useVcsStore } from "./store/vcsStore";
 import { initFileWatching } from "./lib/fileWatch";
+import { initSettings } from "./lib/settings";
+import { initThemes } from "./lib/themes";
 import { initSessionPersistence, restoreSession } from "./lib/session";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { useSSH } from "./hooks/useSSH";
@@ -35,11 +37,13 @@ import { ConnectionDialog } from "./components/connection/ConnectionDialog";
 import { ConflictDialog } from "./components/editor/ConflictDialog";
 import { CloseConfirmDialog } from "./components/editor/CloseConfirmDialog";
 import { ContextMenu } from "./components/filetree/ContextMenu";
+import { TabContextMenu } from "./components/editor/TabContextMenu";
 import { NewEntryDialog } from "./components/filetree/NewEntryDialog";
 import { DeleteConfirmDialog } from "./components/filetree/DeleteConfirmDialog";
 import { PropertiesDialog } from "./components/filetree/PropertiesDialog";
 import { DiscardDialog } from "./components/vcs/DiscardDialog";
 import { VcsConfirmDialog } from "./components/vcs/VcsConfirmDialog";
+import { CommandPalette } from "./components/CommandPalette";
 import { Finder } from "./components/Finder";
 import { SearchInFiles } from "./components/SearchInFiles";
 import { PortForwards } from "./components/PortForwards";
@@ -93,6 +97,13 @@ export default function App() {
   // Auto-reload clean open files when they change on disk (local: watcher;
   // remote/WSL: mtime poll) — watching a growing log just works.
   useEffect(() => initFileWatching(), []);
+
+  // Theme layer first (it subscribes to settings), then load settings.json
+  // (zoom, keybinding overrides, colors) and keep it live.
+  useEffect(() => initThemes(), []);
+  useEffect(() => {
+    if (localConnId) void initSettings(localConnId);
+  }, [localConnId]);
 
   // Once the local session is up, restore the previous session exactly once:
   // panel visibility, local tabs, and the last remote (auto-reconnect for key
@@ -320,10 +331,12 @@ export default function App() {
       <PropertiesDialog />
       <DiscardDialog />
       <VcsConfirmDialog />
+      <CommandPalette />
       <Finder />
       <SearchInFiles />
       <PortForwards />
       <ContextMenu />
+      <TabContextMenu />
       <ToastStack />
     </div>
   );

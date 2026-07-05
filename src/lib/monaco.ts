@@ -95,6 +95,10 @@ export function setupMonaco(): typeof monaco {
   };
 
   monaco.editor.defineTheme(DRACULA_THEME, draculaTheme);
+  // The global default; the theme layer may override it with the custom theme
+  // built from settings.json. Editors must NOT pass `theme:` at create time —
+  // that would reset the global theme every time one mounts.
+  monaco.editor.setTheme(DRACULA_THEME);
   initialized = true;
   return monaco;
 }

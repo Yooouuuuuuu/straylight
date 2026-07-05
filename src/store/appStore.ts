@@ -62,6 +62,11 @@ export interface EditorTab {
   cursor: CursorPosition;
   /** "diff" shows a Monaco diff; "log" shows a repo's commit history. Default "file". */
   kind?: "file" | "diff" | "log" | "merge" | "preview";
+  /** VS Code-style preview tab (italic): the next preview open replaces it.
+   *  Editing, double-click, or pinning promotes it to a permanent tab. */
+  previewTab?: boolean;
+  /** Pinned tabs sit leftmost, are spared by bulk closes, and Ctrl+W skips them. */
+  pinned?: boolean;
   /** The base (HEAD / jj `@-`) content, for a diff tab's old side. */
   diffBase?: string;
   /** Whether the file exists in the base (false = added/untracked). */
@@ -215,6 +220,10 @@ interface AppState {
   searchOpen: boolean;
   /** The port-forwarding overlay. */
   portsOpen: boolean;
+  /** The command palette (Ctrl+Shift+P). */
+  paletteOpen: boolean;
+  /** Problems found in settings.json (shown in the palette; empty = healthy). */
+  settingsIssues: string[];
   /** A line to reveal once a file's editor model is ready (from search). */
   revealTarget: { connId: string; path: string; line: number } | null;
   /** Bumped when a connection color override changes (re-render trigger). */
@@ -289,6 +298,8 @@ interface AppState {
   setFinderOpen: (open: boolean) => void;
   setSearchOpen: (open: boolean) => void;
   setPortsOpen: (open: boolean) => void;
+  setPaletteOpen: (open: boolean) => void;
+  setSettingsIssues: (issues: string[]) => void;
   setRevealTarget: (t: { connId: string; path: string; line: number } | null) => void;
   bumpColors: () => void;
   toggleSidebar: () => void;
@@ -324,7 +335,15 @@ interface AppState {
   /** Close every terminal on a connection (e.g. an explicit disconnect). */
   closeConnTerminals: (connId: string) => void;
 
-  openTab: (tab: NewTab) => void;
+  openTab: (tab: NewTab, opts?: { preview?: boolean; pinned?: boolean }) => void;
+  /** Promote a preview tab to permanent (double-click, edit, pin). */
+  promoteTab: (id: string) => void;
+  /** Pin/unpin a tab; pinning also moves it to the end of the pinned block. */
+  pinTab: (id: string, pinned: boolean) => void;
+  /** Tab-bar right-click menu state. */
+  tabMenu: { x: number; y: number; tabId: string } | null;
+  openTabMenu: (x: number, y: number, tabId: string) => void;
+  closeTabMenu: () => void;
   /** Open (or focus) a read-only diff tab for a changed file. */
   openDiffTab: (d: {
     connId: string;
@@ -362,7 +381,7 @@ interface AppState {
   }) => void;
   setActiveTab: (id: string) => void;
   cycleTab: (direction: 1 | -1) => void;
-  closeTab: (id: string) => void;
+  closeTab: (id: string, allowPinned?: boolean) => void;
   forceCloseTab: (id: string) => void;
   setTabDirty: (id: string, dirty: boolean) => void;
   markTabSaved: (id: string, modified: number) => void;
@@ -445,6 +464,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   finderOpen: false,
   searchOpen: false,
   portsOpen: false,
+  paletteOpen: false,
+  settingsIssues: [],
   revealTarget: null,
   colorVersion: 0,
   terminalView: "terminals" as const,
@@ -605,6 +626,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setFinderOpen: (finderOpen) => set({ finderOpen }),
   setSearchOpen: (searchOpen) => set({ searchOpen }),
   setPortsOpen: (portsOpen) => set({ portsOpen }),
+  setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
+  setSettingsIssues: (settingsIssues) => set({ settingsIssues }),
   setRevealTarget: (revealTarget) => set({ revealTarget }),
   bumpColors: () => set((s) => ({ colorVersion: s.colorVersion + 1 })),
   toggleSidebar: () => set((s) => ({ sidebarVisible: !s.sidebarVisible })),
@@ -717,21 +740,60 @@ export const useAppStore = create<AppState>()((set, get) => ({
       return { terminals, activeTerminalId };
     }),
 
-  openTab: (tab) =>
+  openTab: (tab, opts = {}) =>
     set((s) => {
       const existing = s.tabs.find(
         (t) => t.connId === tab.connId && t.path === tab.path,
       );
-      if (existing) return { activeTabId: existing.id };
+      if (existing) {
+        // A permanent open (double-click) promotes an existing preview.
+        const tabs =
+          !opts.preview && existing.previewTab
+            ? s.tabs.map((t) => (t.id === existing.id ? { ...t, previewTab: false } : t))
+            : s.tabs;
+        return { tabs, activeTabId: existing.id };
+      }
       const id = `tab-${(tabCounter += 1)}`;
       const newTab: EditorTab = {
         ...tab,
         id,
         dirty: false,
         cursor: { line: 1, column: 1 },
+        previewTab: !!opts.preview && !opts.pinned,
+        pinned: !!opts.pinned,
       };
+      if (opts.preview) {
+        // Reuse the single preview slot (never a dirty one — dirty promotes).
+        const slot = s.tabs.findIndex((t) => t.previewTab && !t.dirty);
+        if (slot >= 0) {
+          const tabs = s.tabs.slice();
+          tabs[slot] = newTab;
+          return { tabs, activeTabId: id };
+        }
+      }
       return { tabs: [...s.tabs, newTab], activeTabId: id };
     }),
+
+  promoteTab: (id) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === id ? { ...t, previewTab: false } : t)),
+    })),
+
+  pinTab: (id, pinned) =>
+    set((s) => {
+      const tab = s.tabs.find((t) => t.id === id);
+      if (!tab) return {};
+      const rest = s.tabs.filter((t) => t.id !== id);
+      const lastPinned = rest.reduce((acc, t, i) => (t.pinned ? i : acc), -1);
+      const tabs = rest.slice();
+      // Pin → end of the pinned block; unpin → start of the unpinned block.
+      tabs.splice(lastPinned + 1, 0, { ...tab, pinned, previewTab: false });
+      return { tabs };
+    }),
+
+  tabMenu: null,
+  openTabMenu: (x, y, tabId) => set({ tabMenu: { x, y, tabId } }),
+  closeTabMenu: () => set({ tabMenu: null }),
 
   openDiffTab: (d) =>
     set((s) => {
@@ -842,8 +904,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
       return { activeTabId: s.tabs[next].id };
     }),
 
-  closeTab: (id) => {
+  closeTab: (id, allowPinned = false) => {
     const tab = get().tabs.find((t) => t.id === id);
+    if (tab?.pinned && !allowPinned) return; // Ctrl+W / ×: pinned tabs stay
     if (tab?.dirty) {
       set({ closeConfirm: { tabId: id } });
       return;
@@ -870,7 +933,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   setTabDirty: (id, dirty) =>
     set((s) => ({
-      tabs: s.tabs.map((t) => (t.id === id ? { ...t, dirty } : t)),
+      tabs: s.tabs.map((t) =>
+        t.id === id
+          ? { ...t, dirty, previewTab: dirty ? false : t.previewTab }
+          : t,
+      ),
     })),
 
   markTabSaved: (id, modified) =>

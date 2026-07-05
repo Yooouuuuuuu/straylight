@@ -4,7 +4,7 @@
  *  stored content when the active diff tab changes. */
 import { useEffect, useRef } from "react";
 
-import { DRACULA_THEME, monaco, setupMonaco } from "../../lib/monaco";
+import { monaco, setupMonaco } from "../../lib/monaco";
 import type { EditorTab } from "../../store/appStore";
 
 export function MonacoDiffWrapper({ tab }: { tab: EditorTab }) {
@@ -16,7 +16,6 @@ export function MonacoDiffWrapper({ tab }: { tab: EditorTab }) {
     const host = hostRef.current;
     if (!host) return;
     const editor = monaco.editor.createDiffEditor(host, {
-      theme: DRACULA_THEME,
       automaticLayout: true,
       readOnly: true,
       originalEditable: false,

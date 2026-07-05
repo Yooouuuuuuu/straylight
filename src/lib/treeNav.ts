@@ -170,7 +170,8 @@ export function handleExplorerKey(key: string): boolean {
         if (r.expanded) handle(r)?.collapse(r.path);
         else handle(r)?.expand(r.path);
       } else {
-        void openFileByPath(r.connId, r.path, r.name);
+        // Keyboard opens preview like a single click; edit or pin to keep.
+        void openFileByPath(r.connId, r.path, r.name, { preview: true });
       }
       return true;
     }

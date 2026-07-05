@@ -93,7 +93,7 @@ export function FileNode({
   active: boolean;
   renaming: boolean;
   onToggle: () => void;
-  onOpen: () => void;
+  onOpen: (opts?: { preview?: boolean }) => void;
   onSelect: (mods: { ctrl: boolean; shift: boolean }) => void;
   onContextMenu: (x: number, y: number) => void;
   onCommitRename: (name: string) => void;
@@ -123,16 +123,20 @@ export function FileNode({
     if (active) rowRef.current?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
-  // Single click selects (and toggles a folder); a file opens only on
-  // double-click (or Enter / →). Ctrl/Shift click multi-selects without toggling.
+  // VS Code model: single click selects and opens a file as a *preview* tab
+  // (italic; the next preview replaces it). Double-click opens it permanently
+  // (or promotes the preview). Folders still toggle on single click.
   const handleClick = (e: React.MouseEvent) => {
     const ctrl = e.ctrlKey || e.metaKey;
     const shift = e.shiftKey;
     onSelect({ ctrl, shift });
-    if (!ctrl && !shift && entry.isDir) onToggle();
+    if (!ctrl && !shift) {
+      if (entry.isDir) onToggle();
+      else onOpen({ preview: true });
+    }
   };
   const handleDoubleClick = () => {
-    if (!entry.isDir) onOpen();
+    if (!entry.isDir) onOpen({ preview: false });
   };
 
   const twistyClass = entry.isDir

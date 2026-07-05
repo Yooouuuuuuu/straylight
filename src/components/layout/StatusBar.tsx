@@ -107,6 +107,14 @@ export function StatusBar() {
 
       <span
         className="statusbar__item statusbar__item--button"
+        onClick={() => useAppStore.getState().setPaletteOpen(true)}
+        title="All commands (Ctrl+Shift+P)"
+      >
+        ⌘ Commands
+      </span>
+
+      <span
+        className="statusbar__item statusbar__item--button"
         onClick={() => setPortsOpen(true)}
         title="Forward a port over SSH"
       >

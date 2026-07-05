@@ -12,7 +12,7 @@ import {
   findConflicts,
   resolveConflictsInText,
 } from "../../lib/mergeConflicts";
-import { DRACULA_THEME, monaco, setupMonaco } from "../../lib/monaco";
+import { monaco, setupMonaco } from "../../lib/monaco";
 import { fsWriteFile, vcsStage } from "../../lib/ipc";
 import { useAppStore, type EditorTab } from "../../store/appStore";
 import { useVcsStore } from "../../store/vcsStore";
@@ -36,7 +36,6 @@ export function MergeEditor({ tab }: { tab: EditorTab }) {
     if (hosts.some((h) => !h)) return;
 
     const shared = {
-      theme: DRACULA_THEME,
       automaticLayout: true,
       fontFamily: "'Fira Code', 'Cascadia Code', monospace",
       fontLigatures: true,
