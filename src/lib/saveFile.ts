@@ -15,7 +15,7 @@ export type SaveOutcome = "saved" | "conflict" | "noop" | "error";
 export async function saveTab(tabId: string): Promise<SaveOutcome> {
   const store = useAppStore.getState();
   const tab = store.tabs.find((t) => t.id === tabId);
-  if (!tab || tab.kind === "diff" || tab.kind === "log" || tab.isBinary || !tab.dirty)
+  if (!tab || (tab.kind && tab.kind !== "file") || tab.isBinary || !tab.dirty)
     return "noop";
 
   // Capture the version we're about to save, so edits made during the write

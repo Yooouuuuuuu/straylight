@@ -1,7 +1,7 @@
 {
   "name": "straylight",
   "private": true,
-  "version": "0.8.6",
+  "version": "0.8.7",
   "type": "module",
   "description": "Lightweight SSH file manager, terminal, and code viewer",
   "license": "MIT OR Apache-2.0",
@@ -17,7 +17,9 @@
     "@xterm/addon-fit": "^0.10",
     "@xterm/addon-webgl": "^0.18",
     "@xterm/xterm": "^5",
+    "dompurify": "^3.4.11",
     "fuse.js": "^7",
+    "marked": "^18.0.5",
     "monaco-editor": "^0.50",
     "react": "^18",
     "react-dom": "^18",

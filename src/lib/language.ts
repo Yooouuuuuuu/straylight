@@ -104,19 +104,3 @@ export function languageForFile(name: string): string {
   return "plaintext";
 }
 
-const IMAGE_EXTENSIONS = new Set([
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "webp",
-  "bmp",
-  "ico",
-]);
-
-/** Image files are previewed (Phase 2) rather than opened in the editor. */
-export function isImageFile(name: string): boolean {
-  const dot = name.lastIndexOf(".");
-  if (dot < 0) return false;
-  return IMAGE_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
-}

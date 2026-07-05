@@ -445,6 +445,51 @@
   font-size: var(--font-size-xs);
 }
 
+/* Per-connection color picker (right-click a repo card) */
+.color-menu {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.color-menu__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.color-menu__swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.color-menu__swatch:hover {
+  transform: scale(1.2);
+}
+
+.color-menu__reset {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.color-menu__reset:hover {
+  color: var(--fg-primary);
+}
+
 /* The ⋯ actions dropdown (same interaction as the branch menu) */
 .action-menu {
   border-top: 1px solid var(--border);
@@ -520,6 +565,285 @@
 
 .repo-card__group-head--conflict {
   color: var(--red);
+}
+
+/* Containers tab (terminal panel) */
+.containers-view {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background: var(--bg-primary);
+  padding: var(--space-2) 0 var(--space-4);
+}
+
+.containers-view__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-5);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-secondary);
+}
+
+.containers-view__empty {
+  padding: var(--space-4) var(--space-5);
+  color: var(--fg-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.containers-view__host-label {
+  padding: var(--space-2) var(--space-5) var(--space-1);
+  color: var(--purple);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-code);
+}
+
+.container-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-5);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+}
+
+.container-row:hover {
+  background: var(--bg-tertiary);
+}
+
+.container-row__engine {
+  flex: 0 0 auto;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--cyan, #8be9fd);
+  font-family: var(--font-code);
+  font-size: 10px;
+}
+
+.container-row__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-primary);
+  font-weight: 600;
+}
+
+.container-row__image {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-secondary);
+  font-family: var(--font-code);
+}
+
+.container-row__ports {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--orange);
+  font-family: var(--font-code);
+}
+
+.container-row__status {
+  flex: 0 0 auto;
+  color: var(--green);
+}
+
+/* Markdown preview tab */
+.md-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: auto;
+  background: var(--bg-primary);
+}
+
+.md-preview__body {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-6) 64px;
+  line-height: 1.65;
+  font-size: 14px;
+  color: var(--fg-primary);
+}
+
+.md-preview__body h1,
+.md-preview__body h2 {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.3em;
+  margin: 1.2em 0 0.6em;
+}
+
+.md-preview__body h3,
+.md-preview__body h4,
+.md-preview__body h5 {
+  margin: 1.1em 0 0.5em;
+}
+
+.md-preview__body p,
+.md-preview__body ul,
+.md-preview__body ol {
+  margin: 0.6em 0;
+}
+
+.md-preview__body ul,
+.md-preview__body ol {
+  padding-left: 1.6em;
+}
+
+.md-preview__body a {
+  color: var(--cyan, #8be9fd);
+  text-decoration: underline;
+  cursor: default;
+}
+
+.md-preview__body code {
+  font-family: var(--font-code);
+  font-size: 0.9em;
+  background: var(--bg-tertiary);
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius-sm);
+}
+
+.md-preview__body pre {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  overflow-x: auto;
+  margin: 0.8em 0;
+}
+
+.md-preview__body pre code {
+  background: none;
+  padding: 0;
+}
+
+.md-preview__body blockquote {
+  margin: 0.8em 0;
+  padding: 0.2em var(--space-4);
+  border-left: 3px solid var(--purple);
+  color: var(--fg-secondary);
+}
+
+.md-preview__body table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  display: block;
+  overflow-x: auto;
+}
+
+.md-preview__body th,
+.md-preview__body td {
+  border: 1px solid var(--border);
+  padding: 0.3em 0.7em;
+}
+
+.md-preview__body th {
+  background: var(--bg-secondary);
+}
+
+.md-preview__body img {
+  max-width: 100%;
+}
+
+.md-preview__body hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.2em 0;
+}
+
+/* Right-side action in the tab bar (e.g. Markdown "Preview") */
+.editor-tabs__action {
+  margin-left: auto;
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 2px var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.editor-tabs__action:hover {
+  color: var(--fg-primary);
+  border-color: var(--border-focus);
+}
+
+/* 3-way merge editor: Current | Incoming on top, editable Result below */
+.merge-editor {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  z-index: 2;
+}
+
+.merge-editor__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.merge-editor__count {
+  flex: 1 1 auto;
+  font-size: var(--font-size-xs);
+  color: var(--orange);
+}
+
+.merge-editor__count--done {
+  color: var(--green);
+}
+
+.merge-editor__tops {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+}
+
+.merge-editor__pane {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+}
+
+.merge-editor__pane--incoming {
+  border-right: none;
+}
+
+.merge-editor__pane--result {
+  flex: 1.2 1 0;
+  border-top: 1px solid var(--border);
+  border-right: none;
+}
+
+.merge-editor__label {
+  padding: 2px var(--space-4);
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.merge-editor__host {
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 /* Merge-conflict block highlighting in the editor (ours / theirs) */
@@ -2170,44 +2494,20 @@ select option {
 .commit-row {
   display: flex;
   gap: var(--space-2);
-  padding: 0 var(--space-5);
+  padding: 0 var(--space-5) 0 var(--space-3);
+  /* Fixed height — the graph SVG rail is sized to it (ROW_H in VcsLogView). */
+  height: 42px;
+  overflow: hidden;
 }
 
-.commit-row__rail {
-  position: relative;
-  flex: 0 0 16px;
+/* Multi-lane graph rail (SVG; lane colors cycle the Dracula palette) */
+.commit-row__graph {
+  flex: 0 0 auto;
 }
 
-.commit-row__rail::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  transform: translateX(-50%);
-  background: var(--border);
-}
-
-.commit-row__dot {
-  position: absolute;
-  left: 50%;
-  top: 10px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  background: var(--fg-secondary);
-  border: 2px solid var(--bg-primary);
-  box-sizing: content-box;
-}
-
-.commit-row__dot--current {
-  background: var(--green);
-}
-
-.commit-row__dot--merge {
-  background: var(--purple);
+.commit-row__graph line {
+  stroke-width: 2;
+  opacity: 0.75;
 }
 
 .commit-row__body {

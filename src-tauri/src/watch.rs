@@ -93,3 +93,87 @@ pub async fn vcs_unwatch(
         .remove(&key_for(&conn_id, &root));
     Ok(())
 }
+
+/// Watch one **local** file for external changes (open-tab auto-reload / log
+/// tailing). The parent directory is watched non-recursively and events are
+/// filtered to this filename — editors that save via rename-over-the-file
+/// would detach a direct file watch. Emits debounced `file-fs-change`.
+#[tauri::command]
+pub async fn file_watch(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    conn_id: String,
+    path: String,
+) -> Result<(), String> {
+    let key = key_for(&conn_id, &path);
+    let mut watchers = state.file_watchers.lock().await;
+    if watchers.contains_key(&key) {
+        return Ok(());
+    }
+
+    let p = std::path::PathBuf::from(&path);
+    let parent = p
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .ok_or("path has no parent directory")?
+        .to_path_buf();
+    let fname = p
+        .file_name()
+        .ok_or("path has no file name")?
+        .to_os_string();
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    let mut watcher = notify::recommended_watcher(
+        move |res: Result<notify::Event, notify::Error>| {
+            if let Ok(event) = res {
+                if matches!(
+                    event.kind,
+                    EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+                ) && event
+                    .paths
+                    .iter()
+                    .any(|ep| ep.file_name() == Some(fname.as_os_str()))
+                {
+                    let _ = tx.send(());
+                }
+            }
+        },
+    )
+    .map_err(|e| format!("could not create watcher: {e}"))?;
+    watcher
+        .watch(&parent, RecursiveMode::NonRecursive)
+        .map_err(|e| format!("could not watch {}: {e}", parent.display()))?;
+
+    tauri::async_runtime::spawn(async move {
+        while rx.recv().await.is_some() {
+            loop {
+                match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+                    Ok(Some(())) => continue,
+                    _ => break,
+                }
+            }
+            let _ = app.emit(
+                "file-fs-change",
+                json!({ "connId": conn_id, "path": path }),
+            );
+        }
+    });
+
+    watchers.insert(key, RepoWatcher { _watcher: watcher });
+    Ok(())
+}
+
+/// Stop watching a file (no-op if it wasn't watched).
+#[tauri::command]
+pub async fn file_unwatch(
+    state: State<'_, AppState>,
+    conn_id: String,
+    path: String,
+) -> Result<(), String> {
+    state
+        .file_watchers
+        .lock()
+        .await
+        .remove(&key_for(&conn_id, &path));
+    Ok(())
+}

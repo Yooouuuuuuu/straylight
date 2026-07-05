@@ -44,28 +44,40 @@ under "Active roadmap."
 - Fetch/pull/push UI, refresh-on-focus + a local `.git`/`.jj` watcher, and a
   marker-based conflict flow are **done or in the current rework** (see the
   post-Phase-3 rework plan in `docs/dev/`) — the items below are what remains.
-- [ ] **Multi-lane commit graph** — the history rail is single-lane today.
-- [ ] **3-way merge editor** (base | ours | theirs | result) — level B of the
-      conflict flow; Monaco has no built-in widget for it, so it's a custom UI.
+- [x] **Multi-lane commit graph** — *done*: SVG lanes computed in
+      `lib/commitGraph.ts` from parent edges; git logs `--branches HEAD
+      --topo-order` so all local branches render; lanes cycle the palette,
+      capped at 10 columns.
+- [x] **3-way merge editor** — *done*: ⚔ on a conflict row opens a merge tab —
+      read-only Current | Incoming panes (each side fully resolved), an editable
+      Result seeded with the markers (per-conflict Accept lenses + highlights),
+      accept-all buttons, and **Complete merge** = save + stage (git; jj just
+      saves) + close. Git-marker conflicts only (jj's own format stays
+      hand-edit).
 - [ ] **Blame**, **ignored-file dimming**, **per-hunk staging**.
-- [ ] **jj on a remote** — resolve `jj` on the exec PATH (login shell / cached
-      absolute path); today it works locally and falls back to git otherwise.
-- [ ] **Push/pull interactivity** — the exec channel has no TTY, so an
-      interactive auth prompt (passphrase/2FA) hangs with no cancel; needs a
-      cancel button and/or askpass-style prompting.
+- [x] **jj on a remote** — *done*: `jj` is probed once per SSH connection
+      (default PATH → `~/.cargo/bin` / `~/.local/bin` / `/usr/local/bin` →
+      login shell) and the absolute path is cached and substituted; a repo
+      opened as git before the fix needs remove + re-add to re-detect as jj.
+- [x] **Remote-op cancel** — *done*: fetch/push/update run cancellably; a
+      "running — Cancel" banner on the card kills the SSH channel / local
+      process (freeing the repo lock), so a no-TTY auth hang has an escape.
+      True askpass-style prompting stays future work.
 
 ### Theming
-- [ ] **Global connection-color customization** — `lib/connectionColor.ts` hashes
-      a name to a 7-color Dracula palette (collisions possible). Make the palette
-      a user setting, and feed every surface that identifies a connection (title
-      bar, tree roots, terminal list, VC card frames) from the same source.
+- [x] **Per-connection color override** — *done*: right-click a repo card →
+      swatch row; the picked color persists per connection identity and wins
+      over the hash (`connectionColor.ts` overrides, localStorage).
+- [ ] **Global color surface unification** — feed the *same* override into every
+      surface that identifies a connection (title bar tint, tree roots, terminal
+      list) — today only the VC cards consume it; the others still hash.
 
 ### Editor
-- [ ] **Auto-reload open files on external change** (watch logs like VS Code):
-      non-dirty open editors reload when the file changes on disk; dirty editors
-      keep edits and conflict on save. Local = the same `notify` watcher infra as
-      the VCS one; remote = no watcher without an agent → opt-in mtime polling of
-      open tabs, or recheck on focus. Needs its own design pass first.
+- [x] **Auto-reload open files on external change** — *done*: clean (non-dirty)
+      open tabs reload automatically — local files via a per-file `notify`
+      watcher (instant log tailing), remote/WSL via a 3 s mtime poll; the view
+      follows the tail if it was scrolled to the bottom. Dirty tabs are never
+      touched (save-conflict flow covers them).
 
 ### Explorer & transfer
 - [ ] Fold the transfer panel into the sidebar — drag directly between the trees;
@@ -122,6 +134,12 @@ under "Active roadmap."
 ### Misc
 - [ ] Trim the Monaco bundle to a language subset (it currently ships every
       language).
+- [ ] **Auto-update** — deferred (user decision 2026-07-05): needs a signing
+      keypair + hosted releases (GitHub Releases), which only pays off once
+      installers are distributed to other people; today the app runs from source.
+- [ ] Containers, later ideas: container **file browsing** (a new transport),
+      logs view, start/stop actions — the Containers tab currently lists running
+      containers and opens exec shells.
 
 ### Docs
 - README rewritten through **0.8.4** (transfers, version control, finder, search,

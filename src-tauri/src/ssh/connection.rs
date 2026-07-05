@@ -590,21 +590,3 @@ async fn reestablish(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-/// Report the current state of a connection.
-#[tauri::command]
-pub async fn ssh_get_status(
-    state: State<'_, AppState>,
-    conn_id: String,
-) -> Result<ConnectionStatus, String> {
-    let sessions = state.sessions.lock().await;
-    let current = match sessions.get(&conn_id) {
-        Some(crate::Session::Ssh(conn)) => *conn.state.lock().await,
-        Some(crate::Session::Local) => ConnectionState::Connected,
-        None => ConnectionState::Disconnected,
-    };
-    Ok(ConnectionStatus {
-        conn_id,
-        state: current,
-        message: None,
-    })
-}

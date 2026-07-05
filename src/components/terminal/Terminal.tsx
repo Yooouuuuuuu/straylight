@@ -9,12 +9,14 @@ export function Terminal({
   connId,
   active,
   command,
+  initialInput = null,
 }: {
   id: string;
   connId: string;
   active: boolean;
   command: string[] | null;
+  initialInput?: string | null;
 }) {
-  const containerRef = useTerminal(connId, active, command, id);
+  const containerRef = useTerminal(connId, active, command, id, initialInput);
   return <div className="terminal-host" ref={containerRef} />;
 }

@@ -1,9 +1,11 @@
-/** A repo's commit history (newest first), rendered as a single-lane graph: a
- *  rail of dots with each commit's refs, subject, author, and time. Works for
- *  git and jj (the backend differs only in how the log is fetched). Full
- *  multi-lane graph rendering is a later UX pass. */
-import { useEffect, useRef, useState } from "react";
+/** A repo's commit history (newest first) as a **multi-lane graph**: branches
+ *  and merges get their own lanes (git shows all local branches + HEAD; jj its
+ *  default revset). Works for git and jj — the backend differs only in how the
+ *  log is fetched; the lane layout comes from `lib/commitGraph`. */
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { computeGraph } from "../../lib/commitGraph";
+import { PALETTE } from "../../lib/connectionColor";
 import {
   vcsCommitFiles,
   vcsLog,
@@ -16,6 +18,13 @@ import { useVcsStore } from "../../store/vcsStore";
 import { RelativeTime } from "../RelativeTime";
 
 type FileState = VcsChange[] | "loading" | "error";
+
+// Rail geometry: must match `.commit-row` height in the CSS.
+const LANE_W = 12;
+const ROW_H = 42;
+const MAX_LANES = 10;
+const laneX = (i: number) => 7 + i * LANE_W;
+const laneColor = (i: number) => PALETTE[i % PALETTE.length];
 
 export function VcsLogView({
   connId,
@@ -32,6 +41,9 @@ export function VcsLogView({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [files, setFiles] = useState<Record<string, FileState>>({});
   const isJj = backend === "jj";
+
+  const graph = useMemo(() => (commits ? computeGraph(commits) : null), [commits]);
+  const railW = 7 + Math.min(graph?.width ?? 1, MAX_LANES) * LANE_W;
 
   // The history has no refresh of its own: it re-fetches whenever its repo's
   // status refreshes (watcher / focus / manual / mutation — one policy).
@@ -106,6 +118,13 @@ export function VcsLogView({
           {commits.map((c, i) => {
             const open = expanded.has(c.id);
             const fs = files[c.id];
+            const row = graph?.rows[i];
+            const dotX = laneX(row?.lane ?? 0);
+            const dotColor = c.current
+              ? "var(--green)"
+              : c.parents.length > 1
+                ? "var(--purple)"
+                : laneColor(row?.lane ?? 0);
             return (
               <div className="commit-group" key={`${c.id}-${i}`}>
                 <div
@@ -113,17 +132,49 @@ export function VcsLogView({
                   onClick={() => toggle(c.id)}
                   title="Show changed files"
                 >
-                  <div className="commit-row__rail">
-                    <span
-                      className={[
-                        "commit-row__dot",
-                        c.current ? "commit-row__dot--current" : "",
-                        c.parents.length > 1 ? "commit-row__dot--merge" : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
+                  <svg
+                    className="commit-row__graph"
+                    width={railW}
+                    height={ROW_H}
+                    aria-hidden="true"
+                  >
+                    {row?.through.map((l) => (
+                      <line
+                        key={`t${l}`}
+                        x1={laneX(l)}
+                        y1={0}
+                        x2={laneX(l)}
+                        y2={ROW_H}
+                        stroke={laneColor(l)}
+                      />
+                    ))}
+                    {row?.incoming.map((l) => (
+                      <line
+                        key={`i${l}`}
+                        x1={laneX(l)}
+                        y1={0}
+                        x2={dotX}
+                        y2={ROW_H / 2}
+                        stroke={laneColor(l)}
+                      />
+                    ))}
+                    {row?.outgoing.map((l) => (
+                      <line
+                        key={`o${l}`}
+                        x1={dotX}
+                        y1={ROW_H / 2}
+                        x2={laneX(l)}
+                        y2={ROW_H}
+                        stroke={laneColor(l)}
+                      />
+                    ))}
+                    <circle
+                      cx={dotX}
+                      cy={ROW_H / 2}
+                      r={c.current ? 4.5 : 3.5}
+                      fill={dotColor}
                     />
-                  </div>
+                  </svg>
                   <div className="commit-row__body">
                     <div className="commit-row__top">
                       {c.current && (
@@ -154,7 +205,7 @@ export function VcsLogView({
                   </div>
                 </div>
                 {open && (
-                  <div className="commit-files">
+                  <div className="commit-files" style={{ paddingLeft: railW + 4 }}>
                     {fs === "loading" ? (
                       <div className="commit-files__msg">
                         <span className="spinner spinner--sm" /> Loading…

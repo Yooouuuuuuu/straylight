@@ -61,6 +61,24 @@ export function useKeyboard() {
             event.preventDefault();
           }
           break;
+        case "markdownPreview": {
+          const active = store.tabs.find((t) => t.id === store.activeTabId);
+          if (
+            !inTerminal &&
+            active &&
+            (!active.kind || active.kind === "file") &&
+            /\.(md|markdown)$/i.test(active.name)
+          ) {
+            store.openPreviewTab({
+              connId: active.connId,
+              path: active.path,
+              name: `${active.name} (preview)`,
+              content: active.content,
+            });
+            event.preventDefault();
+          }
+          break;
+        }
         case "nextTab":
           if (store.tabs.length > 1) {
             store.cycleTab(1);

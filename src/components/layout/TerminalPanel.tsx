@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { listTerminalProfiles, type TerminalProfile } from "../../lib/ipc";
 import { pickTerminalTarget } from "../../lib/terminalTarget";
 import { useAppStore } from "../../store/appStore";
+import { ContainersView } from "../terminal/ContainersView";
 import { Terminal } from "../terminal/Terminal";
 import { IconClose, IconPlus } from "../icons";
 
@@ -30,6 +31,8 @@ export function TerminalPanel() {
   const setTerminalVisible = useAppStore((s) => s.setTerminalVisible);
   const newTerminalTarget = useAppStore((s) => s.newTerminalTarget);
   const setNewTerminalTarget = useAppStore((s) => s.setNewTerminalTarget);
+  const terminalView = useAppStore((s) => s.terminalView);
+  const setTerminalView = useAppStore((s) => s.setTerminalView);
 
   const [profiles, setProfiles] = useState<TerminalProfile[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -74,21 +77,28 @@ export function TerminalPanel() {
   return (
     <div className="terminal-panel">
       <div className="terminal-panel__body">
-        {terminals.length === 0 ? (
+        {terminalView === "containers" && <ContainersView />}
+        {terminals.length === 0 && terminalView === "terminals" ? (
           <div className="terminal-message">No terminals — click + to start one.</div>
         ) : (
           terminals.map((t) => (
             <div
               key={t.id}
               className="terminal-instance"
-              style={{ display: t.id === activeTerminalId ? "block" : "none" }}
+              style={{
+                display:
+                  terminalView === "terminals" && t.id === activeTerminalId
+                    ? "block"
+                    : "none",
+              }}
             >
               <Terminal
                 key={`${t.id}:${t.epoch}`}
                 id={t.id}
                 connId={t.connId}
-                active={t.id === activeTerminalId}
+                active={terminalView === "terminals" && t.id === activeTerminalId}
                 command={t.command}
+                initialInput={t.initialInput ?? null}
               />
             </div>
           ))
@@ -180,6 +190,15 @@ export function TerminalPanel() {
         )}
 
         <div className="terminal-sidebar__list" role="tablist">
+          <div
+            role="tab"
+            aria-selected={terminalView === "containers"}
+            className={`terminal-entry${terminalView === "containers" ? " terminal-entry--active" : ""}`}
+            title="Running containers (podman / docker) — click one to shell in"
+            onClick={() => setTerminalView("containers")}
+          >
+            <span className="terminal-entry__label">▣ Containers</span>
+          </div>
           {terminals.map((t) => (
             <div
               key={t.id}

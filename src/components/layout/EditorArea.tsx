@@ -6,6 +6,8 @@ import { BinaryFileCard } from "../editor/BinaryFileCard";
 import { EditorTabs } from "../editor/EditorTabs";
 import { MonacoWrapper } from "../editor/MonacoWrapper";
 import { MonacoDiffWrapper } from "../editor/MonacoDiffWrapper";
+import { MergeEditor } from "../editor/MergeEditor";
+import { MarkdownPreview } from "../editor/MarkdownPreview";
 import { VcsLogView } from "../vcs/VcsLogView";
 
 function EmptyState() {
@@ -79,6 +81,10 @@ export function EditorArea() {
               <MonacoWrapper />
               {active?.kind === "diff" ? (
                 <MonacoDiffWrapper tab={active} />
+              ) : active?.kind === "merge" ? (
+                <MergeEditor key={active.id} tab={active} />
+              ) : active?.kind === "preview" ? (
+                <MarkdownPreview key={active.id} tab={active} />
               ) : active?.kind === "log" ? (
                 <VcsLogView
                   connId={active.connId}

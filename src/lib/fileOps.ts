@@ -54,18 +54,6 @@ export async function createEntry(
   }
 }
 
-export async function deleteEntry(connId: string, path: string): Promise<void> {
-  const store = useAppStore.getState();
-  store.closeConfirmDelete();
-  try {
-    await fsRemove(connId, path);
-    store.applyDelete(connId, path);
-    store.refreshConn(connId);
-    useVcsStore.getState().onFileChanged(connId, path);
-  } catch (error) {
-    store.pushNotice("error", `Couldn't delete: ${String(error)}`);
-  }
-}
 
 /** Delete several entries, refreshing each affected connection once at the end. */
 export async function deleteEntries(

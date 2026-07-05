@@ -154,6 +154,11 @@ async fn git_log(
         &[
             "git",
             "log",
+            // All local branches + HEAD, children before parents — what the
+            // frontend's multi-lane graph layout expects.
+            "--branches",
+            "HEAD",
+            "--topo-order",
             "-n",
             &n,
             "--pretty=format:%h%x1f%p%x1f%an%x1f%at%x1f%D%x1f%s",
@@ -482,6 +487,45 @@ pub async fn vcs_stash(
     Ok(out.stdout.trim().to_string())
 }
 
+/// Run a remote-facing command so it can be cancelled: `vcs_remote_cancel`
+/// drops the in-flight future, which closes the SSH channel (killing the
+/// remote command) or kills the local child — the escape hatch for an
+/// interactive-auth hang on the no-TTY exec channel.
+async fn run_cancellable(
+    state: &AppState,
+    conn_id: &str,
+    root: &str,
+    argv: &[&str],
+) -> Result<CmdOutput, String> {
+    let key = format!("{conn_id}::{root}");
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    state.vcs_ops.lock().await.insert(key.clone(), tx);
+    let result = tokio::select! {
+        r = run_command(state, conn_id, root, argv) => r,
+        _ = rx => Err("cancelled".to_string()),
+    };
+    state.vcs_ops.lock().await.remove(&key);
+    result
+}
+
+/// Cancel the repo's in-flight remote op (fetch / push / update), if any.
+#[tauri::command]
+pub async fn vcs_remote_cancel(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+) -> Result<(), String> {
+    if let Some(tx) = state
+        .vcs_ops
+        .lock()
+        .await
+        .remove(&format!("{conn_id}::{root}"))
+    {
+        let _ = tx.send(());
+    }
+    Ok(())
+}
+
 /// Bring the local line up to date with the remote (run after a fetch): git
 /// merges `@{u}`; jj rebases the working-copy branch onto `<bookmark>@origin`.
 /// Mutates the working tree — the UI confirms first.
@@ -497,9 +541,9 @@ pub async fn vcs_update(
     let _held = lock.lock().await;
     let out = if backend == "jj" {
         let dest = format!("{target}@origin");
-        run_command(&state, &conn_id, &root, &["jj", "rebase", "-d", &dest]).await?
+        run_cancellable(&state, &conn_id, &root, &["jj", "rebase", "-d", &dest]).await?
     } else {
-        run_command(&state, &conn_id, &root, &["git", "merge", "--no-edit", "@{u}"]).await?
+        run_cancellable(&state, &conn_id, &root, &["git", "merge", "--no-edit", "@{u}"]).await?
     };
     let msg = format!("{}\n{}", out.stdout.trim(), out.stderr.trim())
         .trim()
@@ -566,7 +610,7 @@ pub async fn vcs_remote(
         (_, "push") => vec!["git", "push"],
         _ => return Err(format!("unknown operation '{op}'")),
     };
-    let out = run_command(&state, &conn_id, &root, &argv).await?;
+    let out = run_cancellable(&state, &conn_id, &root, &argv).await?;
     let msg = format!("{}\n{}", out.stdout.trim(), out.stderr.trim())
         .trim()
         .to_string();

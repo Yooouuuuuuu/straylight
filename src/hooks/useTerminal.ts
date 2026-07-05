@@ -30,6 +30,7 @@ export function useTerminal(
   active = true,
   command: string[] | null = null,
   id = "",
+  initialInput: string | null = null,
 ) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -131,6 +132,11 @@ export function useTerminal(
         }
         ptyId = id;
         term.focus();
+        // Type the requested command into the fresh shell (e.g. a container
+        // exec from the Containers tab) — visible and cancelable like any input.
+        if (initialInput) {
+          void ptyWrite(id, encoder.encode(`${initialInput}\r`));
+        }
       })
       .catch((error) => {
         term.writeln(`\r\n\x1b[31mFailed to open terminal: ${error}\x1b[0m`);

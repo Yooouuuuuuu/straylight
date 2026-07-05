@@ -20,6 +20,7 @@ import {
 } from "./lib/ipc";
 import { useAppStore } from "./store/appStore";
 import { useVcsStore } from "./store/vcsStore";
+import { initFileWatching } from "./lib/fileWatch";
 import { initSessionPersistence, restoreSession } from "./lib/session";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { useSSH } from "./hooks/useSSH";
@@ -88,6 +89,10 @@ export default function App() {
 
   // Persist the session (open tabs, last remote, panel visibility) on change.
   useEffect(() => initSessionPersistence(), []);
+
+  // Auto-reload clean open files when they change on disk (local: watcher;
+  // remote/WSL: mtime poll) — watching a growing log just works.
+  useEffect(() => initFileWatching(), []);
 
   // Once the local session is up, restore the previous session exactly once:
   // panel visibility, local tabs, and the last remote (auto-reconnect for key

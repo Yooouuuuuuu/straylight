@@ -13,9 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   an inline field (e.g. on the "Connect to a server" button).
 - **Auto-refresh** (optional): a filesystem watch for the local tree; SSH would
   poll (opt-in).
-- **Version control, later:** per-hunk staging, blame, conflict editor, multi-lane
-  commit graph.
-- **Phase 3, later:** Podman containers, Markdown preview, auto-update.
+- **Version control, later:** per-hunk staging, blame, ignored-file dimming.
+- **Auto-update** — deferred until installers are distributed (needs signing keys
+  + hosted releases; the app currently runs from source).
+- **Containers, later:** file browsing inside containers, logs, start/stop.
 - **Transfer polish (later):** drag directly between the sidebar trees (folding
   the three panel buttons into one), OS drag-in/out, and multi cut/copy/paste in
   the explorer.
@@ -25,6 +26,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 - Terminal tab reordering.
+## [0.8.7] - 2026-07-05
+
+The backlog run: seven features and a cleanup sweep.
+
+### Added
+
+- **Multi-lane commit graph.** History renders real lanes — branches and merges
+  fork and join with per-lane colors, and **all local branches** show without
+  checking them out (git logs `--branches HEAD --topo-order`; jj's default
+  revset was already multi-head).
+- **3-way merge editor.** **⚔** on a conflicted file opens Current | Incoming
+  panes (each side fully resolved) over an editable Result seeded with the
+  markers — per-conflict Accept lenses, accept-all buttons, and **Complete
+  merge** (save + stage) once nothing remains.
+- **Containers tab.** **▣ Containers** in the terminal list shows running
+  containers (podman preferred, else docker) across every connected host with
+  image/ports/status — refreshed only while the tab is open. Click one to land
+  in a shell inside it (a visible `… exec -it <id> /bin/sh`).
+- **Markdown preview.** **¶ Preview** in the tab bar (or `Ctrl+Shift+V`) renders
+  the active `.md` GitHub-style (marked + DOMPurify, bundled); shows unsaved
+  edits; links can't navigate the app away.
+- **Auto-reload open files.** Clean tabs reload themselves when the file changes
+  on disk — local via a per-file watcher (instant log tailing; the view follows
+  the tail when pinned to the bottom), remote/WSL via a 3 s mtime poll. Dirty
+  tabs are never touched.
+- **Remote jj detection.** `jj` is probed per SSH connection (PATH → common
+  install dirs → login shell) and cached, so colocated repos on remotes/WSL stop
+  silently falling back to git. (Repos opened as git before: remove + re-add.)
+- **Remote-op cancel.** Fetch / push / update show a "running — Cancel" banner;
+  Cancel kills the SSH channel or local process and frees the repo lock — the
+  escape hatch for interactive-auth hangs on the no-TTY channel.
+- **Per-connection colors.** Right-click a repo card → swatch row (+ Auto);
+  the override persists and wins over the hash color.
+
+### Fixed
+
+- GNU grep exiting 2 on unreadable files no longer discards search results; big
+  per-user toolchain dirs (`.cargo`, `.rustup`, `.cache`, …) are excluded from
+  search and the finder.
+
+### Internal
+
+- Cleanup sweep: every registered Tauri command is invoked (59/59) and dead
+  exports were removed (`ssh_get_status` end-to-end, `deleteEntry`,
+  `isImageFile`, `isTerminalAction`).
+
 ## [0.8.6] - 2026-07-04
 
 Scoped quick-open & search, and the last of the rework polish — batches 3–4.

@@ -17,6 +17,7 @@ import {
   vcsDiscard,
   vcsOpen,
   vcsRemote,
+  vcsRemoteCancel,
   vcsSquash,
   vcsStage,
   vcsStash,
@@ -73,6 +74,8 @@ interface VcsState {
   unstage: (connKey: string, root: string, paths: string[]) => Promise<void>;
   commit: (connKey: string, root: string, message: string) => Promise<boolean>;
   remoteOp: (connKey: string, root: string, op: "fetch" | "pull" | "push") => Promise<void>;
+  /** Cancel the in-flight fetch/push/update (kills the remote command). */
+  cancelRemoteOp: (connKey: string, root: string) => void;
   requestDiscard: (connKey: string, root: string, changes: VcsChange[]) => void;
   confirmDiscard: () => Promise<void>;
   cancelDiscard: () => void;
@@ -399,13 +402,23 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       const first = msg.split("\n").find((l) => l.trim()) ?? `${op} complete`;
       useAppStore.getState().pushNotice("info", `${op}: ${first}`);
     } catch (e) {
-      useAppStore.getState().pushNotice("error", `${op} failed: ${String(e)}`);
+      const msg = String(e);
+      if (msg.includes("cancelled")) {
+        useAppStore.getState().pushNotice("info", `${op} cancelled.`);
+      } else {
+        useAppStore.getState().pushNotice("error", `${op} failed: ${msg}`);
+      }
     } finally {
       set((s) => ({
         repos: mapRepo(s.repos, connKey, root, (r) => ({ ...r, remoteBusy: null })),
       }));
     }
     await get().refreshRepo(connKey, root);
+  },
+
+  cancelRemoteOp: (connKey, root) => {
+    const repo = get().repos.find((r) => r.connKey === connKey && r.root === root);
+    if (repo?.connId) void vcsRemoteCancel(repo.connId, repo.root).catch(() => {});
   },
 
   switchBranch: async (connKey, root, target) => {
@@ -487,7 +500,12 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       const first = msg.split("\n").find((l) => l.trim()) ?? "Updated.";
       useAppStore.getState().pushNotice("info", first);
     } catch (e) {
-      useAppStore.getState().pushNotice("error", `Update failed: ${String(e)}`);
+      const msg = String(e);
+      if (msg.includes("cancelled")) {
+        useAppStore.getState().pushNotice("info", "Update cancelled.");
+      } else {
+        useAppStore.getState().pushNotice("error", `Update failed: ${msg}`);
+      }
     } finally {
       set((s) => ({
         repos: mapRepo(s.repos, connKey, root, (r) => ({ ...r, remoteBusy: null })),

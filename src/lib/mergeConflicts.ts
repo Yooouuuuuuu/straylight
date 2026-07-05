@@ -87,6 +87,48 @@ export function acceptConflict(
   model.pushEditOperations([], [{ range, text }], () => null);
 }
 
+/** Resolve every git-style conflict in plain text to one side — used to build
+ *  the read-only "Current" / "Incoming" panes of the merge editor. Regions
+ *  without a `=======` (jj's own format) are left untouched. */
+export function resolveConflictsInText(
+  text: string,
+  choice: "current" | "incoming",
+): string {
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text.split(/\r?\n/);
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.startsWith("<<<<<<<")) {
+      let base = -1;
+      let sep = -1;
+      let end = -1;
+      for (let j = i + 1; j < lines.length; j += 1) {
+        const l = lines[j];
+        if (sep < 0 && base < 0 && l.startsWith("|||||||")) base = j;
+        else if (sep < 0 && l.startsWith("=======")) sep = j;
+        else if (l.startsWith(">>>>>>>")) {
+          end = j;
+          break;
+        }
+      }
+      if (sep >= 0 && end >= 0) {
+        if (choice === "current") {
+          out.push(...lines.slice(i + 1, base >= 0 ? base : sep));
+        } else {
+          out.push(...lines.slice(sep + 1, end));
+        }
+        i = end + 1;
+        continue;
+      }
+    }
+    out.push(line);
+    i += 1;
+  }
+  return out.join(eol);
+}
+
 const COMMAND_ID = "straylight.acceptConflict";
 let registered = false;
 

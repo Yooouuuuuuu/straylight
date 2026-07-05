@@ -2,8 +2,7 @@
  *  every explorer section and every tracked repo, and reload open **clean** file
  *  tabs from disk. Dirty tabs keep their edits (the save-conflict flow covers
  *  divergence); connections, terminals, and port forwards are never touched. */
-import { setTabContentInPlace } from "./activeEditor";
-import { fsReadFile } from "./ipc";
+import { reloadCleanTab } from "./fileWatch";
 import { useAppStore } from "../store/appStore";
 import { useVcsStore } from "../store/vcsStore";
 
@@ -22,21 +21,7 @@ export async function refreshApp(): Promise<void> {
     const candidates = app.tabs.filter(
       (t) => (!t.kind || t.kind === "file") && !t.dirty && !t.isBinary && !t.truncated,
     );
-    await Promise.all(
-      candidates.map(async (t) => {
-        try {
-          const file = await fsReadFile(t.connId, t.path);
-          const cur = useAppStore.getState().tabs.find((x) => x.id === t.id);
-          // Skip if closed or edited meanwhile, unreadable as text, or unchanged.
-          if (!cur || cur.dirty || file.isBinary) return;
-          if (file.modified === cur.modified && file.content === cur.content) return;
-          useAppStore.getState().reloadTabContent(t.id, file);
-          setTabContentInPlace(t.id, file.content);
-        } catch {
-          /* unreadable right now (deleted?) — leave the tab as-is */
-        }
-      }),
-    );
+    await Promise.all(candidates.map((t) => reloadCleanTab(t.id)));
     useAppStore.getState().pushNotice("info", "Refreshed.");
   } finally {
     running = false;

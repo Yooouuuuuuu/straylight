@@ -7,9 +7,9 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { useAppStore } from "../../store/appStore";
 import { useVcsStore, type TrackedRepo } from "../../store/vcsStore";
-import { colorForName } from "../../lib/connectionColor";
+import { colorForName, PALETTE, setColorOverride } from "../../lib/connectionColor";
 import { basename } from "../../lib/format";
-import { openDiff } from "../../lib/openDiff";
+import { openDiff, openMergeEditor } from "../../lib/openDiff";
 import { openFileByPath } from "../../lib/openFile";
 import { vcsBranches, type VcsBranch } from "../../lib/ipc";
 import { vcsClass, vcsLetter } from "../../lib/vcsDecorations";
@@ -134,6 +134,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   const unstage = useVcsStore((s) => s.unstage);
   const commit = useVcsStore((s) => s.commit);
   const remoteOp = useVcsStore((s) => s.remoteOp);
+  const cancelRemoteOp = useVcsStore((s) => s.cancelRemoteOp);
   const requestDiscard = useVcsStore((s) => s.requestDiscard);
   const amend = useVcsStore((s) => s.amend);
   const stash = useVcsStore((s) => s.stash);
@@ -148,6 +149,9 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   const [describeMode, setDescribeMode] = useState<"@" | "@-" | null>(null);
   const [branchOpen, setBranchOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [colorOpen, setColorOpen] = useState(false);
+  const bumpColors = useAppStore((s) => s.bumpColors);
+  useAppStore((s) => s.colorVersion); // re-render when an override changes
 
   const st = repo.status;
   const inactive = !repo.connId;
@@ -240,8 +244,42 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
     <div
       className="repo-card"
       style={{ borderColor: colorForName(repo.connKey) }}
-      title={`${repo.connKey} — ${repo.root}`}
+      title={`${repo.connKey} — ${repo.root} (right-click: connection color)`}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setColorOpen((o) => !o);
+      }}
     >
+      {colorOpen && (
+        <div className="color-menu">
+          <span className="color-menu__label">{repo.connKey}</span>
+          {PALETTE.map((c) => (
+            <button
+              key={c}
+              className="color-menu__swatch"
+              style={{ background: c }}
+              title={c}
+              onClick={() => {
+                setColorOverride(repo.connKey, c);
+                bumpColors();
+                setColorOpen(false);
+              }}
+            />
+          ))}
+          <button
+            className="color-menu__reset"
+            title="Back to the automatic color"
+            onClick={() => {
+              setColorOverride(repo.connKey, null);
+              bumpColors();
+              setColorOpen(false);
+            }}
+          >
+            Auto
+          </button>
+        </div>
+      )}
       <div className="repo-card__head">
         <span
           className={`repo-card__backend repo-card__backend--${repo.backend}`}
@@ -460,6 +498,21 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
 
       {repo.error && <div className="repo-card__error">{repo.error}</div>}
 
+      {repo.remoteBusy && (
+        <div className="repo-card__banner">
+          <span>
+            <span className="spinner spinner--sm" /> {repo.remoteBusy} running — an
+            auth prompt can hang here (no TTY).
+          </span>
+          <button
+            className="repo-card__group-act"
+            onClick={() => cancelRemoteOp(repo.connKey, repo.root)}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
       {commitBoxOpen && (
         <div className="repo-card__commit">
           <div className="repo-card__mode-switch">
@@ -573,6 +626,16 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
               >
                 <span className={`change-row__badge ${vcsClass(c.kind)}`}>!</span>
                 <span className="change-row__path">{c.path}</span>
+                <button
+                  className="change-row__act"
+                  title="Open in the merge editor"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void openMergeEditor(repo, c.path);
+                  }}
+                >
+                  ⚔
+                </button>
                 {isGit && (
                   <button
                     className="change-row__act"

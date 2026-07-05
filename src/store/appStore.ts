@@ -61,7 +61,7 @@ export interface EditorTab {
   dirty: boolean;
   cursor: CursorPosition;
   /** "diff" shows a Monaco diff; "log" shows a repo's commit history. Default "file". */
-  kind?: "file" | "diff" | "log";
+  kind?: "file" | "diff" | "log" | "merge" | "preview";
   /** The base (HEAD / jj `@-`) content, for a diff tab's old side. */
   diffBase?: string;
   /** Whether the file exists in the base (false = added/untracked). */
@@ -98,6 +98,8 @@ export interface TerminalSession {
   /** Shell command for a local profile (e.g. ["wsl.exe","-d","Ubuntu"]); null
    *  uses the session's default shell. Ignored for remote (login shell). */
   command: string[] | null;
+  /** Typed into the shell once it opens (e.g. `podman exec -it … /bin/sh`). */
+  initialInput?: string | null;
   epoch: number;
 }
 
@@ -215,6 +217,8 @@ interface AppState {
   portsOpen: boolean;
   /** A line to reveal once a file's editor model is ready (from search). */
   revealTarget: { connId: string; path: string; line: number } | null;
+  /** Bumped when a connection color override changes (re-render trigger). */
+  colorVersion: number;
   sidebarVisible: boolean;
   terminalVisible: boolean;
   /** User preference for which workspace a new terminal opens on. */
@@ -286,6 +290,7 @@ interface AppState {
   setSearchOpen: (open: boolean) => void;
   setPortsOpen: (open: boolean) => void;
   setRevealTarget: (t: { connId: string; path: string; line: number } | null) => void;
+  bumpColors: () => void;
   toggleSidebar: () => void;
   setSidebarVisible: (visible: boolean) => void;
   toggleTerminal: () => void;
@@ -302,9 +307,17 @@ interface AppState {
   /** Stamp a section's "last refreshed" time once its tree has actually loaded. */
   markRefreshed: (connId: string) => void;
 
-  openTerminal: (connId: string, label: string, command?: string[] | null) => void;
+  openTerminal: (
+    connId: string,
+    label: string,
+    command?: string[] | null,
+    initialInput?: string | null,
+  ) => void;
   closeTerminal: (id: string) => void;
   setActiveTerminal: (id: string) => void;
+  /** What the terminal panel body shows: the terminals, or the Containers tab. */
+  terminalView: "terminals" | "containers";
+  setTerminalView: (v: "terminals" | "containers") => void;
   cycleTerminal: (direction: 1 | -1) => void;
   /** Restart every terminal on a connection (its PTYs died — e.g. a reconnect). */
   restartConnTerminals: (connId: string) => void;
@@ -323,6 +336,22 @@ interface AppState {
     content: string;
     language: string;
     isBinary: boolean;
+  }) => void;
+  /** Open (or focus) a rendered Markdown preview for a file. */
+  openPreviewTab: (d: {
+    connId: string;
+    path: string;
+    name: string;
+    content: string;
+  }) => void;
+  /** Open (or focus) a 3-way merge editor for a conflicted file. */
+  openMergeTab: (d: {
+    connId: string;
+    path: string;
+    name: string;
+    content: string;
+    modified: number;
+    language: string;
   }) => void;
   /** Open (or focus) a repo's commit-history tab. */
   openLogTab: (d: {
@@ -417,6 +446,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   searchOpen: false,
   portsOpen: false,
   revealTarget: null,
+  colorVersion: 0,
+  terminalView: "terminals" as const,
   sidebarVisible: true,
   terminalVisible: true,
   newTerminalTarget: loadTermTarget(),
@@ -575,6 +606,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setSearchOpen: (searchOpen) => set({ searchOpen }),
   setPortsOpen: (portsOpen) => set({ portsOpen }),
   setRevealTarget: (revealTarget) => set({ revealTarget }),
+  bumpColors: () => set((s) => ({ colorVersion: s.colorVersion + 1 })),
   toggleSidebar: () => set((s) => ({ sidebarVisible: !s.sidebarVisible })),
   setSidebarVisible: (sidebarVisible) => set({ sidebarVisible }),
   toggleTerminal: () => set((s) => ({ terminalVisible: !s.terminalVisible })),
@@ -615,7 +647,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
             : {},
     ),
 
-  openTerminal: (connId, label, command = null) =>
+  openTerminal: (connId, label, command = null, initialInput = null) =>
     set((s) => {
       const id = `term-${(terminalCounter += 1)}`;
       // Keep titles unique per connection so two shells on the same workspace are
@@ -626,8 +658,19 @@ export const useAppStore = create<AppState>()((set, get) => ({
         n += 1;
         title = `${label} ${n}`;
       }
-      const term: TerminalSession = { id, connId, title, command, epoch: 0 };
-      return { terminals: [...s.terminals, term], activeTerminalId: id };
+      const term: TerminalSession = {
+        id,
+        connId,
+        title,
+        command,
+        initialInput,
+        epoch: 0,
+      };
+      return {
+        terminals: [...s.terminals, term],
+        activeTerminalId: id,
+        terminalView: "terminals" as const,
+      };
     }),
 
   closeTerminal: (id) =>
@@ -645,7 +688,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
       return { terminals, activeTerminalId };
     }),
 
-  setActiveTerminal: (activeTerminalId) => set({ activeTerminalId }),
+  setActiveTerminal: (activeTerminalId) =>
+    set({ activeTerminalId, terminalView: "terminals" }),
+
+  setTerminalView: (terminalView) => set({ terminalView }),
 
   cycleTerminal: (direction) =>
     set((s) => {
@@ -709,6 +755,54 @@ export const useAppStore = create<AppState>()((set, get) => ({
         kind: "diff",
         diffBase: d.base,
         diffBaseExists: d.baseExists,
+      };
+      return { tabs: [...s.tabs, tab], activeTabId: id };
+    }),
+
+  openPreviewTab: (d) =>
+    set((s) => {
+      const id = `preview::${d.connId}::${d.path}`;
+      if (s.tabs.some((t) => t.id === id)) return { activeTabId: id };
+      const tab: EditorTab = {
+        id,
+        connId: d.connId,
+        path: d.path,
+        name: d.name,
+        content: d.content,
+        language: "markdown",
+        isBinary: false,
+        encoding: "utf-8",
+        size: 0,
+        modified: 0,
+        truncated: false,
+        lineEnding: "LF",
+        dirty: false,
+        cursor: { line: 1, column: 1 },
+        kind: "preview",
+      };
+      return { tabs: [...s.tabs, tab], activeTabId: id };
+    }),
+
+  openMergeTab: (d) =>
+    set((s) => {
+      const id = `merge::${d.connId}::${d.path}`;
+      if (s.tabs.some((t) => t.id === id)) return { activeTabId: id };
+      const tab: EditorTab = {
+        id,
+        connId: d.connId,
+        path: d.path,
+        name: d.name,
+        content: d.content,
+        language: d.language,
+        isBinary: false,
+        encoding: "utf-8",
+        size: 0,
+        modified: d.modified,
+        truncated: false,
+        lineEnding: d.content.includes("\r\n") ? "CRLF" : "LF",
+        dirty: false,
+        cursor: { line: 1, column: 1 },
+        kind: "merge",
       };
       return { tabs: [...s.tabs, tab], activeTabId: id };
     }),

@@ -78,11 +78,18 @@ export function MonacoWrapper() {
         const model = models.get(id);
         if (!model) return; // never activated — the store's tab.content seeds it
         const active = editor.getModel() === model;
+        // Follow the tail: if the view was pinned to the bottom (log watching),
+        // keep it there after the reload; otherwise restore the old position.
+        const atBottom =
+          active &&
+          editor.getScrollTop() + editor.getLayoutInfo().height >=
+            editor.getScrollHeight() - 2 * 20;
         const viewState = active ? editor.saveViewState() : null;
         model.setValue(content);
         savedVersions.set(id, model.getAlternativeVersionId());
         recomputeDirty(id);
         if (active && viewState) editor.restoreViewState(viewState);
+        if (atBottom) editor.revealLine(model.getLineCount());
       },
     });
 
@@ -136,7 +143,8 @@ export function MonacoWrapper() {
 
     const tab = useAppStore.getState().tabs.find((t) => t.id === activeTabId);
     // Diff/log tabs render their own views; the code editor shows nothing.
-    if (!activeTabId || !tab || tab.isBinary || tab.kind === "diff" || tab.kind === "log") {
+    // Non-file kinds (diff / log / merge / preview) render their own views.
+    if (!activeTabId || !tab || tab.isBinary || (tab.kind && tab.kind !== "file")) {
       editor.setModel(null);
       prevActiveRef.current = null;
       return;

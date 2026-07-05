@@ -4,6 +4,7 @@
 //! a WSL distro (also reached over SSH — see [`wsl`]), or the local filesystem.
 //! File operations go through the transport-agnostic [`transport::FileTransport`].
 
+pub mod containers;
 pub mod exec;
 pub mod forward;
 pub mod ssh;
@@ -46,6 +47,14 @@ pub struct AppState {
     pub forwards: Mutex<HashMap<String, forward::ForwardEntry>>,
     /// Filesystem watchers on local repos, keyed by `connId::root`.
     pub repo_watchers: Mutex<HashMap<String, watch::RepoWatcher>>,
+    /// Filesystem watchers on open local files (tab auto-reload), keyed by
+    /// `connId::path`.
+    pub file_watchers: Mutex<HashMap<String, watch::RepoWatcher>>,
+    /// Probed absolute path of `jj` per SSH connection (None = not installed).
+    /// SSH exec shells are non-login, so jj in `~/.cargo/bin` is off the PATH.
+    pub jj_paths: Mutex<HashMap<String, Option<String>>>,
+    /// Cancel handles for in-flight remote VCS ops, keyed by `connId::root`.
+    pub vcs_ops: Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
 }
 
 impl AppState {
@@ -57,6 +66,9 @@ impl AppState {
             vcs_locks: Mutex::new(HashMap::new()),
             forwards: Mutex::new(HashMap::new()),
             repo_watchers: Mutex::new(HashMap::new()),
+            file_watchers: Mutex::new(HashMap::new()),
+            jj_paths: Mutex::new(HashMap::new()),
+            vcs_ops: Mutex::new(HashMap::new()),
         }
     }
 
@@ -103,7 +115,6 @@ pub fn run() {
             ssh::connection::ssh_connect,
             ssh::connection::ssh_disconnect,
             ssh::connection::ssh_reconnect,
-            ssh::connection::ssh_get_status,
             transport::local_connect,
             transport::list_drives,
             transport::fs_find,
@@ -132,6 +143,7 @@ pub fn run() {
             forward::port_forward_start,
             forward::port_forward_stop,
             forward::port_forward_list,
+            containers::container_list,
             vcs::vcs_open,
             vcs::vcs_status,
             vcs::vcs_file_base,
@@ -151,8 +163,11 @@ pub fn run() {
             vcs::vcs_update,
             vcs::vcs_describe,
             vcs::vcs_squash,
+            vcs::vcs_remote_cancel,
             watch::vcs_watch,
             watch::vcs_unwatch,
+            watch::file_watch,
+            watch::file_unwatch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Straylight application");

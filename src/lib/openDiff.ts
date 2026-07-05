@@ -57,6 +57,37 @@ export async function openDiff(repo: TrackedRepo, change: VcsChange): Promise<vo
   }
 }
 
+/** Open the 3-way merge editor for a conflicted file. */
+export async function openMergeEditor(
+  repo: TrackedRepo,
+  relPath: string,
+): Promise<void> {
+  if (!repo.connId) return;
+  const store = useAppStore.getState();
+  const root = repo.root.replace(/\\/g, "/").replace(/\/+$/, "");
+  const path = `${root}/${relPath}`;
+  store.setBusyPath(path);
+  try {
+    const file = await fsReadFile(repo.connId, path);
+    if (file.isBinary) {
+      store.pushNotice("warn", "Binary file — resolve it outside the merge editor.");
+      return;
+    }
+    store.openMergeTab({
+      connId: repo.connId,
+      path,
+      name: basename(relPath),
+      content: file.content,
+      modified: file.modified,
+      language: languageForFile(basename(relPath)),
+    });
+  } catch (e) {
+    store.pushNotice("error", `Couldn't open merge editor: ${String(e)}`);
+  } finally {
+    store.setBusyPath(null);
+  }
+}
+
 /** Open a diff for a file *as changed by a specific commit* (commit vs parent). */
 export async function openCommitDiff(
   conn: { connId: string; root: string; backend: string },

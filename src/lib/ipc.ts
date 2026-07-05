@@ -122,9 +122,6 @@ export function sshReconnect(connId: string): Promise<void> {
   return invoke("ssh_reconnect", { connId });
 }
 
-export function sshGetStatus(connId: string): Promise<ConnectionStatus> {
-  return invoke("ssh_get_status", { connId });
-}
 
 // ---------------------------------------------------------------------------
 // Filesystem (transport-agnostic: SFTP for SSH sessions, std::fs for local)
@@ -480,6 +477,27 @@ export function onVcsFsChange(
   return listen<VcsFsChange>("vcs-fs-change", (event) => handler(event.payload));
 }
 
+/** Watch one **local** open file for external changes (tab auto-reload). */
+export function fileWatch(connId: string, path: string): Promise<void> {
+  return invoke("file_watch", { connId, path });
+}
+
+export function fileUnwatch(connId: string, path: string): Promise<void> {
+  return invoke("file_unwatch", { connId, path });
+}
+
+/** Debounced external change to a watched open file. */
+export interface FileFsChange {
+  connId: string;
+  path: string;
+}
+
+export function onFileFsChange(
+  handler: (change: FileFsChange) => void,
+): Promise<UnlistenFn> {
+  return listen<FileFsChange>("file-fs-change", (event) => handler(event.payload));
+}
+
 /** A branch (git) or bookmark (jj). */
 export interface VcsBranch {
   name: string;
@@ -550,6 +568,30 @@ export function vcsDescribe(
 /** jj: fold working-copy changes into the last commit (keeps its message). */
 export function vcsSquash(connId: string, root: string): Promise<void> {
   return invoke("vcs_squash", { connId, root });
+}
+
+/** Cancel the repo's in-flight remote op (fetch / push / update), if any. */
+export function vcsRemoteCancel(connId: string, root: string): Promise<void> {
+  return invoke("vcs_remote_cancel", { connId, root });
+}
+
+// ---------------------------------------------------------------------------
+// Containers
+// ---------------------------------------------------------------------------
+
+/** A running container on some connected host. */
+export interface ContainerInfo {
+  id: string;
+  name: string;
+  image: string;
+  status: string;
+  ports: string;
+  engine: string;
+}
+
+/** Running containers on the host (podman preferred, else docker; [] if none). */
+export function containerList(connId: string): Promise<ContainerInfo[]> {
+  return invoke("container_list", { connId });
 }
 
 // ---------------------------------------------------------------------------

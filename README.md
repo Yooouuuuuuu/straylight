@@ -54,12 +54,14 @@ relaunch.
   Control panel: **live status** (local repos are file-watched; remote/WSL refresh
   on window focus) with **tree decorations**, side-by-side **diffs**, **stage /
   commit / amend** (jj: describe + commit, fix-last-message, squash), a **live
-  commit history** above the explorer (click a commit to browse its files),
-  **branch/bookmark switching**, **stash** (git), **discard**, marker-based
-  **conflict resolution** (Accept Current / Incoming / Both), and **fetch / update
-  / push** — fetch is always safe; anything that mutates the tree or publishes
-  asks first. The VCS binary runs *on the host that owns the repo* — no local
-  clone — so commits use the host's real identity, config, and hooks. See
+  multi-lane commit graph** above the explorer (all local branches; click a
+  commit to browse its files), **branch/bookmark switching**, **stash** (git),
+  **discard**, **conflict resolution** — inline Accept actions or a full **3-way
+  merge editor** — and **fetch / update / push** with a **Cancel** for hung auth;
+  fetch is always safe, anything that mutates the tree or publishes asks first.
+  The VCS binary runs *on the host that owns the repo* — no local clone — so
+  commits use the host's real identity, config, and hooks (jj is auto-located
+  even when it's only in `~/.cargo/bin` on the remote). See
   [docs/version-control.md](docs/version-control.md).
 - **Quick-open & search** — `Ctrl+P` fuzzy-opens a file by name; `Ctrl+Shift+F`
   searches file contents (grouped by file) and jumps to the line. Both start with
@@ -69,8 +71,13 @@ relaunch.
   the SSH server, over a tunnel on the existing connection.
 - **Editing** — a tabbed Monaco editor; edit and **save** (`Ctrl+S`) local *and*
   remote files, with per-tab dirty state and save-conflict detection. Binary files
-  show an info card; very large files open in a lightweight mode.
+  show an info card; very large files open in a lightweight mode. Clean tabs
+  **auto-reload** when the file changes on disk (watch a growing log — the view
+  follows the tail), and `.md` files get a rendered **Markdown preview**
+  (`Ctrl+Shift+V`).
 - **Terminals** — multiple, with a shell picker; see [Terminal](#terminal) below.
+  A **▣ Containers** tab lists running containers (podman/docker) on every
+  connected host — click one to open a shell inside it.
 - **Status bar** — connection state, file path, git branch, language, encoding, line
   ending, and cursor position, plus Source Control / Ports / terminal toggles.
 
@@ -163,6 +170,7 @@ If the fonts are missing the UI falls back to the system monospace stack.
 | <kbd>Ctrl</kbd>+<kbd>P</kbd> | Quick-open a file by name (fuzzy) |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> | Search across files |
 | <kbd>F5</kbd> / <kbd>Ctrl</kbd>+<kbd>R</kbd> | Refresh everything (explorer, repos, open files — dirty tabs untouched) |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> | Markdown preview for the current file |
 | <kbd>Ctrl</kbd>+<kbd>W</kbd> | Close the current tab |
 | <kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd> | Next / previous tab |
 | <kbd>Ctrl</kbd>+<kbd>`</kbd> | Toggle the terminal panel |

@@ -9,6 +9,7 @@ export type ShortcutAction =
   | "quickOpen"
   | "searchInFiles"
   | "appRefresh"
+  | "markdownPreview"
   | "nextTab"
   | "prevTab"
   | "renameSelected"
@@ -55,6 +56,14 @@ export const SHORTCUTS: Shortcut[] = [
     shift: true,
     description: "Search across files",
     label: "Ctrl+Shift+F",
+  },
+  {
+    action: "markdownPreview",
+    key: "v",
+    ctrl: true,
+    shift: true,
+    description: "Open the Markdown preview for the current file",
+    label: "Ctrl+Shift+V",
   },
   // Replaces the WebView page reload: refresh explorer + repos + open files.
   {
@@ -191,10 +200,6 @@ const TERMINAL_ACTIONS: ShortcutAction[] = [
   "nextTerminal",
   "prevTerminal",
 ];
-
-export function isTerminalAction(action: ShortcutAction): boolean {
-  return TERMINAL_ACTIONS.includes(action);
-}
 
 export function isPassthroughShortcut(event: KeyboardEvent): boolean {
   const action = matchShortcut(event);
