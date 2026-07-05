@@ -163,12 +163,16 @@ export function matchShortcut(event: KeyboardEvent): ShortcutAction | null {
 /** Actions that belong to the terminal. These are the *only* shortcuts that act
  *  while a terminal is focused — everything else is left to the shell, so
  *  Ctrl+B, Ctrl+R, Ctrl+W, Ctrl+E, etc. keep their readline/tmux meaning. xterm
- *  is told to ignore these so they reach the window handler. */
+ *  is told to ignore these so they reach the window handler. Ctrl+±/0 are here
+ *  because in a terminal they resize the terminal font (not the app zoom). */
 const TERMINAL_ACTIONS: ShortcutAction[] = [
   "toggleTerminal",
   "newTerminal",
   "nextTerminal",
   "prevTerminal",
+  "zoomIn",
+  "zoomOut",
+  "zoomReset",
 ];
 
 export function isPassthroughShortcut(event: KeyboardEvent): boolean {

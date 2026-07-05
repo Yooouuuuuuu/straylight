@@ -9,8 +9,8 @@ backend) and React (frontend). The goal is the VS Code Remote-SSH experience at
 **edit + save** files in a tabbed Monaco editor (local *and* remote), manage files
 (cut/copy/paste, transfers between machines, full keyboard navigation), use
 **source control for git *and* Jujutsu (jj)**, **quick-open** and **search across
-files**, **forward ports**, and run **multiple terminals** — all in one
-Dracula-themed window that can show local folders, a WSL distro, and one remote at
+files**, **forward ports**, and run **multiple terminals** — all in one themed
+window that can show local folders, a WSL distro, and one remote at
 the same time. Dropped connections auto-reconnect, and your workspace is restored on
 relaunch.
 
@@ -21,8 +21,9 @@ relaunch.
 
 ## What works
 
-- **Dracula theme everywhere** — embedded Fira Code with ligatures, themed Monaco
-  editor and xterm.js terminal.
+- **Themed everywhere** — the signature Straylight theme by default (plus
+  Dracula, Nord, Solarized Light presets), embedded Fira Code with ligatures,
+  themed Monaco editor and xterm.js terminal.
 - **Local, WSL, and remote in one window** — a multi-root sidebar with pinned
   local folders, your WSL distros, and one attached SSH host, all browsable at
   once. Each section has its own toolbar (hidden-files, New File/Folder, refresh,
@@ -70,8 +71,9 @@ relaunch.
 - **Command palette & settings** — `Ctrl+Shift+P` lists every command with its
   keybinding. One `settings.json` (app config dir) holds zoom, **keybinding
   overrides** (by command id), and the full **color sections** — the file *is*
-  the theme; presets (Dracula / Nord / Catppuccin Mocha) just fill them in, and
-  every color is individually editable, applied live (UI, editor, terminals).
+  the theme; presets (Straylight ×3 / Dracula / Nord / Solarized Light) just
+  fill them in, and every color is individually editable, applied live (UI,
+  editor, and per-shell-kind terminal sections).
   The stability promises are written down in [docs/stability.md](docs/stability.md).
 - **Port forwarding** — forward a local `127.0.0.1` port to a service reachable from
   the SSH server, over a tunnel on the existing connection.
@@ -282,7 +284,7 @@ straylight/
 │   ├── hooks/              # useSSH, useTerminal, useKeyboard
 │   ├── lib/                # ipc, monaco, language, openDiff, vcsDecorations, …
 │   ├── store/              # appStore.ts + vcsStore.ts (Zustand)
-│   └── theme/, styles/     # Dracula variables, tokens, fonts, component CSS
+│   └── theme/, styles/     # theme variables, tokens, fonts, component CSS
 ├── src-tauri/              # Rust backend
 │   ├── src/ssh/            # connection, config, sftp, pty
 │   ├── src/exec.rs         # host command-runner (shared)

@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { clipboardShortcut } from "../../lib/fileOps";
 import { basename, dirname } from "../../lib/format";
+import { sshConfigPath } from "../../lib/ipc";
+import { openFileByPath } from "../../lib/openFile";
 import {
   handleExplorerKey,
   registerExplorerFocus,
@@ -18,6 +20,7 @@ import { RelativeTime } from "../RelativeTime";
 import { RootTree } from "../filetree/RootTree";
 import { TransferPanel, type TransferConn } from "../transfer/TransferPanel";
 import {
+  IconExternal,
   IconEye,
   IconEyeOff,
   IconFilePlus,
@@ -255,7 +258,6 @@ export function Sidebar() {
               connId={localConnId}
               rootPath={path}
               label={basename(path) || path}
-              color="#8be9fd"
               removable
               defaultCollapsed
               showHidden={showHiddenLocal}
@@ -271,9 +273,30 @@ export function Sidebar() {
           </div>
         )}
 
+        {/* WSL distros (second section — Local, WSL, then Remote) */}
+        <WslSection />
+
         {/* Remote root */}
         <div className="sidebar__section-head sidebar__section-head--remote">
           <span className="sidebar__section-label">Remote</span>
+          <button
+            className="icon-btn"
+            title="Edit ~/.ssh/config in the editor"
+            onClick={() =>
+              void (async () => {
+                try {
+                  const path = await sshConfigPath();
+                  if (localConnId) await openFileByPath(localConnId, path, "config");
+                } catch (error) {
+                  useAppStore
+                    .getState()
+                    .pushNotice("error", `Couldn't open SSH config: ${String(error)}`);
+                }
+              })()
+            }
+          >
+            <IconExternal size={13} />
+          </button>
           {remote && (
             <>
               <button
@@ -340,13 +363,12 @@ export function Sidebar() {
                 connId={remote.connId}
                 rootPath={path}
                 label={basename(path) || path}
-                color={remote.color}
                 removable
                 defaultCollapsed
                 showHidden={showHiddenRemote}
                 refreshToken={refreshTokenRemote}
                 rootId={`${remote.connId}::${path}`}
-                order={1000 + index}
+                order={2000 + index}
                 onRemove={() => removeRemotePin(path)}
               />
             ))
@@ -358,9 +380,6 @@ export function Sidebar() {
         ) : (
           <ConnectionManager />
         )}
-
-        {/* WSL distros (their own slot, alongside Local and Remote) */}
-        <WslSection />
       </div>
     </div>
     {transfer && (

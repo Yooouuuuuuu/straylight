@@ -22,7 +22,12 @@ import {
   registerTerminalFocus,
   unregisterTerminalFocus,
 } from "../lib/terminalFocus";
-import { currentTermTheme, registerTerminal, unregisterTerminal } from "../lib/themes";
+import {
+  currentTermFont,
+  currentTermTheme,
+  registerTerminal,
+  unregisterTerminal,
+} from "../lib/themes";
 import { useAppStore } from "../store/appStore";
 
 export function useTerminal(
@@ -51,21 +56,29 @@ export function useTerminal(
     // hardcoded below 21376 to force the always-safe heuristic on both Win10
     // and Win11. FUTURE WORK: detect the real Windows build for native reflow
     // on Win11 (and verify behavior on Linux), once the feature set settles.
+    const appState = useAppStore.getState();
     const isWindowsConpty =
-      navigator.userAgent.includes("Windows") &&
-      connId === useAppStore.getState().localConnId;
+      navigator.userAgent.includes("Windows") && connId === appState.localConnId;
     const windowsPty = isWindowsConpty
       ? ({ backend: "conpty", buildNumber: 19045 } as const)
       : undefined;
+    // Each shell kind has its own settings section (terminalLocal /
+    // terminalWsl / terminalRemote).
+    const scope =
+      connId === appState.localConnId
+        ? "local"
+        : connId === appState.wsl?.connId
+          ? "wsl"
+          : "remote";
+    const font = currentTermFont();
 
     const term = new Terminal({
-      fontFamily:
-        "'Fira Code', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace",
-      fontSize: 13,
+      fontFamily: font.family,
+      fontSize: font.size,
       lineHeight: 1.1,
       cursorBlink: true,
       allowProposedApi: true,
-      theme: currentTermTheme(),
+      theme: currentTermTheme(scope),
       scrollback: 5000,
       windowsPty,
     });
@@ -74,7 +87,8 @@ export function useTerminal(
     term.loadAddon(fit);
     term.open(container);
     termRef.current = term;
-    registerTerminal(term); // re-themed live when settings.json changes
+    // Re-themed (and refit on font changes) live when settings.json changes.
+    registerTerminal(term, { scope, refit: () => fit.fit() });
     fitRef.current = fit;
     if (id) registerTerminalFocus(id, () => term.focus());
 

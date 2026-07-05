@@ -226,8 +226,6 @@ interface AppState {
   settingsIssues: string[];
   /** A line to reveal once a file's editor model is ready (from search). */
   revealTarget: { connId: string; path: string; line: number } | null;
-  /** Bumped when a connection color override changes (re-render trigger). */
-  colorVersion: number;
   sidebarVisible: boolean;
   terminalVisible: boolean;
   /** User preference for which workspace a new terminal opens on. */
@@ -301,7 +299,6 @@ interface AppState {
   setPaletteOpen: (open: boolean) => void;
   setSettingsIssues: (issues: string[]) => void;
   setRevealTarget: (t: { connId: string; path: string; line: number } | null) => void;
-  bumpColors: () => void;
   toggleSidebar: () => void;
   setSidebarVisible: (visible: boolean) => void;
   toggleTerminal: () => void;
@@ -467,7 +464,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   paletteOpen: false,
   settingsIssues: [],
   revealTarget: null,
-  colorVersion: 0,
   terminalView: "terminals" as const,
   sidebarVisible: true,
   terminalVisible: true,
@@ -629,7 +625,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   setSettingsIssues: (settingsIssues) => set({ settingsIssues }),
   setRevealTarget: (revealTarget) => set({ revealTarget }),
-  bumpColors: () => set((s) => ({ colorVersion: s.colorVersion + 1 })),
   toggleSidebar: () => set((s) => ({ sidebarVisible: !s.sidebarVisible })),
   setSidebarVisible: (sidebarVisible) => set({ sidebarVisible }),
   toggleTerminal: () => set((s) => ({ terminalVisible: !s.terminalVisible })),

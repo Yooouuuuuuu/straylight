@@ -2262,7 +2262,7 @@ select option {
 }
 
 .file-node__name--dir {
-  color: var(--fg-primary);
+  color: var(--tree-dir);
 }
 
 .file-node__symlink {
@@ -2286,23 +2286,39 @@ select option {
 
 /* ------------------------------------------------------- Sidebar roots */
 
+/* Section bars carry the theme's main color; --section-fg is the contrasting
+ * text/icon color each theme picks for on-accent readability. */
 .sidebar__section-head {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-4) var(--space-4) var(--space-2) var(--space-5);
+  padding: var(--space-2) var(--space-4) var(--space-2) var(--space-5);
   font-size: var(--font-size-xs);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--fg-secondary);
+  background: linear-gradient(
+    90deg,
+    var(--accent),
+    color-mix(in srgb, var(--accent) 45%, var(--bg-secondary)) 70%,
+    color-mix(in srgb, var(--accent) 20%, var(--bg-secondary))
+  );
+  color: var(--section-fg);
 }
 
 .sidebar__section-head .icon-btn {
   flex: 0 0 auto;
+  color: var(--section-fg);
+  opacity: 0.85;
+}
+
+.sidebar__section-head .icon-btn:hover {
+  opacity: 1;
 }
 
 .sidebar__section-label {
   flex: 0 0 auto;
+  color: var(--section-fg);
+  font-weight: 700;
 }
 
 /* "5s ago" — plain (not uppercased) and allowed to shrink/ellipsis first. */
@@ -2325,8 +2341,6 @@ select option {
 
 .sidebar__section-head--remote {
   margin-top: var(--space-4);
-  border-top: 1px solid var(--border);
-  padding-top: var(--space-5);
 }
 
 .root-tree {
@@ -2377,6 +2391,7 @@ select option {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--tree-root);
 }
 
 .root-tree__remove {

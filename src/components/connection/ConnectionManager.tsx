@@ -4,11 +4,10 @@
 import { useEffect, useState } from "react";
 
 import { colorForName } from "../../lib/connectionColor";
-import { sshConfigPath, sshListConfigHosts, type SshHostEntry } from "../../lib/ipc";
-import { openFileByPath } from "../../lib/openFile";
+import { sshListConfigHosts, type SshHostEntry } from "../../lib/ipc";
 import { useSSH } from "../../hooks/useSSH";
 import { useAppStore } from "../../store/appStore";
-import { IconExternal, IconPlug } from "../icons";
+import { IconPlug } from "../icons";
 
 function hostDetail(host: SshHostEntry): string {
   const target = host.hostName ?? host.name;
@@ -22,7 +21,6 @@ export function ConnectionManager() {
   const [hosts, setHosts] = useState<SshHostEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const openDialog = useAppStore((s) => s.openDialog);
-  const localConnId = useAppStore((s) => s.localConnId);
   const { connect } = useSSH();
 
   useEffect(() => {
@@ -77,21 +75,6 @@ export function ConnectionManager() {
     });
   }
 
-  async function editConfig() {
-    try {
-      const path = await sshConfigPath();
-      if (localConnId) {
-        await openFileByPath(localConnId, path, "config");
-      } else {
-        useAppStore.getState().pushNotice("warn", "Local session is still starting.");
-      }
-    } catch (error) {
-      useAppStore
-        .getState()
-        .pushNotice("error", `Couldn't open SSH config: ${String(error)}`);
-    }
-  }
-
   return (
     <div className="conn-list">
       <button
@@ -100,25 +83,6 @@ export function ConnectionManager() {
       >
         <IconPlug /> Connect to a server
       </button>
-
-      <div
-        className="conn-group-label"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
-        <span>From ~/.ssh/config</span>
-        <button
-          className="btn btn--ghost"
-          style={{ padding: "2px 8px" }}
-          title="Edit ~/.ssh/config in the editor"
-          onClick={() => void editConfig()}
-        >
-          <IconExternal size={13} /> Edit
-        </button>
-      </div>
 
       {loading ? (
         <div className="conn-empty">

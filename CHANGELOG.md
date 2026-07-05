@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   an inline field (e.g. on the "Connect to a server" button).
 - **Auto-refresh** (optional): a filesystem watch for the local tree; SSH would
   poll (opt-in).
-- **Version control, later:** per-hunk staging, blame, ignored-file dimming.
+- **Version control, later:** per-hunk staging, blame.
 - **Auto-update** — deferred until installers are distributed (needs signing keys
   + hosted releases; the app currently runs from source).
 - **Containers, later:** file browsing inside containers, logs, start/stop.
@@ -26,6 +26,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 - Terminal tab reordering.
+
+## [0.8.10] - 2026-07-06
+
+### Added
+
+- **Straylight is the built-in default theme.** The signature palette
+  (`#AF011C` accent) is now what a fresh install boots with; the base CSS is
+  `theme/straylight.css` and all built-in fallbacks (UI, editor, terminals,
+  Monaco pre-settings theme) use it. "Theme: Straylight (default)" is the
+  reset preset; Dracula stays as a normal explicit preset.
+- **Solarized Light preset** — the classic light theme, with a light Monaco
+  base picked by background luminance and file-icon tints that now reference
+  theme palette slots (so light themes stay readable).
+- **Per-shell-kind terminal theming.** settings.json now has one full xterm
+  section per shell kind — `terminalLocal` (pwsh), `terminalWsl`, and
+  `terminalRemote` (SSH) — with no inheritance between them. Presets write all
+  three: local = WSL, remote darker (the Dracula preset ships the classic
+  black Campbell console for SSH).
+- **`terminalFont`** (`{ "family", "size" }`) — terminal font settings, applied
+  live with a refit; deliberately never touched by theme presets.
+- **Ctrl+= / Ctrl+- / Ctrl+0 in a terminal** now step/reset the terminal font
+  size (persisted); outside a terminal they remain whole-app zoom.
+- **Per-repo colors.** Tracked repos default to green; right-click a repo card
+  in Source Control to pick its color. The card frame, explorer root label,
+  repo-root folder, and ⑂ indicator all follow it.
+- **Themable folder icons** — new `icon-folder` / `icon-folder-open` color
+  keys (per-preset values included).
+
+### Changed
+
+- Explorer sections are ordered Local → WSL → Remote; all hosts share the
+  theme accent (per-connection hashing removed); section bars use an accent
+  gradient with the new `section-fg` contrast slot; pinned names and folder
+  names are plain foreground (new `tree-root` / `tree-dir` keys), with repo
+  colors reserved for tracked roots.
+- "Edit ~/.ssh/config" moved from the connection panel to the Remote section
+  header.
+- Catppuccin Mocha preset removed (final theme roster to be decided before
+  1.0.0).
+
 ## [0.8.9] - 2026-07-05
 
 The 1.0 contracts: one settings file, a command palette, themes, zoom, and

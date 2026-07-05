@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { formatSize, formatTimestamp } from "../../lib/format";
 import type { FileEntry } from "../../lib/ipc";
-import { useVcsStore } from "../../store/vcsStore";
+import { repoColorForPath, useVcsStore } from "../../store/vcsStore";
 import { vcsClass, vcsLetter } from "../../lib/vcsDecorations";
 import { IconChevron } from "../icons";
 import { FileIcon } from "./FileIcons";
@@ -73,6 +73,7 @@ export function RenameInput({
 }
 
 export function FileNode({
+  connId,
   entry,
   depth,
   expanded,
@@ -86,6 +87,7 @@ export function FileNode({
   onCommitRename,
   onCancelRename,
 }: {
+  connId: string;
   entry: FileEntry;
   depth: number;
   expanded: boolean;
@@ -117,6 +119,12 @@ export function FileNode({
   });
   const vcsDirect =
     vcsKind && vcsKind !== "child" && vcsKind !== "ignored" ? vcsKind : null;
+
+  // A folder that IS a tracked repo's root shows the repo's color (default
+  // green) — real change letters (M/A/…) still win over it.
+  const trackedColor = useVcsStore((s) =>
+    entry.isDir ? repoColorForPath(s.repos, connId, entry.path) : null,
+  );
 
   // Keep the selected row visible when the selection moves by keyboard.
   useEffect(() => {
@@ -174,6 +182,7 @@ export function FileNode({
             className={`file-node__name ${entry.isDir ? "file-node__name--dir" : ""} ${
               vcsKind ? vcsClass(vcsKind) : ""
             }`}
+            style={!vcsDirect && trackedColor ? { color: trackedColor } : undefined}
           >
             {entry.name}
           </span>

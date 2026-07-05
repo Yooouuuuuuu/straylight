@@ -51,6 +51,35 @@ export interface TrackedRepo {
   uiCommitOpen?: boolean;
   /** A stash pop hit conflicts — offer "drop stash" once resolved (transient). */
   stashConflict?: boolean;
+  /** Repo color (card frame + its root folder in the explorer). Usually a
+   *  theme slot like "var(--purple)"; null/absent = the tracked default. */
+  color?: string | null;
+}
+
+/** Default color for tracked repos (green — themed per palette). */
+export const REPO_COLOR_DEFAULT = "var(--green)";
+
+/** The display color for a tracked repo. */
+export function repoColor(repo: TrackedRepo): string {
+  return repo.color ?? REPO_COLOR_DEFAULT;
+}
+
+/** Color for a tree path: the repo's color when the path IS a tracked repo's
+ *  root (or a pin inside one, for root labels) — else null. */
+export function repoColorForPath(
+  repos: TrackedRepo[],
+  connId: string,
+  path: string,
+  containment: "exact" | "within" = "exact",
+): string | null {
+  const p = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  for (const r of repos) {
+    if (r.connId !== connId) continue;
+    const root = r.root.replace(/\\/g, "/").replace(/\/+$/, "");
+    if (p === root) return repoColor(r);
+    if (containment === "within" && p.startsWith(`${root}/`)) return repoColor(r);
+  }
+  return null;
 }
 
 interface VcsState {
@@ -93,6 +122,8 @@ interface VcsState {
   /** jj: fold working-copy changes into the last commit. */
   squash: (connKey: string, root: string) => Promise<void>;
   toggleCommitOpen: (connKey: string, root: string) => void;
+  /** Set (or clear, with null) a repo's color — card frame + explorer root. */
+  setRepoColor: (connKey: string, root: string, color: string | null) => void;
   askConfirm: (title: string, body: string, run: () => void) => void;
   clearConfirm: () => void;
   /** Re-resolve each repo's live connId from the active connections. */
@@ -150,6 +181,7 @@ function persist(repos: TrackedRepo[]): void {
           status: r.status,
           lastUpdated: r.lastUpdated,
           uiCommitOpen: r.uiCommitOpen,
+          color: r.color ?? null,
         })),
       ),
     );
@@ -174,6 +206,7 @@ function load(): TrackedRepo[] {
       error: null,
       lastUpdated: d.lastUpdated ?? null,
       uiCommitOpen: !!d.uiCommitOpen,
+      color: typeof d.color === "string" ? d.color : null,
     }));
   } catch {
     return [];
@@ -585,6 +618,13 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
         ...r,
         uiCommitOpen: !r.uiCommitOpen,
       }));
+      persist(repos);
+      return { repos };
+    }),
+
+  setRepoColor: (connKey, root, color) =>
+    set((s) => {
+      const repos = mapRepo(s.repos, connKey, root, (r) => ({ ...r, color }));
       persist(repos);
       return { repos };
     }),

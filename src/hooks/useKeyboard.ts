@@ -7,6 +7,7 @@ import { refreshApp } from "../lib/appRefresh";
 import { allCommands } from "../lib/commands";
 import { saveActiveFile } from "../lib/saveFile";
 import { matchShortcut } from "../lib/shortcuts";
+import { adjustTerminalFontSize } from "../lib/themes";
 import { focusTerminal } from "../lib/terminalFocus";
 import { pickTerminalTarget } from "../lib/terminalTarget";
 import { focusExplorer } from "../lib/treeNav";
@@ -71,8 +72,13 @@ export function useKeyboard() {
         case "zoomIn":
         case "zoomOut":
         case "zoomReset": {
-          // Ctrl+- can collide with readline undo — zoom stays out of terminals.
-          if (!inTerminal) {
+          // In a terminal, Ctrl+±/0 sizes the terminal font (persisted to
+          // settings.json "terminalFont"); elsewhere it's whole-app zoom.
+          if (inTerminal) {
+            void adjustTerminalFontSize(
+              action === "zoomIn" ? 1 : action === "zoomOut" ? -1 : null,
+            );
+          } else {
             const id =
               action === "zoomIn"
                 ? "view.zoomIn"
@@ -80,8 +86,8 @@ export function useKeyboard() {
                   ? "view.zoomOut"
                   : "view.zoomReset";
             void allCommands().find((c) => c.id === id)?.run();
-            event.preventDefault();
           }
+          event.preventDefault();
           break;
         }
         case "copyPathSelected":

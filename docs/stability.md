@@ -14,10 +14,16 @@ anything below are breaking changes.
   - `zoom` (number 0.5–3)
   - `keybindings` (command id → `"ctrl+shift+f"`-style spec; single-stroke, no
     chords)
-  - `colors` / `editor` / `terminal` — the full color token sections. The key
-    names are stable; they mirror the CSS custom properties, Monaco token
-    groups, and xterm's ITheme names. Missing keys fall back to the built-in
-    (Dracula) defaults; theme presets just overwrite these sections.
+  - `colors` / `editor` — the full UI and Monaco color token sections. The key
+    names are stable; they mirror the CSS custom properties and Monaco token
+    groups. Missing keys fall back to the built-in (Straylight) defaults;
+    theme presets just overwrite these sections.
+  - `terminalLocal` / `terminalWsl` / `terminalRemote` — one full xterm ITheme
+    section per shell kind (pwsh / WSL / SSH), no inheritance between them.
+    Missing sections/keys fall back to the Straylight defaults; presets write
+    all three (local = WSL, remote darker).
+  - `terminalFont` (`{ "family": "Fira Code", "size": 13 }`, size 6–40) —
+    user preference, deliberately untouched by theme presets.
   - Problems never fail silently: parse errors and invalid entries surface as a
     toast and a warning row in the command palette.
 - **VCS semantics.** Straylight runs **your real `git` / `jj` on the host that

@@ -1,0 +1,47 @@
+/* Straylight palette (the built-in default theme) as CSS custom properties.
+   Every color in the app references one of these variables; settings.json
+   `colors` keys override them 1:1 (minus the `--`). */
+
+:root {
+  /* Core */
+  --bg-primary: #151013; /* Background */
+  --bg-secondary: #0f0b0d; /* Darker background */
+  --bg-tertiary: #241a1e; /* Current line / hover */
+  --bg-selected: #3a2228; /* Selection */
+  --fg-primary: #f0e7e9; /* Foreground */
+  --fg-secondary: #8a6f76; /* Muted text */
+
+  /* Accent colors */
+  --cyan: #ff7a9c;
+  --green: #5ce626;
+  --orange: #ff6a3d;
+  --pink: #ff00ff;
+  --purple: #e0446a;
+  --red: #f30100;
+  --yellow: #ffb454;
+
+  /* Explorer content (root/pinned names, folder names, folder icons) */
+  --tree-root: #f0e7e9;
+  --tree-dir: #f0e7e9;
+  --icon-folder: #e0446a;
+  --icon-folder-open: #ff7a9c;
+  /* Text/icons on the accent-colored section bars */
+  --section-fg: #f5e6e8;
+
+  /* Semantic mapping */
+  --border: #3a2228;
+  --border-focus: #af011c;
+  --scrollbar: #3a2228;
+  --scrollbar-hover: #5a3038;
+  --success: #5ce626;
+  --warning: #ffb454;
+  --error: #f30100;
+  --info: #ff7a9c;
+  --accent: #af011c;
+
+  /* Typography */
+  --font-code: "Fira Code", "Cascadia Code", "JetBrains Mono", "SF Mono",
+    Consolas, "Liberation Mono", Menlo, monospace;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+}

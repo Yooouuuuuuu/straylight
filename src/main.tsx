@@ -1,6 +1,6 @@
 import ReactDOM from "react-dom/client";
 
-import "./theme/dracula.css";
+import "./theme/straylight.css";
 import "./theme/tokens.css";
 import "./theme/fonts.css";
 import "./styles/global.css";

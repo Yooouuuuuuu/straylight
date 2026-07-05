@@ -6,8 +6,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import { useAppStore } from "../../store/appStore";
-import { useVcsStore, type TrackedRepo } from "../../store/vcsStore";
-import { colorForName, PALETTE, setColorOverride } from "../../lib/connectionColor";
+import { repoColor, useVcsStore, type TrackedRepo } from "../../store/vcsStore";
+import { PALETTE, paletteName } from "../../lib/connectionColor";
 import { basename } from "../../lib/format";
 import { openDiff, openMergeEditor } from "../../lib/openDiff";
 import { openFileByPath } from "../../lib/openFile";
@@ -150,8 +150,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   const [branchOpen, setBranchOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
-  const bumpColors = useAppStore((s) => s.bumpColors);
-  useAppStore((s) => s.colorVersion); // re-render when an override changes
+  const setRepoColor = useVcsStore((s) => s.setRepoColor);
 
   const st = repo.status;
   const inactive = !repo.connId;
@@ -244,8 +243,8 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   return (
     <div
       className="repo-card"
-      style={{ borderColor: colorForName(repo.connKey) }}
-      title={`${repo.connKey} — ${repo.root} (right-click: connection color)`}
+      style={{ borderColor: repoColor(repo) }}
+      title={`${repo.connKey} — ${repo.root} (right-click: repo color)`}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -260,20 +259,18 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
               key={c}
               className="color-menu__swatch"
               style={{ background: c }}
-              title={c}
+              title={paletteName(c)}
               onClick={() => {
-                setColorOverride(repo.connKey, c);
-                bumpColors();
+                setRepoColor(repo.connKey, repo.root, c);
                 setColorOpen(false);
               }}
             />
           ))}
           <button
             className="color-menu__reset"
-            title="Back to the automatic color"
+            title="Back to the tracked default (green)"
             onClick={() => {
-              setColorOverride(repo.connKey, null);
-              bumpColors();
+              setRepoColor(repo.connKey, repo.root, null);
               setColorOpen(false);
             }}
           >

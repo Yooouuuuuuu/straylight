@@ -33,10 +33,10 @@ function EmptyState() {
         height="64"
         aria-hidden
       >
-        <rect width="16" height="16" rx="4" fill="#bd93f9" />
+        <rect width="16" height="16" rx="4" fill="var(--accent)" />
         <path
           d="M10.4 5.4c-.5-.6-1.3-1-2.3-1-1.4 0-2.4.7-2.4 1.8 0 1 .7 1.5 2 1.8l.8.2c.7.2 1 .4 1 .8 0 .5-.5.8-1.2.8-.8 0-1.4-.3-1.8-.9l-1.2.8c.6.9 1.6 1.4 2.9 1.4 1.6 0 2.7-.8 2.7-2 0-1-.6-1.6-2-1.9l-.8-.2c-.7-.2-1-.4-1-.8 0-.4.4-.7 1.1-.7.7 0 1.2.3 1.5.8l1.2-.8Z"
-          fill="#282A36"
+          fill="var(--bg-primary)"
         />
       </svg>
       <div className="empty-state__title">Straylight</div>

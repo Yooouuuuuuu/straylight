@@ -1,18 +1,19 @@
 /**
  * Extension → accent color for file-tree icons. Phase 1 keeps this intentionally
  * lightweight (a tinted document glyph per file type); Phase 2 swaps in a full
- * Catppuccin icon set. Colors come from the Dracula palette.
+ * Catppuccin icon set. Tints reference the theme's palette slots, so every
+ * theme (including light ones) re-colors the icons.
  */
 
-const CYAN = "#8BE9FD";
-const GREEN = "#50FA7B";
-const ORANGE = "#FFB86C";
-const PINK = "#FF79C6";
-const PURPLE = "#BD93F9";
-const RED = "#FF5555";
-const YELLOW = "#F1FA8C";
-const FG = "#F8F8F2";
-const MUTED = "#6272A4";
+const CYAN = "var(--cyan)";
+const GREEN = "var(--green)";
+const ORANGE = "var(--orange)";
+const PINK = "var(--pink)";
+const PURPLE = "var(--purple)";
+const RED = "var(--red)";
+const YELLOW = "var(--yellow)";
+const FG = "var(--fg-primary)";
+const MUTED = "var(--fg-secondary)";
 
 const EXTENSION_COLORS: Record<string, string> = {
   ts: CYAN,
@@ -99,8 +100,10 @@ const FILENAME_COLORS: Record<string, string> = {
   "readme.md": CYAN,
 };
 
-export const FOLDER_COLOR = PURPLE;
-export const FOLDER_OPEN_COLOR = CYAN;
+// Folder glyphs are themable (settings.json `colors` keys); per-filetype tints
+// below stay fixed — they're language-semantic, like syntax colors.
+export const FOLDER_COLOR = "var(--icon-folder)";
+export const FOLDER_OPEN_COLOR = "var(--icon-folder-open)";
 export const DEFAULT_FILE_COLOR = MUTED;
 
 /** Accent color for a file's icon based on its name/extension. */

@@ -21,7 +21,7 @@ import {
   type TreeRow,
 } from "../../lib/treeNav";
 import { useAppStore } from "../../store/appStore";
-import { findRepoForPath, useVcsStore } from "../../store/vcsStore";
+import { findRepoForPath, repoColorForPath, useVcsStore } from "../../store/vcsStore";
 import { FileNode } from "./FileNode";
 import { IconChevron, IconClose } from "../icons";
 
@@ -35,7 +35,6 @@ export function RootTree({
   connId,
   rootPath,
   label,
-  color,
   removable,
   onRemove,
   defaultCollapsed,
@@ -47,7 +46,6 @@ export function RootTree({
   connId: string;
   rootPath: string;
   label: string;
-  color?: string;
   removable?: boolean;
   onRemove?: () => void;
   /** Start the root collapsed (and don't load it until first expanded). */
@@ -79,6 +77,10 @@ export function RootTree({
   const askConfirm = useVcsStore((s) => s.askConfirm);
   const repoTracked = useVcsStore(
     (s) => findRepoForPath(s.repos, connId, rootPath) !== undefined,
+  );
+  // Tracked pins take the repo's color (default green; editable on the card).
+  const rootRepoColor = useVcsStore((s) =>
+    repoColorForPath(s.repos, connId, rootPath, "within"),
   );
 
   const loadDir = useCallback(
@@ -254,6 +256,7 @@ export function RootTree({
       rows.push(
         <FileNode
           key={entry.path}
+          connId={connId}
           entry={entry}
           depth={depth}
           expanded={isExpanded}
@@ -330,11 +333,15 @@ export function RootTree({
         >
           <IconChevron size={14} />
         </span>
-        <span className="root-tree__label" style={color ? { color } : undefined}>
+        <span
+          className="root-tree__label"
+          style={rootRepoColor ? { color: rootRepoColor } : undefined}
+        >
           {label}
         </span>
         <button
           className={`root-tree__remove root-tree__vcs ${repoTracked ? "root-tree__vcs--tracked" : ""}`}
+          style={rootRepoColor ? { color: rootRepoColor } : undefined}
           title={
             repoTracked
               ? "In Source Control — open the panel"

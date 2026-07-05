@@ -26,7 +26,7 @@ import {
   IconRefresh,
 } from "../icons";
 
-const WSL_COLOR = "#bd93f9";
+const WSL_COLOR = "var(--accent)";
 
 export function WslSection() {
   const wsl = useAppStore((s) => s.wsl);
@@ -178,13 +178,12 @@ export function WslSection() {
               connId={wsl.connId}
               rootPath={path}
               label={basename(path) || path}
-              color={WSL_COLOR}
               removable
               defaultCollapsed
               showHidden={showHiddenWsl}
               refreshToken={refreshTokenWsl}
               rootId={`${wsl.connId}::${path}`}
-              order={2000 + index}
+              order={1000 + index}
               onRemove={() => removeWslPin(path)}
             />
           ))

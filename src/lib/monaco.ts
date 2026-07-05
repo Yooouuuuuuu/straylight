@@ -1,5 +1,6 @@
 /**
- * Monaco bootstrap: web-worker wiring for Vite and the Dracula theme.
+ * Monaco bootstrap: web-worker wiring for Vite and the fallback (Straylight)
+ * theme shown until the settings-driven theme layer takes over.
  *
  * Vite bundles Monaco's language workers via the `?worker` import suffix; we
  * point `MonacoEnvironment.getWorker` at them by label. Call {@link setupMonaco}
@@ -18,57 +19,57 @@ declare global {
   }
 }
 
-export const DRACULA_THEME = "dracula";
+export const FALLBACK_THEME = "straylight";
 
-const draculaTheme: monaco.editor.IStandaloneThemeData = {
+const fallbackTheme: monaco.editor.IStandaloneThemeData = {
   base: "vs-dark",
   inherit: true,
   rules: [
-    { token: "", foreground: "F8F8F2" },
-    { token: "comment", foreground: "6272A4", fontStyle: "italic" },
-    { token: "keyword", foreground: "FF79C6" },
-    { token: "string", foreground: "F1FA8C" },
-    { token: "number", foreground: "BD93F9" },
-    { token: "type", foreground: "8BE9FD", fontStyle: "italic" },
-    { token: "function", foreground: "50FA7B" },
-    { token: "variable", foreground: "F8F8F2" },
-    { token: "constant", foreground: "BD93F9" },
-    { token: "operator", foreground: "FF79C6" },
-    { token: "delimiter", foreground: "F8F8F2" },
-    { token: "tag", foreground: "FF79C6" },
-    { token: "attribute.name", foreground: "50FA7B" },
-    { token: "attribute.value", foreground: "F1FA8C" },
-    { token: "regexp", foreground: "FF5555" },
+    { token: "", foreground: "F0E7E9" },
+    { token: "comment", foreground: "7A5F66", fontStyle: "italic" },
+    { token: "keyword", foreground: "FF4D6D" },
+    { token: "string", foreground: "5CE626" },
+    { token: "number", foreground: "FF00FF" },
+    { token: "type", foreground: "FFB454", fontStyle: "italic" },
+    { token: "function", foreground: "FF7A9C" },
+    { token: "variable", foreground: "F0E7E9" },
+    { token: "constant", foreground: "FF00FF" },
+    { token: "operator", foreground: "FF4D6D" },
+    { token: "delimiter", foreground: "F0E7E9" },
+    { token: "tag", foreground: "FF4D6D" },
+    { token: "attribute.name", foreground: "FF7A9C" },
+    { token: "attribute.value", foreground: "5CE626" },
+    { token: "regexp", foreground: "FF00FF" },
   ],
   colors: {
-    "editor.background": "#282A36",
-    "editor.foreground": "#F8F8F2",
-    "editor.lineHighlightBackground": "#343746",
-    "editor.selectionBackground": "#44475A",
-    "editorCursor.foreground": "#F8F8F2",
-    "editorWhitespace.foreground": "#44475A",
-    "editorLineNumber.foreground": "#6272A4",
-    "editorLineNumber.activeForeground": "#F8F8F2",
-    "editor.findMatchBackground": "#FFB86C44",
-    "editor.findMatchHighlightBackground": "#FFB86C22",
-    "editorWidget.background": "#21222C",
-    "editorWidget.border": "#44475A",
-    "editorSuggestWidget.background": "#21222C",
-    "editorSuggestWidget.border": "#44475A",
-    "editorSuggestWidget.selectedBackground": "#44475A",
-    "editorGutter.background": "#282A36",
-    "editorIndentGuide.background1": "#343746",
-    "editorIndentGuide.activeBackground1": "#44475A",
-    "scrollbarSlider.background": "#44475A80",
-    "scrollbarSlider.hoverBackground": "#44475ABB",
-    "scrollbarSlider.activeBackground": "#6272A4",
-    "minimap.background": "#21222C",
+    "editor.background": "#151013",
+    "editor.foreground": "#F0E7E9",
+    "editor.lineHighlightBackground": "#221418",
+    "editor.selectionBackground": "#46232C",
+    "editorCursor.foreground": "#F30100",
+    "editorWhitespace.foreground": "#46232C",
+    "editorLineNumber.foreground": "#7A5F66",
+    "editorLineNumber.activeForeground": "#F0E7E9",
+    "editor.findMatchBackground": "#FF6A3D44",
+    "editor.findMatchHighlightBackground": "#FF6A3D22",
+    "editorWidget.background": "#0F0B0D",
+    "editorWidget.border": "#46232C",
+    "editorSuggestWidget.background": "#0F0B0D",
+    "editorSuggestWidget.border": "#46232C",
+    "editorSuggestWidget.selectedBackground": "#46232C",
+    "editorGutter.background": "#151013",
+    "editorIndentGuide.background1": "#221418",
+    "editorIndentGuide.activeBackground1": "#46232C",
+    "scrollbarSlider.background": "#46232C80",
+    "scrollbarSlider.hoverBackground": "#46232CBB",
+    "scrollbarSlider.activeBackground": "#7A5F66",
+    "minimap.background": "#0F0B0D",
   },
 };
 
 let initialized = false;
 
-/** Idempotently configure Monaco's workers and register the Dracula theme. */
+/** Idempotently configure Monaco's workers and register the fallback theme. */
 export function setupMonaco(): typeof monaco {
   if (initialized) return monaco;
 
@@ -94,11 +95,11 @@ export function setupMonaco(): typeof monaco {
     },
   };
 
-  monaco.editor.defineTheme(DRACULA_THEME, draculaTheme);
+  monaco.editor.defineTheme(FALLBACK_THEME, fallbackTheme);
   // The global default; the theme layer may override it with the custom theme
   // built from settings.json. Editors must NOT pass `theme:` at create time —
   // that would reset the global theme every time one mounts.
-  monaco.editor.setTheme(DRACULA_THEME);
+  monaco.editor.setTheme(FALLBACK_THEME);
   initialized = true;
   return monaco;
 }
