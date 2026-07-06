@@ -27,6 +27,10 @@
   --icon-folder-open: #ff7a9c;
   /* Text/icons on the accent-colored section bars */
   --section-fg: #f5e6e8;
+  /* Per-section bar colors (Local / WSL / Remote get distinct identities) */
+  --section-local: #f30100;
+  --section-wsl: #ff0180;
+  --section-remote: #ff00ff;
 
   /* Semantic mapping */
   --border: #3a2228;

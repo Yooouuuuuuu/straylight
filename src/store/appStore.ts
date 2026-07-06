@@ -60,8 +60,13 @@ export interface EditorTab {
   lineEnding: "LF" | "CRLF";
   dirty: boolean;
   cursor: CursorPosition;
-  /** "diff" shows a Monaco diff; "log" shows a repo's commit history. Default "file". */
-  kind?: "file" | "diff" | "log" | "merge" | "preview";
+  /** "diff" shows a Monaco diff; "log" shows a repo's commit history;
+   *  "terminal" hosts a terminal session in the editor area. Default "file". */
+  kind?: "file" | "diff" | "log" | "merge" | "preview" | "terminal";
+  /** Which editor group (split) the tab lives in. Absent = group 0. */
+  groupId?: number;
+  /** The terminal session a kind:"terminal" tab hosts. */
+  terminalId?: string;
   /** VS Code-style preview tab (italic): the next preview open replaces it.
    *  Editing, double-click, or pinning promotes it to a permanent tab. */
   previewTab?: boolean;
@@ -76,6 +81,63 @@ export interface EditorTab {
 }
 
 export type NewTab = Omit<EditorTab, "id" | "dirty" | "cursor">;
+
+// ---- editor groups (splits) -------------------------------------------------
+
+export const MAX_EDITOR_GROUPS = 3;
+
+const gidOf = (t: EditorTab): number => t.groupId ?? 0;
+
+interface GroupsSlice {
+  tabs: EditorTab[];
+  editorGroups: number[];
+  groupActive: Record<number, string | null>;
+  activeGroupId: number;
+  activeTabId: string | null;
+}
+
+/** Recompute the group bookkeeping after any tab/group change: drops emptied
+ *  groups (keeping at least one), repairs each group's active tab, and focuses
+ *  `focusId` (undefined = keep the current focus if still valid). */
+function groupsPatch(
+  s: GroupsSlice,
+  tabs: EditorTab[],
+  focusId?: string | null,
+): GroupsSlice {
+  const present = new Set(tabs.map(gidOf));
+  let editorGroups = s.editorGroups.filter((g) => present.has(g));
+  for (const g of present) {
+    if (!editorGroups.includes(g)) editorGroups.push(g);
+  }
+  if (editorGroups.length === 0) editorGroups = [0];
+
+  const groupActive: Record<number, string | null> = {};
+  for (const g of editorGroups) {
+    const prev = s.groupActive[g];
+    groupActive[g] =
+      prev && tabs.some((t) => t.id === prev && gidOf(t) === g)
+        ? prev
+        : (tabs.find((t) => gidOf(t) === g)?.id ?? null);
+  }
+
+  let activeTabId = focusId !== undefined ? focusId : s.activeTabId;
+  if (activeTabId && !tabs.some((t) => t.id === activeTabId)) activeTabId = null;
+  let activeGroupId = s.activeGroupId;
+  if (activeTabId) {
+    activeGroupId = gidOf(tabs.find((t) => t.id === activeTabId)!);
+    groupActive[activeGroupId] = activeTabId;
+  } else {
+    if (!editorGroups.includes(activeGroupId)) {
+      // The focused group vanished — fall back to its former neighbor.
+      const oldIdx = s.editorGroups.indexOf(activeGroupId);
+      activeGroupId =
+        editorGroups[Math.max(0, Math.min(oldIdx - 1, editorGroups.length - 1))] ??
+        editorGroups[0];
+    }
+    activeTabId = groupActive[activeGroupId] ?? null;
+  }
+  return { tabs, editorGroups, groupActive, activeGroupId, activeTabId };
+}
 
 /** The window's single remote SSH connection. */
 export interface RemoteConnection {
@@ -106,6 +168,9 @@ export interface TerminalSession {
   /** Typed into the shell once it opens (e.g. `podman exec -it … /bin/sh`). */
   initialInput?: string | null;
   epoch: number;
+  /** Shown as an editor tab instead of in the panel (the shell survives the
+   *  move — its DOM is reparented, never remounted). */
+  inEditor?: boolean;
 }
 
 export interface Notice {
@@ -175,8 +240,55 @@ function saveConnPins(key: string, id: string, pins: string[]): void {
   }
 }
 
-function remoteHostKey(r: RemoteConnection): string {
+export function remoteHostKey(r: RemoteConnection): string {
   return `${r.user}@${r.host}:${r.port}`;
+}
+
+// Host identity colors, keyed by `user@host:port` (remote hosts only — Local
+// and WSL use their section colors). Persisted so prod stays "its" color.
+const HOST_COLORS_KEY = "straylight.hostColors";
+/** Default ramp for newly-seen hosts. Deliberately stops short of pure green —
+ *  `var(--green)` means "tracked repo" in the tree. */
+export const HOST_COLOR_RAMP = ["#f30100", "#ff8a00", "#d8e626"];
+
+function loadHostColors(): Record<string, string> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(HOST_COLORS_KEY) ?? "null");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === "string") out[k] = v;
+      }
+      return out;
+    }
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
+// Which explorer sections are shown (the L / W / R toggles). Hiding never
+// touches the connection — just the section's rendering.
+const SECTIONS_KEY = "straylight.sections";
+export interface SectionVisibility {
+  local: boolean;
+  wsl: boolean;
+  remote: boolean;
+}
+function loadSections(): SectionVisibility {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SECTIONS_KEY) ?? "null");
+    if (parsed && typeof parsed === "object") {
+      return {
+        local: parsed.local !== false,
+        wsl: parsed.wsl !== false,
+        remote: parsed.remote !== false,
+      };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { local: true, wsl: true, remote: true };
 }
 
 /** Where a new terminal opens. "auto" = first active of remote → WSL → local. */
@@ -241,6 +353,10 @@ interface AppState {
   lastRefreshLocal: number | null;
   lastRefreshRemote: number | null;
   lastRefreshWsl: number | null;
+  /** Identity colors for remote hosts (`user@host:port` → color). */
+  hostColors: Record<string, string>;
+  /** Explorer section visibility (the L / W / R header toggles). */
+  sections: SectionVisibility;
 
   // Terminals ------------------------------------------------------------
   terminals: TerminalSession[];
@@ -307,6 +423,9 @@ interface AppState {
   toggleHiddenLocal: () => void;
   toggleHiddenRemote: () => void;
   toggleHiddenWsl: () => void;
+  /** Set (or null = reset to the auto ramp) a remote host's identity color. */
+  setHostColor: (hostKey: string, color: string | null) => void;
+  toggleSection: (which: keyof SectionVisibility) => void;
   refreshLocal: () => void;
   refreshRemote: () => void;
   refreshWsl: () => void;
@@ -331,6 +450,23 @@ interface AppState {
   restartConnTerminals: (connId: string) => void;
   /** Close every terminal on a connection (e.g. an explicit disconnect). */
   closeConnTerminals: (connId: string) => void;
+
+  // Editor groups (splits, max MAX_EDITOR_GROUPS side by side) --------------
+  /** Ordered group ids, left to right. Always at least one. */
+  editorGroups: number[];
+  /** The focused group (openTab targets it). */
+  activeGroupId: number;
+  /** Each group's active tab. `activeTabId` mirrors the focused group's. */
+  groupActive: Record<number, string | null>;
+  setActiveGroup: (gid: number) => void;
+  /** Move a tab into a new group to the right of its own (creates the split). */
+  splitRight: (tabId: string) => void;
+  /** Move a tab into an existing group. */
+  moveTabToGroup: (tabId: string, gid: number) => void;
+  /** Session restore: reassign tabs to groups in one pass. */
+  setTabGroups: (byTabId: Record<string, number>) => void;
+  /** Pull a terminal session out of the panel into an editor tab. */
+  moveTerminalToEditor: (terminalId: string) => void;
 
   openTab: (tab: NewTab, opts?: { preview?: boolean; pinned?: boolean }) => void;
   /** Promote a preview tab to permanent (double-click, edit, pin). */
@@ -477,12 +613,17 @@ export const useAppStore = create<AppState>()((set, get) => ({
   lastRefreshLocal: null,
   lastRefreshRemote: null,
   lastRefreshWsl: null,
+  hostColors: loadHostColors(),
+  sections: loadSections(),
 
   terminals: [],
   activeTerminalId: null,
 
   tabs: [],
   activeTabId: null,
+  editorGroups: [0],
+  activeGroupId: 0,
+  groupActive: {},
   busyPath: null,
   conflict: null,
   closeConfirm: null,
@@ -641,6 +782,28 @@ export const useAppStore = create<AppState>()((set, get) => ({
   toggleHiddenRemote: () =>
     set((s) => ({ showHiddenRemote: !s.showHiddenRemote })),
   toggleHiddenWsl: () => set((s) => ({ showHiddenWsl: !s.showHiddenWsl })),
+  setHostColor: (hostKey, color) =>
+    set((s) => {
+      const hostColors = { ...s.hostColors };
+      if (color === null) delete hostColors[hostKey];
+      else hostColors[hostKey] = color;
+      try {
+        localStorage.setItem(HOST_COLORS_KEY, JSON.stringify(hostColors));
+      } catch {
+        /* ignore */
+      }
+      return { hostColors };
+    }),
+  toggleSection: (which) =>
+    set((s) => {
+      const sections = { ...s.sections, [which]: !s.sections[which] };
+      try {
+        localStorage.setItem(SECTIONS_KEY, JSON.stringify(sections));
+      } catch {
+        /* ignore */
+      }
+      return { sections };
+    }),
   refreshLocal: () =>
     set((s) => ({ refreshTokenLocal: s.refreshTokenLocal + 1 })),
   refreshRemote: () =>
@@ -703,7 +866,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
         // else the next, else none. (Same pattern as forceCloseTab.)
         activeTerminalId = terminals[idx - 1]?.id ?? terminals[idx]?.id ?? null;
       }
-      return { terminals, activeTerminalId };
+      // A killed session also closes its editor-area tab, if it had one.
+      const tabId = `term::${id}`;
+      const hadTab = s.tabs.some((t) => t.id === tabId);
+      const tabs = hadTab ? s.tabs.filter((t) => t.id !== tabId) : s.tabs;
+      return {
+        terminals,
+        activeTerminalId,
+        ...(hadTab ? groupsPatch(s, tabs) : {}),
+      };
     }),
 
   setActiveTerminal: (activeTerminalId) =>
@@ -713,10 +884,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   cycleTerminal: (direction) =>
     set((s) => {
-      if (s.terminals.length === 0) return {};
-      const idx = s.terminals.findIndex((t) => t.id === s.activeTerminalId);
-      const next = (idx + direction + s.terminals.length) % s.terminals.length;
-      return { activeTerminalId: s.terminals[next].id };
+      // Editor-hosted terminals aren't part of the panel's ring.
+      const ring = s.terminals.filter((t) => !t.inEditor);
+      if (ring.length === 0) return {};
+      const idx = ring.findIndex((t) => t.id === s.activeTerminalId);
+      const next = ring[(idx + direction + ring.length) % ring.length];
+      return { activeTerminalId: next.id };
     }),
 
   restartConnTerminals: (connId) =>
@@ -728,17 +901,25 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   closeConnTerminals: (connId) =>
     set((s) => {
+      const gone = new Set(
+        s.terminals.filter((t) => t.connId === connId).map((t) => `term::${t.id}`),
+      );
       const terminals = s.terminals.filter((t) => t.connId !== connId);
       const activeTerminalId = terminals.some((t) => t.id === s.activeTerminalId)
         ? s.activeTerminalId
         : (terminals[terminals.length - 1]?.id ?? null);
-      return { terminals, activeTerminalId };
+      const tabs = s.tabs.filter((t) => !gone.has(t.id));
+      return {
+        terminals,
+        activeTerminalId,
+        ...(tabs.length !== s.tabs.length ? groupsPatch(s, tabs) : {}),
+      };
     }),
 
   openTab: (tab, opts = {}) =>
     set((s) => {
       const existing = s.tabs.find(
-        (t) => t.connId === tab.connId && t.path === tab.path,
+        (t) => t.connId === tab.connId && t.path === tab.path && t.kind !== "terminal",
       );
       if (existing) {
         // A permanent open (double-click) promotes an existing preview.
@@ -746,7 +927,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
           !opts.preview && existing.previewTab
             ? s.tabs.map((t) => (t.id === existing.id ? { ...t, previewTab: false } : t))
             : s.tabs;
-        return { tabs, activeTabId: existing.id };
+        return groupsPatch(s, tabs, existing.id);
       }
       const id = `tab-${(tabCounter += 1)}`;
       const newTab: EditorTab = {
@@ -756,17 +937,107 @@ export const useAppStore = create<AppState>()((set, get) => ({
         cursor: { line: 1, column: 1 },
         previewTab: !!opts.preview && !opts.pinned,
         pinned: !!opts.pinned,
+        groupId: s.activeGroupId,
       };
       if (opts.preview) {
-        // Reuse the single preview slot (never a dirty one — dirty promotes).
-        const slot = s.tabs.findIndex((t) => t.previewTab && !t.dirty);
+        // Reuse the group's single preview slot (never a dirty one — dirty
+        // promotes; each split keeps its own preview slot).
+        const slot = s.tabs.findIndex(
+          (t) => t.previewTab && !t.dirty && gidOf(t) === s.activeGroupId,
+        );
         if (slot >= 0) {
           const tabs = s.tabs.slice();
           tabs[slot] = newTab;
-          return { tabs, activeTabId: id };
+          return groupsPatch(s, tabs, id);
         }
       }
-      return { tabs: [...s.tabs, newTab], activeTabId: id };
+      return groupsPatch(s, [...s.tabs, newTab], id);
+    }),
+
+  setActiveGroup: (gid) =>
+    set((s) => {
+      if (!s.editorGroups.includes(gid) || s.activeGroupId === gid) return {};
+      return { activeGroupId: gid, activeTabId: s.groupActive[gid] ?? null };
+    }),
+
+  splitRight: (tabId) =>
+    set((s) => {
+      const tab = s.tabs.find((t) => t.id === tabId);
+      if (!tab || s.editorGroups.length >= MAX_EDITOR_GROUPS) return {};
+      const newGid = Math.max(0, ...s.editorGroups) + 1;
+      const tabs = s.tabs.map((t) =>
+        t.id === tabId ? { ...t, groupId: newGid } : t,
+      );
+      const editorGroups = [...s.editorGroups];
+      editorGroups.splice(editorGroups.indexOf(gidOf(tab)) + 1, 0, newGid);
+      return groupsPatch({ ...s, editorGroups }, tabs, tabId);
+    }),
+
+  moveTabToGroup: (tabId, gid) =>
+    set((s) => {
+      const tab = s.tabs.find((t) => t.id === tabId);
+      if (!tab || !s.editorGroups.includes(gid) || gidOf(tab) === gid) return {};
+      const tabs = s.tabs.map((t) =>
+        t.id === tabId ? { ...t, groupId: gid } : t,
+      );
+      return groupsPatch(s, tabs, tabId);
+    }),
+
+  setTabGroups: (byTabId) =>
+    set((s) => {
+      const tabs = s.tabs.map((t) =>
+        byTabId[t.id] !== undefined
+          ? { ...t, groupId: Math.max(0, Math.min(byTabId[t.id], MAX_EDITOR_GROUPS - 1)) }
+          : t,
+      );
+      const editorGroups = [...new Set(tabs.map(gidOf))].sort((a, b) => a - b);
+      return groupsPatch(
+        { ...s, editorGroups },
+        tabs,
+        s.activeTabId ?? undefined,
+      );
+    }),
+
+  moveTerminalToEditor: (terminalId) =>
+    set((s) => {
+      const sess = s.terminals.find((t) => t.id === terminalId);
+      if (!sess) return {};
+      const id = `term::${terminalId}`;
+      const terminals = s.terminals.map((t) =>
+        t.id === terminalId ? { ...t, inEditor: true } : t,
+      );
+      const panelLeft = terminals.filter((t) => !t.inEditor);
+      const activeTerminalId =
+        s.activeTerminalId === terminalId
+          ? (panelLeft[0]?.id ?? null)
+          : s.activeTerminalId;
+      if (s.tabs.some((t) => t.id === id)) {
+        return { terminals, activeTerminalId, ...groupsPatch(s, s.tabs, id) };
+      }
+      const tab: EditorTab = {
+        id,
+        connId: sess.connId,
+        path: sess.title,
+        name: sess.title,
+        content: "",
+        language: "plaintext",
+        isBinary: false,
+        encoding: "utf-8",
+        size: 0,
+        modified: 0,
+        truncated: false,
+        lineEnding: "LF",
+        dirty: false,
+        cursor: { line: 1, column: 1 },
+        kind: "terminal",
+        terminalId,
+        groupId: s.activeGroupId,
+      };
+      return {
+        terminals,
+        activeTerminalId,
+        ...groupsPatch(s, [...s.tabs, tab], id),
+      };
     }),
 
   promoteTab: (id) =>
@@ -778,11 +1049,21 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set((s) => {
       const tab = s.tabs.find((t) => t.id === id);
       if (!tab) return {};
+      const gid = gidOf(tab);
       const rest = s.tabs.filter((t) => t.id !== id);
-      const lastPinned = rest.reduce((acc, t, i) => (t.pinned ? i : acc), -1);
+      // Pin → end of the group's pinned block; unpin → start of its unpinned
+      // block (same index — right after the last pinned tab of the group).
+      let firstOfGroup = -1;
+      let lastPinned = -1;
+      rest.forEach((t, i) => {
+        if (gidOf(t) !== gid) return;
+        if (firstOfGroup < 0) firstOfGroup = i;
+        if (t.pinned) lastPinned = i;
+      });
+      const insert =
+        lastPinned >= 0 ? lastPinned + 1 : firstOfGroup >= 0 ? firstOfGroup : rest.length;
       const tabs = rest.slice();
-      // Pin → end of the pinned block; unpin → start of the unpinned block.
-      tabs.splice(lastPinned + 1, 0, { ...tab, pinned, previewTab: false });
+      tabs.splice(insert, 0, { ...tab, pinned, previewTab: false });
       return { tabs };
     }),
 
@@ -793,7 +1074,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   openDiffTab: (d) =>
     set((s) => {
       const id = `diff::${d.connId}::${d.relPath}`;
-      if (s.tabs.some((t) => t.id === id)) return { activeTabId: id };
+      if (s.tabs.some((t) => t.id === id)) return groupsPatch(s, s.tabs, id);
       const tab: EditorTab = {
         id,
         connId: d.connId,
@@ -812,14 +1093,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
         kind: "diff",
         diffBase: d.base,
         diffBaseExists: d.baseExists,
+        groupId: s.activeGroupId,
       };
-      return { tabs: [...s.tabs, tab], activeTabId: id };
+      return groupsPatch(s, [...s.tabs, tab], id);
     }),
 
   openPreviewTab: (d) =>
     set((s) => {
       const id = `preview::${d.connId}::${d.path}`;
-      if (s.tabs.some((t) => t.id === id)) return { activeTabId: id };
+      if (s.tabs.some((t) => t.id === id)) return groupsPatch(s, s.tabs, id);
       const tab: EditorTab = {
         id,
         connId: d.connId,
@@ -836,14 +1118,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
         dirty: false,
         cursor: { line: 1, column: 1 },
         kind: "preview",
+        groupId: s.activeGroupId,
       };
-      return { tabs: [...s.tabs, tab], activeTabId: id };
+      return groupsPatch(s, [...s.tabs, tab], id);
     }),
 
   openMergeTab: (d) =>
     set((s) => {
       const id = `merge::${d.connId}::${d.path}`;
-      if (s.tabs.some((t) => t.id === id)) return { activeTabId: id };
+      if (s.tabs.some((t) => t.id === id)) return groupsPatch(s, s.tabs, id);
       const tab: EditorTab = {
         id,
         connId: d.connId,
@@ -860,14 +1143,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
         dirty: false,
         cursor: { line: 1, column: 1 },
         kind: "merge",
+        groupId: s.activeGroupId,
       };
-      return { tabs: [...s.tabs, tab], activeTabId: id };
+      return groupsPatch(s, [...s.tabs, tab], id);
     }),
 
   openLogTab: (d) =>
     set((s) => {
       const id = `log::${d.connId}::${d.root}`;
-      if (s.tabs.some((t) => t.id === id)) return { activeTabId: id };
+      if (s.tabs.some((t) => t.id === id)) return groupsPatch(s, s.tabs, id);
       const tab: EditorTab = {
         id,
         connId: d.connId,
@@ -885,18 +1169,21 @@ export const useAppStore = create<AppState>()((set, get) => ({
         cursor: { line: 1, column: 1 },
         kind: "log",
         vcsBackend: d.backend,
+        groupId: s.activeGroupId,
       };
-      return { tabs: [...s.tabs, tab], activeTabId: id };
+      return groupsPatch(s, [...s.tabs, tab], id);
     }),
 
-  setActiveTab: (activeTabId) => set({ activeTabId }),
+  setActiveTab: (id) => set((s) => groupsPatch(s, s.tabs, id)),
 
   cycleTab: (direction) =>
     set((s) => {
-      if (s.tabs.length === 0) return {};
-      const idx = s.tabs.findIndex((t) => t.id === s.activeTabId);
-      const next = (idx + direction + s.tabs.length) % s.tabs.length;
-      return { activeTabId: s.tabs[next].id };
+      // Cycle within the focused group (each split keeps its own ring).
+      const group = s.tabs.filter((t) => gidOf(t) === s.activeGroupId);
+      if (group.length === 0) return {};
+      const idx = group.findIndex((t) => t.id === s.activeTabId);
+      const next = group[(idx + direction + group.length) % group.length];
+      return groupsPatch(s, s.tabs, next.id);
     }),
 
   closeTab: (id, allowPinned = false) => {
@@ -911,16 +1198,28 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   forceCloseTab: (id) =>
     set((s) => {
-      const idx = s.tabs.findIndex((t) => t.id === id);
-      if (idx < 0) return {};
+      const tab = s.tabs.find((t) => t.id === id);
+      if (!tab) return {};
+      // Closing a terminal tab returns the shell to the panel (never kills it —
+      // explicit kill lives on the panel's × after it's back).
+      const terminals =
+        tab.kind === "terminal" && tab.terminalId
+          ? s.terminals.map((t) =>
+              t.id === tab.terminalId ? { ...t, inEditor: false } : t,
+            )
+          : s.terminals;
       const tabs = s.tabs.filter((t) => t.id !== id);
-      let activeTabId = s.activeTabId;
+      let focus: string | null | undefined;
       if (s.activeTabId === id) {
-        activeTabId = tabs[idx - 1]?.id ?? tabs[idx]?.id ?? null;
+        // Prefer the closed tab's neighbor within its own group.
+        const group = s.tabs.filter((t) => gidOf(t) === gidOf(tab));
+        const gIdx = group.findIndex((t) => t.id === id);
+        const rest = group.filter((t) => t.id !== id);
+        focus = rest[gIdx - 1]?.id ?? rest[gIdx]?.id ?? null;
       }
       return {
-        tabs,
-        activeTabId,
+        ...groupsPatch(s, tabs, focus),
+        terminals,
         conflict: s.conflict?.tabId === id ? null : s.conflict,
         closeConfirm: s.closeConfirm?.tabId === id ? null : s.closeConfirm,
       };

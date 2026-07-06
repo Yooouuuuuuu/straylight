@@ -10,7 +10,7 @@ import {
   closeSavedTabs,
   closeTabsToRight,
 } from "../../lib/tabActions";
-import { useAppStore } from "../../store/appStore";
+import { MAX_EDITOR_GROUPS, useAppStore } from "../../store/appStore";
 
 export function TabContextMenu() {
   const menu = useAppStore((s) => s.tabMenu);
@@ -39,7 +39,22 @@ export function TabContextMenu() {
   const tab = useAppStore((s) =>
     s.tabMenu ? s.tabs.find((t) => t.id === s.tabMenu?.tabId) : undefined,
   );
+  const editorGroups = useAppStore((s) => s.editorGroups);
+  const groupSize = useAppStore(
+    (s) =>
+      s.tabs.filter((t) => (t.groupId ?? 0) === ((tab?.groupId ?? 0))).length,
+  );
   if (!menu || !tab) return null;
+
+  const gid = tab.groupId ?? 0;
+  const gIdx = editorGroups.indexOf(gid);
+  // Splitting the only tab of the only group would be a no-op layout.
+  const canSplit =
+    editorGroups.length < MAX_EDITOR_GROUPS &&
+    (groupSize > 1 || editorGroups.length > 1);
+  const leftGroup = gIdx > 0 ? editorGroups[gIdx - 1] : null;
+  const rightGroup =
+    gIdx >= 0 && gIdx < editorGroups.length - 1 ? editorGroups[gIdx + 1] : null;
 
   const left = Math.min(menu.x, window.innerWidth - 196);
   const top = Math.min(menu.y, window.innerHeight - 260);
@@ -81,6 +96,33 @@ export function TabContextMenu() {
         Close All
       </button>
       <div className="context-menu__sep" />
+      {canSplit && (
+        <button
+          className="context-menu__item"
+          onClick={act(() => store.splitRight(tab.id))}
+        >
+          Split Right
+        </button>
+      )}
+      {leftGroup !== null && (
+        <button
+          className="context-menu__item"
+          onClick={act(() => store.moveTabToGroup(tab.id, leftGroup))}
+        >
+          Move to Left Group
+        </button>
+      )}
+      {rightGroup !== null && (
+        <button
+          className="context-menu__item"
+          onClick={act(() => store.moveTabToGroup(tab.id, rightGroup))}
+        >
+          Move to Right Group
+        </button>
+      )}
+      {(canSplit || leftGroup !== null || rightGroup !== null) && (
+        <div className="context-menu__sep" />
+      )}
       <button
         className="context-menu__item"
         onClick={act(() => store.pinTab(tab.id, !tab.pinned))}

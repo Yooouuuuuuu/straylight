@@ -33,6 +33,10 @@ export function TerminalPanel() {
   const setNewTerminalTarget = useAppStore((s) => s.setNewTerminalTarget);
   const terminalView = useAppStore((s) => s.terminalView);
   const setTerminalView = useAppStore((s) => s.setTerminalView);
+  const moveTerminalToEditor = useAppStore((s) => s.moveTerminalToEditor);
+  // Terminals living in the editor area stay mounted here (their xterm DOM is
+  // reparented into the editor pane) but leave the panel's tab list.
+  const panelTerminals = terminals.filter((t) => !t.inEditor);
 
   const [profiles, setProfiles] = useState<TerminalProfile[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -78,7 +82,7 @@ export function TerminalPanel() {
     <div className="terminal-panel">
       <div className="terminal-panel__body">
         {terminalView === "containers" && <ContainersView />}
-        {terminals.length === 0 && terminalView === "terminals" ? (
+        {panelTerminals.length === 0 && terminalView === "terminals" ? (
           <div className="terminal-message">No terminals — click + to start one.</div>
         ) : (
           terminals.map((t) => (
@@ -87,7 +91,9 @@ export function TerminalPanel() {
               className="terminal-instance"
               style={{
                 display:
-                  terminalView === "terminals" && t.id === activeTerminalId
+                  terminalView === "terminals" &&
+                  t.id === activeTerminalId &&
+                  !t.inEditor
                     ? "block"
                     : "none",
               }}
@@ -199,7 +205,7 @@ export function TerminalPanel() {
           >
             <span className="terminal-entry__label">▣ Containers</span>
           </div>
-          {terminals.map((t) => (
+          {panelTerminals.map((t) => (
             <div
               key={t.id}
               role="tab"
@@ -215,6 +221,16 @@ export function TerminalPanel() {
               }}
             >
               <span className="terminal-entry__label">{t.title}</span>
+              <button
+                className="terminal-entry__close terminal-entry__move"
+                title="Move to the editor area (the shell keeps running)"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  moveTerminalToEditor(t.id);
+                }}
+              >
+                ⇱
+              </button>
               <button
                 className="terminal-entry__close"
                 title="Close terminal"

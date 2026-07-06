@@ -48,12 +48,22 @@ export function closeSavedTabs(): void {
 
 export function closeOtherTabs(keepId: string): void {
   const s = useAppStore.getState();
-  closeTabs(s.tabs.filter((t) => t.id !== keepId && !t.pinned).map((t) => t.id));
+  const keep = s.tabs.find((t) => t.id === keepId);
+  const gid = keep?.groupId ?? 0;
+  // Scoped to the tab's own group — other splits are untouched.
+  closeTabs(
+    s.tabs
+      .filter((t) => (t.groupId ?? 0) === gid && t.id !== keepId && !t.pinned)
+      .map((t) => t.id),
+  );
 }
 
 export function closeTabsToRight(fromId: string): void {
   const s = useAppStore.getState();
-  const idx = s.tabs.findIndex((t) => t.id === fromId);
-  if (idx < 0) return;
-  closeTabs(s.tabs.slice(idx + 1).filter((t) => !t.pinned).map((t) => t.id));
+  const from = s.tabs.find((t) => t.id === fromId);
+  if (!from) return;
+  const gid = from.groupId ?? 0;
+  const group = s.tabs.filter((t) => (t.groupId ?? 0) === gid);
+  const idx = group.findIndex((t) => t.id === fromId);
+  closeTabs(group.slice(idx + 1).filter((t) => !t.pinned).map((t) => t.id));
 }

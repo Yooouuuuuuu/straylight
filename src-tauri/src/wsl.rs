@@ -275,6 +275,15 @@ fn provision(distro: &str, user: &str, priv_path: &PathBuf, port: u16) -> Result
     wsl_exec(distro, true, &script).map(|_| ())
 }
 
+/// What `wsl_connect` hands back: the connection id plus the login user (the
+/// UI labels the distro `user@distro`).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WslConnection {
+    pub conn_id: String,
+    pub user: String,
+}
+
 /// Connect to a WSL distro: provision an `sshd` inside it, then attach as a
 /// `localhost` SSH host via the existing transport. Returns the connection id.
 #[cfg(windows)]
@@ -284,7 +293,7 @@ pub async fn wsl_connect(
     app: tauri::AppHandle,
     distro: String,
     allow_install: bool,
-) -> Result<String, String> {
+) -> Result<WslConnection, String> {
     let provisioned = {
         let distro = distro.clone();
         tokio::task::spawn_blocking(move || -> Result<(String, u16, PathBuf), String> {
@@ -307,20 +316,21 @@ pub async fn wsl_connect(
     let auth = crate::ssh::connection::AuthMethod::Auto {
         identity_file: Some(key_path.to_string_lossy().into_owned()),
     };
-    crate::ssh::connection::ssh_connect(
+    let conn_id = crate::ssh::connection::ssh_connect(
         state,
         app,
         "127.0.0.1".to_string(),
         port,
-        user,
+        user.clone(),
         auth,
         None,
     )
-    .await
+    .await?;
+    Ok(WslConnection { conn_id, user })
 }
 
 #[cfg(not(windows))]
 #[tauri::command]
-pub async fn wsl_connect(_distro: String, _allow_install: bool) -> Result<String, String> {
+pub async fn wsl_connect(_distro: String, _allow_install: bool) -> Result<WslConnection, String> {
     Err("WSL is only available on Windows".into())
 }

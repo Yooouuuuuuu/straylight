@@ -1,0 +1,97 @@
+/** Global Monaco model registry, shared by all editor groups. A tab's model is
+ *  keyed by tab id and lives here — NOT in a component — so a tab moved to
+ *  another split keeps its content, undo history, and dirty state. The
+ *  activeEditor bridge (save/reload plumbing) is installed once over this
+ *  registry and works regardless of which group currently shows the tab. */
+import { setEditorBridge } from "./activeEditor";
+import { monaco } from "./monaco";
+import { useAppStore, type EditorTab } from "../store/appStore";
+
+const LIGHTWEIGHT_BYTES = 50 * 1024 * 1024;
+
+const models = new Map<string, monaco.editor.ITextModel>();
+const savedVersions = new Map<string, number>();
+/** Live group editors, so setContent can find the one showing a model. */
+const editors = new Set<monaco.editor.IStandaloneCodeEditor>();
+let bridgeInstalled = false;
+
+export function recomputeDirty(tabId: string): void {
+  const model = models.get(tabId);
+  if (!model) return;
+  const saved = savedVersions.get(tabId) ?? model.getAlternativeVersionId();
+  useAppStore
+    .getState()
+    .setTabDirty(tabId, model.getAlternativeVersionId() !== saved);
+}
+
+/** The tab's model, created from its seed content on first use. */
+export function acquireModel(tab: EditorTab): monaco.editor.ITextModel {
+  let model = models.get(tab.id);
+  if (!model) {
+    const lightweight = tab.size >= LIGHTWEIGHT_BYTES;
+    model = monaco.editor.createModel(
+      tab.content,
+      lightweight ? "plaintext" : tab.language,
+    );
+    models.set(tab.id, model);
+    savedVersions.set(tab.id, model.getAlternativeVersionId());
+  }
+  return model;
+}
+
+/** Dispose models whose tabs are gone. */
+export function pruneModels(liveIds: Set<string>): void {
+  for (const [id, model] of models) {
+    if (!liveIds.has(id)) {
+      model.dispose();
+      models.delete(id);
+      savedVersions.delete(id);
+    }
+  }
+}
+
+function editorShowing(
+  model: monaco.editor.ITextModel,
+): monaco.editor.IStandaloneCodeEditor | null {
+  for (const e of editors) if (e.getModel() === model) return e;
+  return null;
+}
+
+/** Track a group's editor instance. Returns the unregister function. Installs
+ *  the save/reload bridge on first registration (module-lived thereafter). */
+export function registerGroupEditor(
+  editor: monaco.editor.IStandaloneCodeEditor,
+): () => void {
+  editors.add(editor);
+  if (!bridgeInstalled) {
+    bridgeInstalled = true;
+    setEditorBridge({
+      getContent: (id) => models.get(id)?.getValue() ?? null,
+      getVersionId: (id) => models.get(id)?.getAlternativeVersionId() ?? null,
+      markSavedVersion: (id, versionId) => {
+        savedVersions.set(id, versionId);
+        recomputeDirty(id);
+      },
+      setContent: (id, content) => {
+        const model = models.get(id);
+        if (!model) return; // never activated — the store's tab.content seeds it
+        const shown = editorShowing(model);
+        // Follow the tail: if the view was pinned to the bottom (log watching),
+        // keep it there after the reload; otherwise restore the old position.
+        const atBottom =
+          !!shown &&
+          shown.getScrollTop() + shown.getLayoutInfo().height >=
+            shown.getScrollHeight() - 2 * 20;
+        const viewState = shown ? shown.saveViewState() : null;
+        model.setValue(content);
+        savedVersions.set(id, model.getAlternativeVersionId());
+        recomputeDirty(id);
+        if (shown && viewState) shown.restoreViewState(viewState);
+        if (shown && atBottom) shown.revealLine(model.getLineCount());
+      },
+    });
+  }
+  return () => {
+    editors.delete(editor);
+  };
+}

@@ -78,6 +78,15 @@ export function allCommands(): Command[] {
     { id: "editor.nextTab", title: "Editor: Next Tab", run: () => app().cycleTab(1) },
     { id: "editor.previousTab", title: "Editor: Previous Tab", run: () => app().cycleTab(-1) },
     {
+      id: "editor.splitRight",
+      title: "Editor: Split Right",
+      run: () => {
+        const s = app();
+        if (s.activeTabId) s.splitRight(s.activeTabId);
+        else s.pushNotice("warn", "No active tab to split.");
+      },
+    },
+    {
       id: "explorer.copyPath",
       title: "Explorer: Copy Path of Selection",
       run: () => {

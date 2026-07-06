@@ -6,8 +6,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import { useAppStore } from "../../store/appStore";
-import { repoColor, useVcsStore, type TrackedRepo } from "../../store/vcsStore";
-import { PALETTE, paletteName } from "../../lib/connectionColor";
+import { useVcsStore, type TrackedRepo } from "../../store/vcsStore";
+import { hostColorForConnKey } from "../../lib/hostColors";
 import { basename } from "../../lib/format";
 import { openDiff, openMergeEditor } from "../../lib/openDiff";
 import { openFileByPath } from "../../lib/openFile";
@@ -149,8 +149,9 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   const [describeMode, setDescribeMode] = useState<"@" | "@-" | null>(null);
   const [branchOpen, setBranchOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
-  const [colorOpen, setColorOpen] = useState(false);
-  const setRepoColor = useVcsStore((s) => s.setRepoColor);
+  // Frame color = whose machine this repo lives on (host identity, not per-repo).
+  const hostColors = useAppStore((s) => s.hostColors);
+  const moveRepo = useVcsStore((s) => s.moveRepo);
 
   const st = repo.status;
   const inactive = !repo.connId;
@@ -240,45 +241,35 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
     </div>
   );
 
+  const dragId = `${repo.connKey}::${repo.root}`;
+
   return (
     <div
       className="repo-card"
-      style={{ borderColor: repoColor(repo) }}
-      title={`${repo.connKey} — ${repo.root} (right-click: repo color)`}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setColorOpen((o) => !o);
+      style={{ borderColor: hostColorForConnKey(hostColors, repo.connKey) }}
+      title={`${repo.connKey} — ${repo.root}`}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes("application/x-straylight-repo")) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+        }
+      }}
+      onDrop={(e) => {
+        const from = e.dataTransfer.getData("application/x-straylight-repo");
+        if (from && from !== dragId) {
+          e.preventDefault();
+          moveRepo(from, dragId);
+        }
       }}
     >
-      {colorOpen && (
-        <div className="color-menu">
-          <span className="color-menu__label">{repo.connKey}</span>
-          {PALETTE.map((c) => (
-            <button
-              key={c}
-              className="color-menu__swatch"
-              style={{ background: c }}
-              title={paletteName(c)}
-              onClick={() => {
-                setRepoColor(repo.connKey, repo.root, c);
-                setColorOpen(false);
-              }}
-            />
-          ))}
-          <button
-            className="color-menu__reset"
-            title="Back to the tracked default (green)"
-            onClick={() => {
-              setRepoColor(repo.connKey, repo.root, null);
-              setColorOpen(false);
-            }}
-          >
-            Auto
-          </button>
-        </div>
-      )}
-      <div className="repo-card__head">
+      <div
+        className="repo-card__head"
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData("application/x-straylight-repo", dragId);
+          e.dataTransfer.effectAllowed = "move";
+        }}
+      >
         <span
           className={`repo-card__backend repo-card__backend--${repo.backend}`}
           title={repo.backend === "jj" ? "Jujutsu repository" : "git repository"}

@@ -26,7 +26,7 @@ import {
   IconRefresh,
 } from "../icons";
 
-const WSL_COLOR = "var(--accent)";
+const WSL_COLOR = "var(--section-wsl)";
 
 export function WslSection() {
   const wsl = useAppStore((s) => s.wsl);
@@ -75,13 +75,13 @@ export function WslSection() {
       setConnecting(distro);
       setInstallFor(null);
       try {
-        const connId = await wslConnect(distro, allowInstall);
+        const { connId, user } = await wslConnect(distro, allowInstall);
         const listing = await fsListDir(connId, "");
         const conn: RemoteConnection = {
           connId,
           name: distro,
           host: "127.0.0.1",
-          user: "",
+          user,
           port: 0,
           color: WSL_COLOR,
           authType: "auto",
@@ -125,8 +125,10 @@ export function WslSection() {
         : (wslPins[0] ?? wslRootPath);
     return (
       <>
-        <div className="sidebar__section-head sidebar__section-head--remote">
-          <span className="sidebar__section-label">WSL</span>
+        <div className="sidebar__section-head sidebar__section-head--wsl">
+          <span className="sidebar__section-label" title={wsl.name}>
+            {wsl.user ? `${wsl.user}@${wsl.name}` : `WSL: ${wsl.name}`}
+          </span>
           <button
             className={`icon-btn ${showHiddenWsl ? "icon-btn--active" : ""}`}
             title={showHiddenWsl ? "Hide hidden files" : "Show hidden files"}
@@ -212,7 +214,7 @@ export function WslSection() {
 
   return (
     <>
-      <div className="sidebar__section-head sidebar__section-head--remote">
+      <div className="sidebar__section-head sidebar__section-head--wsl">
         <span className="sidebar__section-label">WSL</span>
         <button
           className="icon-btn sidebar__section-action"

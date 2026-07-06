@@ -1,20 +1,27 @@
 /** The editor tab bar. Click to switch, middle-click or × to close; a dirty tab
- *  shows a dot (which becomes × on hover). */
+ *  shows a dot (which becomes × on hover). WSL/remote tabs carry a host-color
+ *  underline so "whose file is this" reads at a glance (local stays plain). */
+import { tabHostColor } from "../../lib/hostColors";
 import { useAppStore } from "../../store/appStore";
 import { FileIcon } from "../filetree/FileIcons";
 import { IconClose } from "../icons";
 
 const MD_RE = /\.(md|markdown)$/i;
 
-export function EditorTabs() {
-  const tabs = useAppStore((s) => s.tabs);
-  const activeTabId = useAppStore((s) => s.activeTabId);
+export function EditorTabs({ groupId }: { groupId: number }) {
+  const allTabs = useAppStore((s) => s.tabs);
+  const tabs = allTabs.filter((t) => (t.groupId ?? 0) === groupId);
+  const activeTabId = useAppStore((s) => s.groupActive[groupId] ?? null);
   const setActiveTab = useAppStore((s) => s.setActiveTab);
   const closeTab = useAppStore((s) => s.closeTab);
   const openPreviewTab = useAppStore((s) => s.openPreviewTab);
   const promoteTab = useAppStore((s) => s.promoteTab);
   const pinTab = useAppStore((s) => s.pinTab);
   const openTabMenu = useAppStore((s) => s.openTabMenu);
+  // Subscribed so tab markers re-render when hosts/colors change.
+  useAppStore((s) => s.hostColors);
+  useAppStore((s) => s.remote?.connId);
+  useAppStore((s) => s.wsl?.connId);
 
   if (tabs.length === 0) return null;
 
@@ -24,16 +31,24 @@ export function EditorTabs() {
 
   return (
     <div className="editor-tabs">
-      {tabs.map((tab) => (
+      {tabs.map((tab) => {
+        const hostColor = tabHostColor(tab.connId);
+        return (
         <div
           key={tab.id}
           className={[
             "editor-tab",
             tab.id === activeTabId ? "editor-tab--active" : "",
             tab.dirty ? "editor-tab--dirty" : "",
+            hostColor ? "editor-tab--host" : "",
           ]
             .filter(Boolean)
             .join(" ")}
+          style={
+            hostColor
+              ? ({ "--tab-host-color": hostColor } as React.CSSProperties)
+              : undefined
+          }
           onClick={() => setActiveTab(tab.id)}
           onDoubleClick={() => promoteTab(tab.id)}
           onContextMenu={(event) => {
@@ -51,7 +66,9 @@ export function EditorTabs() {
               ? `${tab.path} (changes)`
               : tab.kind === "merge"
                 ? `${tab.path} (merge)`
-                : tab.path
+                : tab.kind === "terminal"
+                  ? `${tab.name} — terminal (closing returns it to the panel)`
+                  : tab.path
           }
         >
           <span className="editor-tab__icon">
@@ -63,6 +80,8 @@ export function EditorTabs() {
               <span className="editor-tab__diff">⚔</span>
             ) : tab.kind === "preview" ? (
               <span className="editor-tab__diff">¶</span>
+            ) : tab.kind === "terminal" ? (
+              <span className="editor-tab__diff">{">_"}</span>
             ) : (
               <FileIcon name={tab.name} isDir={false} isOpen={false} />
             )}
@@ -100,7 +119,8 @@ export function EditorTabs() {
             </button>
           )}
         </div>
-      ))}
+        );
+      })}
       {canPreview && active && (
         <button
           className="editor-tabs__action"

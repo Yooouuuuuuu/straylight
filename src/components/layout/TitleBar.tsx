@@ -2,9 +2,11 @@
  *  accent, an appearance menu (themes / settings — non-functional preferences
  *  live here, not in the command palette), and window controls. The center
  *  region is a Tauri drag handle. */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
+import appIcon from "../../assets/icon.png";
+import { remoteColor } from "../../lib/hostColors";
 import { openFileByPath } from "../../lib/openFile";
 import { settingsFilePath } from "../../lib/settings";
 import { applyThemePreset, THEME_PRESETS } from "../../lib/themes";
@@ -14,19 +16,14 @@ import { IconClose, IconMaximize, IconMinimize } from "../icons";
 
 function Logo({ size = 16 }: { size?: number }) {
   return (
-    <svg
+    <img
+      src={appIcon}
       width={size}
       height={size}
-      viewBox="0 0 16 16"
       className="titlebar__logo"
+      alt=""
       aria-hidden
-    >
-      <rect width="16" height="16" rx="4" fill="var(--accent)" />
-      <path
-        d="M10.4 5.4c-.5-.6-1.3-1-2.3-1-1.4 0-2.4.7-2.4 1.8 0 1 .7 1.5 2 1.8l.8.2c.7.2 1 .4 1 .8 0 .5-.5.8-1.2.8-.8 0-1.4-.3-1.8-.9l-1.2.8c.6.9 1.6 1.4 2.9 1.4 1.6 0 2.7-.8 2.7-2 0-1-.6-1.6-2-1.9l-.8-.2c-.7-.2-1-.4-1-.8 0-.4.4-.7 1.1-.7.7 0 1.2.3 1.5.8l1.2-.8Z"
-        fill="var(--bg-primary)"
-      />
-    </svg>
+    />
   );
 }
 
@@ -40,10 +37,23 @@ const STATE_LABELS: Record<ConnectionState, string> = {
 export function TitleBar() {
   const remote = useAppStore((s) => s.remote);
   const connState = useAppStore((s) => s.connState);
+  const hostColors = useAppStore((s) => s.hostColors);
+  const settingsIssues = useAppStore((s) => s.settingsIssues);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const appWindow = getCurrentWindow();
-  const accent = remote?.color ?? "transparent";
+  // The window carries its remote's identity color (host bars use the same).
+  const accent = remote ? remoteColor(hostColors, remote) : "transparent";
+
+  // Native title = the connected host, so the taskbar and Alt+Tab can tell
+  // windows apart (the in-window title bar is custom-drawn).
+  useEffect(() => {
+    const title = remote
+      ? `${remote.user}@${remote.host} — Straylight`
+      : "Straylight";
+    appWindow.setTitle(title).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remote?.connId]);
 
   const openSettingsFile = () => {
     setMenuOpen(false);
@@ -80,6 +90,17 @@ export function TitleBar() {
         </div>
       </div>
       <div className="titlebar__controls">
+        <button
+          className={`titlebar__btn ${settingsIssues.length > 0 ? "titlebar__btn--warn" : ""}`}
+          title={
+            settingsIssues.length > 0
+              ? `All commands (Ctrl+Shift+P) — ${settingsIssues.length} settings problem${settingsIssues.length === 1 ? "" : "s"}`
+              : "All commands (Ctrl+Shift+P)"
+          }
+          onClick={() => useAppStore.getState().setPaletteOpen(true)}
+        >
+          ⌘
+        </button>
         <button
           className="titlebar__btn"
           title="Appearance & settings"

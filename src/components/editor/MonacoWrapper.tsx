@@ -1,12 +1,17 @@
-/** The editor surface. Holds one Monaco editor and one model per open tab, so
- *  each tab keeps its own content, undo history, cursor, and scroll. Stays
- *  mounted across tab/binary changes so models aren't lost.
+/** One editor group's Monaco surface. Models live in the global registry
+ *  (lib/editorModels) keyed by tab id, so every group shares them and a tab
+ *  moved between splits keeps its content, undo history, and dirty state.
+ *  This component owns only the editor instance and per-group view states.
  *
  *  Dirty is computed from the model's alternative version id vs. its saved
  *  version, so undoing back to the saved state clears the dirty flag. */
 import { useEffect, useRef } from "react";
 
-import { setEditorBridge } from "../../lib/activeEditor";
+import {
+  acquireModel,
+  recomputeDirty,
+  registerGroupEditor,
+} from "../../lib/editorModels";
 import {
   conflictDecorations,
   setupMergeConflictActions,
@@ -14,21 +19,17 @@ import {
 import { monaco, setupMonaco } from "../../lib/monaco";
 import { useAppStore } from "../../store/appStore";
 
-const LIGHTWEIGHT_BYTES = 50 * 1024 * 1024;
-
-export function MonacoWrapper() {
+export function MonacoWrapper({ groupId }: { groupId: number }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
-  const modelsRef = useRef<Map<string, monaco.editor.ITextModel>>(new Map());
   const viewStatesRef = useRef<
     Map<string, monaco.editor.ICodeEditorViewState>
   >(new Map());
-  /** Per-tab "saved" alternative version id, for dirty detection. */
-  const savedVersionRef = useRef<Map<string, number>>(new Map());
   const prevActiveRef = useRef<string | null>(null);
+  /** The tab whose model this group's editor currently shows. */
+  const shownTabRef = useRef<string | null>(null);
 
-  const activeTabId = useAppStore((s) => s.activeTabId);
-  const tabs = useAppStore((s) => s.tabs);
+  const activeTabId = useAppStore((s) => s.groupActive[groupId] ?? null);
 
   // Create the editor once.
   useEffect(() => {
@@ -53,46 +54,9 @@ export function MonacoWrapper() {
       guides: { indentation: true },
     });
     editorRef.current = editor;
+    const unregister = registerGroupEditor(editor);
 
-    const models = modelsRef.current;
-    const savedVersions = savedVersionRef.current;
-
-    const recomputeDirty = (tabId: string) => {
-      const model = models.get(tabId);
-      if (!model) return;
-      const saved = savedVersions.get(tabId) ?? model.getAlternativeVersionId();
-      useAppStore
-        .getState()
-        .setTabDirty(tabId, model.getAlternativeVersionId() !== saved);
-    };
-
-    setEditorBridge({
-      getContent: (id) => models.get(id)?.getValue() ?? null,
-      getVersionId: (id) => models.get(id)?.getAlternativeVersionId() ?? null,
-      markSavedVersion: (id, versionId) => {
-        savedVersions.set(id, versionId);
-        recomputeDirty(id);
-      },
-      setContent: (id, content) => {
-        const model = models.get(id);
-        if (!model) return; // never activated — the store's tab.content seeds it
-        const active = editor.getModel() === model;
-        // Follow the tail: if the view was pinned to the bottom (log watching),
-        // keep it there after the reload; otherwise restore the old position.
-        const atBottom =
-          active &&
-          editor.getScrollTop() + editor.getLayoutInfo().height >=
-            editor.getScrollHeight() - 2 * 20;
-        const viewState = active ? editor.saveViewState() : null;
-        model.setValue(content);
-        savedVersions.set(id, model.getAlternativeVersionId());
-        recomputeDirty(id);
-        if (active && viewState) editor.restoreViewState(viewState);
-        if (atBottom) editor.revealLine(model.getLineCount());
-      },
-    });
-
-    // Highlight the two sides of any merge-conflict region in the active model
+    // Highlight the two sides of any merge-conflict region in the shown model
     // (the accept actions themselves are CodeLenses from setupMergeConflictActions).
     const conflictDecos = editor.createDecorationsCollection();
     const updateConflictDecos = () => {
@@ -101,7 +65,7 @@ export function MonacoWrapper() {
     };
 
     const cursorSub = editor.onDidChangeCursorPosition((event) => {
-      const id = useAppStore.getState().activeTabId;
+      const id = shownTabRef.current;
       if (id) {
         useAppStore.getState().setTabCursor(id, {
           line: event.position.lineNumber,
@@ -110,7 +74,7 @@ export function MonacoWrapper() {
       }
     });
     const changeSub = editor.onDidChangeModelContent(() => {
-      const id = useAppStore.getState().activeTabId;
+      const id = shownTabRef.current;
       if (id) recomputeDirty(id);
       updateConflictDecos();
     });
@@ -120,17 +84,15 @@ export function MonacoWrapper() {
       cursorSub.dispose();
       changeSub.dispose();
       modelSub.dispose();
-      setEditorBridge(null);
-      models.forEach((model) => model.dispose());
-      models.clear();
-      savedVersions.clear();
+      unregister();
       editor.dispose();
       editorRef.current = null;
+      shownTabRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Switch the editor's model when the active tab changes.
+  // Switch the editor's model when this group's active tab changes.
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -141,25 +103,17 @@ export function MonacoWrapper() {
     }
 
     const tab = useAppStore.getState().tabs.find((t) => t.id === activeTabId);
-    // Diff/log tabs render their own views; the code editor shows nothing.
-    // Non-file kinds (diff / log / merge / preview) render their own views.
+    // Non-file kinds (diff / log / merge / preview / terminal) render their
+    // own views; the code editor shows nothing.
     if (!activeTabId || !tab || tab.isBinary || (tab.kind && tab.kind !== "file")) {
       editor.setModel(null);
       prevActiveRef.current = null;
+      shownTabRef.current = null;
       return;
     }
 
-    let model = modelsRef.current.get(activeTabId);
-    if (!model) {
-      const lightweight = tab.size >= LIGHTWEIGHT_BYTES;
-      model = monaco.editor.createModel(
-        tab.content,
-        lightweight ? "plaintext" : tab.language,
-      );
-      modelsRef.current.set(activeTabId, model);
-      savedVersionRef.current.set(activeTabId, model.getAlternativeVersionId());
-    }
-    editor.setModel(model);
+    editor.setModel(acquireModel(tab));
+    shownTabRef.current = activeTabId;
     const state = viewStatesRef.current.get(activeTabId);
     if (state) editor.restoreViewState(state);
     editor.focus();
@@ -187,19 +141,6 @@ export function MonacoWrapper() {
     editor.focus();
     useAppStore.getState().setRevealTarget(null);
   }, [revealTarget, activeTabId]);
-
-  // Dispose models for tabs that were closed.
-  useEffect(() => {
-    const ids = new Set(tabs.map((t) => t.id));
-    for (const [id, model] of modelsRef.current) {
-      if (!ids.has(id)) {
-        model.dispose();
-        modelsRef.current.delete(id);
-        viewStatesRef.current.delete(id);
-        savedVersionRef.current.delete(id);
-      }
-    }
-  }, [tabs]);
 
   return <div className="monaco-host" ref={hostRef} />;
 }

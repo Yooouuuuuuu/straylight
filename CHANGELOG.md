@@ -27,6 +27,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 - Terminal tab reordering.
 
+## [0.8.11] - 2026-07-06
+
+### Added
+
+- **Split editors.** Up to 3 side-by-side editor groups: tab context menu →
+  Split Right / Move to Left/Right Group (also `Editor: Split Right` in the
+  palette). Models are shared across groups, so a moved tab keeps its content,
+  undo history, and dirty state. Per-group preview slot, pinned block, Ctrl+Tab
+  ring, and bulk-close scope; the focused group carries an accent stripe;
+  splits are restored on relaunch.
+- **Terminals in the editor area.** ⇱ on a panel terminal moves it into an
+  editor tab — the live xterm DOM is reparented, so the shell keeps running
+  with scrollback intact. Closing the tab returns the terminal to the panel;
+  killing the session (or disconnecting its host) closes the tab.
+- **Host identity colors.** Local / WSL / Remote section bars have their own
+  theme keys (`section-local/wsl/remote`); a connected remote gets a **host
+  bar** (`user@host` + toolbar) under the permanent Remote bar, with a
+  right-click color menu. The host's color shows on the host bar, title-bar
+  tint, its VC card frames, and WSL/remote file-tab stripes; the native window
+  title reads `user@host — Straylight` (taskbar / Alt+Tab). WSL's bar shows
+  `user@distro`.
+- **L / W / R section toggles** in the Explorer header hide/show each section
+  without touching connections (persisted).
+- **Draggable VC cards** — drag a card header onto another card to reorder;
+  persisted.
+- **⌘ Commands moved to the title bar** next to ⚙ (red while settings.json has
+  problems); removed from the status bar.
+- **New app icon** — full desktop icon set regenerated from the new source
+  (`src-tauri/icons/icon-source.png`); used by the window/taskbar/installers
+  and in-app (title-bar logo and the empty-editor screen).
+
+### Changed
+
+- Per-repo card colors removed: card frames now always follow the owning
+  host's color; tracked-repo indicators in the tree stay green.
+
 ## [0.8.10] - 2026-07-06
 
 ### Added

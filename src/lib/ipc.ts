@@ -660,12 +660,13 @@ export function wslListDistros(): Promise<WslDistro[]> {
 }
 
 /** Provision (if allowed) and connect to a WSL distro; returns its connection
- *  id (a localhost SSH connection). Rejects with a `WSL_NEEDS_INSTALL:` prefix
- *  when the distro has no SSH server and `allowInstall` was false. */
+ *  id (a localhost SSH connection) plus the login user (for `user@distro`
+ *  labels). Rejects with a `WSL_NEEDS_INSTALL:` prefix when the distro has no
+ *  SSH server and `allowInstall` was false. */
 export function wslConnect(
   distro: string,
   allowInstall: boolean,
-): Promise<string> {
+): Promise<{ connId: string; user: string }> {
   return invoke("wsl_connect", { distro, allowInstall });
 }
 

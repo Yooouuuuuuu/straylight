@@ -35,6 +35,8 @@ interface PersistedTab {
   pinned?: boolean;
   /** The one preview (italic) tab restores as a preview. */
   preview?: boolean;
+  /** Editor-group index (splits), left to right. Absent = the first group. */
+  group?: number;
 }
 
 interface PersistedSession {
@@ -113,12 +115,17 @@ function writeSnapshot(): void {
   // Only real file tabs persist; diff/log tabs are ephemeral.
   const fileTabs = s.tabs.filter((t) => !t.kind || t.kind === "file");
 
-  const persistTab = (t: (typeof fileTabs)[number], scope: Scope): PersistedTab => ({
-    scope,
-    path: t.path,
-    ...(t.pinned ? { pinned: true } : {}),
-    ...(t.previewTab ? { preview: true } : {}),
-  });
+  const persistTab = (t: (typeof fileTabs)[number], scope: Scope): PersistedTab => {
+    // Persist the group as its left-to-right index (ids are session-local).
+    const group = s.editorGroups.indexOf(t.groupId ?? 0);
+    return {
+      scope,
+      path: t.path,
+      ...(t.pinned ? { pinned: true } : {}),
+      ...(t.previewTab ? { preview: true } : {}),
+      ...(group > 0 ? { group } : {}),
+    };
+  };
 
   const localTabs: PersistedTab[] = fileTabs
     .filter((t) => t.connId === s.localConnId)
@@ -210,7 +217,27 @@ export async function consumePendingRemoteTabs(
       pinned: t.pinned,
     });
   }
+  applyPersistedGroups();
   restoreActiveTab();
+}
+
+/** Reassign restored tabs to their saved editor groups (splits). Runs after
+ *  each batch of reopens — local at launch, remote once its host connects. */
+function applyPersistedGroups(): void {
+  const saved = savedAtStartup;
+  if (!saved) return;
+  const s = useAppStore.getState();
+  const map: Record<string, number> = {};
+  for (const p of saved.tabs) {
+    if (!p.group) continue;
+    const tab = s.tabs.find((t) => {
+      if (t.path !== p.path) return false;
+      if (p.scope === "local") return t.connId === s.localConnId;
+      return !!s.remote && t.connId === s.remote.connId;
+    });
+    if (tab) map[tab.id] = p.group;
+  }
+  if (Object.keys(map).length > 0) s.setTabGroups(map);
 }
 
 function restoreActiveTab(): void {
@@ -247,6 +274,7 @@ export async function restoreSession(
         pinned: t.pinned,
       });
     }
+    applyPersistedGroups();
 
     if (s.remote) {
       const remoteTabs = s.tabs.filter((t) => t.scope === "remote");

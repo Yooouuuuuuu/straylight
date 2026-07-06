@@ -23,6 +23,10 @@ import {
   unregisterTerminalFocus,
 } from "../lib/terminalFocus";
 import {
+  registerTerminalSlot,
+  unregisterTerminalSlot,
+} from "../lib/terminalSlots";
+import {
   currentTermFont,
   currentTermTheme,
   registerTerminal,
@@ -44,6 +48,14 @@ export function useTerminal(
   useEffect(() => {
     const container = containerRef.current;
     if (!connId || !container) return;
+
+    // xterm lives in a plain (non-React) div so it can be reparented into an
+    // editor-pane slot without a remount — React never reconciles it, so
+    // moving it can't crash a later reconciliation.
+    const host = document.createElement("div");
+    host.className = "terminal-host__inner";
+    container.appendChild(host);
+    if (id) registerTerminalSlot(id, host, container);
 
     let disposed = false;
     let ptyId: string | null = null;
@@ -85,7 +97,7 @@ export function useTerminal(
 
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.open(container);
+    term.open(host);
     termRef.current = term;
     // Re-themed (and refit on font changes) live when settings.json changes.
     registerTerminal(term, { scope, refit: () => fit.fit() });
@@ -116,9 +128,12 @@ export function useTerminal(
       // Never fit while the panel is hidden. A collapsed panel still leaves the
       // terminal a few px tall (its padding), so a plain 0-height check isn't
       // enough — fit() would resize the PTY to ~1 row and ConPTY would reflow
-      // the whole buffer into it, wiping the scrollback.
-      if (!useAppStore.getState().terminalVisible) return;
-      if (!container.clientWidth || !container.clientHeight) return;
+      // the whole buffer into it, wiping the scrollback. (An editor-hosted
+      // terminal ignores the panel's visibility — it lives elsewhere.)
+      const state = useAppStore.getState();
+      const inEditor = !!state.terminals.find((t) => t.id === id)?.inEditor;
+      if (!inEditor && !state.terminalVisible) return;
+      if (!host.clientWidth || !host.clientHeight) return;
       try {
         fit.fit();
       } catch {
@@ -179,7 +194,7 @@ export function useTerminal(
           .catch(() => {});
       }
     };
-    container.addEventListener("contextmenu", onContextMenu);
+    host.addEventListener("contextmenu", onContextMenu);
 
     // Debounce resizes: a drag (or a panel toggle) fires a burst of resize
     // events, and resizing the PTY on each one makes the local ConPTY re-emit
@@ -190,13 +205,14 @@ export function useTerminal(
       clearTimeout(fitTimer);
       fitTimer = setTimeout(safeFit, 100);
     });
-    observer.observe(container);
+    // Observe the host (it moves with the terminal), not the panel wrapper.
+    observer.observe(host);
 
     return () => {
       disposed = true;
       clearTimeout(fitTimer);
       observer.disconnect();
-      container.removeEventListener("contextmenu", onContextMenu);
+      host.removeEventListener("contextmenu", onContextMenu);
       dataSub.dispose();
       resizeSub.dispose();
       if (unlisten) unlisten();
@@ -206,6 +222,8 @@ export function useTerminal(
       termRef.current = null;
       fitRef.current = null;
       term.dispose();
+      if (id) unregisterTerminalSlot(id, host);
+      host.remove();
     };
   }, [connId]);
 

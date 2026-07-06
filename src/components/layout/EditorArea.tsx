@@ -1,6 +1,16 @@
-/** Center editor region: the tab bar, and the body which shows the Monaco
- *  editor (for the active text tab), a binary info card, or an empty state.
- *  The editor stays mounted so per-tab models survive switching. */
+/** Center editor region: up to MAX_EDITOR_GROUPS side-by-side editor groups
+ *  (splits), each with its own tab bar and body — Monaco, a diff, a merge
+ *  editor, a Markdown preview, a repo history, a terminal, or a binary card.
+ *  Tab models are global (lib/editorModels), so moving a tab between groups
+ *  keeps its content, undo history, and dirty state. */
+import { Fragment, useEffect, useRef } from "react";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+
+import appIcon from "../../assets/icon.png";
+
+import { pruneModels } from "../../lib/editorModels";
+import { focusTerminal } from "../../lib/terminalFocus";
+import { mountTerminalIn, parkTerminal } from "../../lib/terminalSlots";
 import { useAppStore } from "../../store/appStore";
 import { BinaryFileCard } from "../editor/BinaryFileCard";
 import { EditorTabs } from "../editor/EditorTabs";
@@ -26,19 +36,14 @@ function EmptyState() {
 
   return (
     <div className="empty-state">
-      <svg
+      <img
         className="empty-state__logo"
-        viewBox="0 0 16 16"
+        src={appIcon}
         width="64"
         height="64"
+        alt=""
         aria-hidden
-      >
-        <rect width="16" height="16" rx="4" fill="var(--accent)" />
-        <path
-          d="M10.4 5.4c-.5-.6-1.3-1-2.3-1-1.4 0-2.4.7-2.4 1.8 0 1 .7 1.5 2 1.8l.8.2c.7.2 1 .4 1 .8 0 .5-.5.8-1.2.8-.8 0-1.4-.3-1.8-.9l-1.2.8c.6.9 1.6 1.4 2.9 1.4 1.6 0 2.7-.8 2.7-2 0-1-.6-1.6-2-1.9l-.8-.2c-.7-.2-1-.4-1-.8 0-.4.4-.7 1.1-.7.7 0 1.2.3 1.5.8l1.2-.8Z"
-          fill="var(--bg-primary)"
-        />
-      </svg>
+      />
       <div className="empty-state__title">Straylight</div>
       <div className="empty-state__hint">
         Open a local folder or connect to a server in the sidebar, then pick a
@@ -77,14 +82,35 @@ function EmptyState() {
   );
 }
 
-export function EditorArea() {
-  const tabs = useAppStore((s) => s.tabs);
-  const activeTabId = useAppStore((s) => s.activeTabId);
-  const active = tabs.find((t) => t.id === activeTabId) ?? null;
+/** Hosts a terminal session inside an editor pane by reparenting its live
+ *  xterm DOM (see lib/terminalSlots) — the shell never restarts. */
+function TerminalTabHost({ terminalId }: { terminalId: string }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (ref.current) mountTerminalIn(terminalId, ref.current);
+    focusTerminal(terminalId);
+    return () => parkTerminal(terminalId);
+  }, [terminalId]);
+  return <div className="terminal-editor-host" ref={ref} />;
+}
+
+function GroupPane({ gid }: { gid: number }) {
+  const activeId = useAppStore((s) => s.groupActive[gid] ?? null);
+  const active = useAppStore(
+    (s) => s.tabs.find((t) => t.id === activeId) ?? null,
+  );
+  const isFocused = useAppStore(
+    (s) => s.activeGroupId === gid && s.editorGroups.length > 1,
+  );
+  const setActiveGroup = useAppStore((s) => s.setActiveGroup);
 
   return (
-    <div className="editor-area">
-      <EditorTabs />
+    <div
+      className={`editor-group ${isFocused ? "editor-group--focused" : ""}`}
+      onMouseDownCapture={() => setActiveGroup(gid)}
+      onFocusCapture={() => setActiveGroup(gid)}
+    >
+      <EditorTabs groupId={gid} />
       <div className="editor-area__body">
         {active && !active.isBinary && active.truncated && (
           <div className="editor-banner">
@@ -92,30 +118,63 @@ export function EditorArea() {
           </div>
         )}
         <div className="editor-area__content">
-          {tabs.length === 0 ? (
-            <EmptyState />
+          <MonacoWrapper groupId={gid} />
+          {active?.kind === "diff" ? (
+            <MonacoDiffWrapper tab={active} />
+          ) : active?.kind === "merge" ? (
+            <MergeEditor key={active.id} tab={active} />
+          ) : active?.kind === "preview" ? (
+            <MarkdownPreview key={active.id} tab={active} />
+          ) : active?.kind === "log" ? (
+            <VcsLogView
+              connId={active.connId}
+              root={active.path}
+              backend={active.vcsBackend ?? "git"}
+            />
+          ) : active?.kind === "terminal" && active.terminalId ? (
+            <TerminalTabHost terminalId={active.terminalId} />
           ) : (
-            <>
-              <MonacoWrapper />
-              {active?.kind === "diff" ? (
-                <MonacoDiffWrapper tab={active} />
-              ) : active?.kind === "merge" ? (
-                <MergeEditor key={active.id} tab={active} />
-              ) : active?.kind === "preview" ? (
-                <MarkdownPreview key={active.id} tab={active} />
-              ) : active?.kind === "log" ? (
-                <VcsLogView
-                  connId={active.connId}
-                  root={active.path}
-                  backend={active.vcsBackend ?? "git"}
-                />
-              ) : (
-                active?.isBinary && <BinaryFileCard file={active} />
-              )}
-            </>
+            active?.isBinary && <BinaryFileCard file={active} />
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+export function EditorArea() {
+  const groups = useAppStore((s) => s.editorGroups);
+  const tabs = useAppStore((s) => s.tabs);
+
+  // Dispose Monaco models whose tabs are gone (the registry is global).
+  useEffect(() => {
+    pruneModels(new Set(tabs.map((t) => t.id)));
+  }, [tabs]);
+
+  if (tabs.length === 0) {
+    return (
+      <div className="editor-area">
+        <div className="editor-area__body">
+          <div className="editor-area__content">
+            <EmptyState />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="editor-area">
+      <PanelGroup direction="horizontal" className="editor-area__groups">
+        {groups.map((gid, i) => (
+          <Fragment key={gid}>
+            {i > 0 && <PanelResizeHandle className="resize-handle" />}
+            <Panel id={`group-${gid}`} order={i + 1} minSize={15}>
+              <GroupPane gid={gid} />
+            </Panel>
+          </Fragment>
+        ))}
+      </PanelGroup>
     </div>
   );
 }

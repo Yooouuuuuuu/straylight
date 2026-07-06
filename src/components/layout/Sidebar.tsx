@@ -3,15 +3,21 @@
  *  carries its own hidden-files toggle, refresh, and "last refreshed" stamp. */
 import { useEffect, useRef, useState } from "react";
 
+import { PALETTE, paletteName } from "../../lib/connectionColor";
 import { clipboardShortcut } from "../../lib/fileOps";
 import { basename, dirname } from "../../lib/format";
+import { remoteColor } from "../../lib/hostColors";
 import { sshConfigPath } from "../../lib/ipc";
 import { openFileByPath } from "../../lib/openFile";
 import {
   handleExplorerKey,
   registerExplorerFocus,
 } from "../../lib/treeNav";
-import { useAppStore } from "../../store/appStore";
+import {
+  HOST_COLOR_RAMP,
+  remoteHostKey,
+  useAppStore,
+} from "../../store/appStore";
 import { useSSH } from "../../hooks/useSSH";
 import { ConnectionManager } from "../connection/ConnectionManager";
 import { WslSection } from "../connection/WslSection";
@@ -55,7 +61,20 @@ export function Sidebar() {
   const wslPins = useAppStore((s) => s.wslPins);
   const selected = useAppStore((s) => s.selected);
   const openNewEntry = useAppStore((s) => s.openNewEntry);
+  const sections = useAppStore((s) => s.sections);
+  const toggleSection = useAppStore((s) => s.toggleSection);
+  const hostColors = useAppStore((s) => s.hostColors);
+  const setHostColor = useAppStore((s) => s.setHostColor);
   const { disconnect } = useSSH();
+  // "Connect to another server" while one is already attached (the + on the
+  // Remote bar); connecting replaces the current remote, as before.
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [hostMenu, setHostMenu] = useState(false);
+  // A successful connect (or a disconnect) closes the connect panel.
+  useEffect(() => {
+    setConnectOpen(false);
+    setHostMenu(false);
+  }, [remote?.connId]);
 
   // Transfer panel (drag between two connections). The three buttons in the
   // Explorer header open it for whichever pairs are connected.
@@ -158,6 +177,27 @@ export function Sidebar() {
       <div className="sidebar__header">
         <span className="sidebar__title">Explorer</span>
         <div className="sidebar__actions">
+          {(
+            [
+              ["local", "L", "var(--section-local)"],
+              ["wsl", "W", "var(--section-wsl)"],
+              ["remote", "R", "var(--section-remote)"],
+            ] as const
+          ).map(([key, letter, color]) => (
+            <button
+              key={key}
+              className={`section-toggle ${sections[key] ? "" : "section-toggle--off"}`}
+              style={{ color }}
+              title={
+                sections[key]
+                  ? `Hide the ${letter === "L" ? "Local" : letter === "W" ? "WSL" : "Remote"} section (connections stay)`
+                  : `Show the ${letter === "L" ? "Local" : letter === "W" ? "WSL" : "Remote"} section`
+              }
+              onClick={() => toggleSection(key)}
+            >
+              {letter}
+            </button>
+          ))}
           {localConn && remoteConn && (
             <button
               className="icon-btn"
@@ -203,7 +243,9 @@ export function Sidebar() {
         }}
       >
         {/* Local roots */}
-        <div className="sidebar__section-head">
+        {sections.local && (
+        <>
+        <div className="sidebar__section-head sidebar__section-head--local">
           <span className="sidebar__section-label">Local</span>
           <button
             className={`icon-btn ${showHiddenLocal ? "icon-btn--active" : ""}`}
@@ -272,11 +314,16 @@ export function Sidebar() {
             No folders yet — click + to open one.
           </div>
         )}
+        </>
+        )}
 
         {/* WSL distros (second section — Local, WSL, then Remote) */}
-        <WslSection />
+        {sections.wsl && <WslSection />}
 
-        {/* Remote root */}
+        {/* Remote: a permanent section bar; each connection gets a host bar
+            under it (the multi-remote shape, currently capped at one). */}
+        {sections.remote && (
+        <>
         <div className="sidebar__section-head sidebar__section-head--remote">
           <span className="sidebar__section-label">Remote</span>
           <button
@@ -298,7 +345,57 @@ export function Sidebar() {
             <IconExternal size={13} />
           </button>
           {remote && (
-            <>
+            <button
+              className={`icon-btn sidebar__section-action ${connectOpen ? "icon-btn--active" : ""}`}
+              title="Connect to a server (replaces the current one)"
+              onClick={() => setConnectOpen((o) => !o)}
+            >
+              <IconPlus />
+            </button>
+          )}
+        </div>
+        {(!remote || connectOpen) && <ConnectionManager />}
+        {remote && (
+          <>
+            <div
+              className="host-bar"
+              style={{ "--host-color": remoteColor(hostColors, remote) } as React.CSSProperties}
+              title={`${remote.name} (${remoteHostKey(remote)}) — right-click: host color`}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setHostMenu((o) => !o);
+              }}
+            >
+              {hostMenu && (
+                <div className="color-menu">
+                  <span className="color-menu__label">{remoteHostKey(remote)}</span>
+                  {[...HOST_COLOR_RAMP, ...PALETTE].map((c) => (
+                    <button
+                      key={c}
+                      className="color-menu__swatch"
+                      style={{ background: c }}
+                      title={c.startsWith("var(") ? paletteName(c) : c}
+                      onClick={() => {
+                        setHostColor(remoteHostKey(remote), c);
+                        setHostMenu(false);
+                      }}
+                    />
+                  ))}
+                  <button
+                    className="color-menu__reset"
+                    title="Back to the default host color"
+                    onClick={() => {
+                      setHostColor(remoteHostKey(remote), null);
+                      setHostMenu(false);
+                    }}
+                  >
+                    Auto
+                  </button>
+                </div>
+              )}
+              <span className="host-bar__label" title={remoteHostKey(remote)}>
+                {remote.user}@{remote.host}
+              </span>
               <button
                 className={`icon-btn ${showHiddenRemote ? "icon-btn--active" : ""}`}
                 title={
@@ -352,33 +449,31 @@ export function Sidebar() {
               >
                 <IconLogout />
               </button>
-            </>
-          )}
-        </div>
-        {remote ? (
-          remotePins.length > 0 ? (
-            remotePins.map((path, index) => (
-              <RootTree
-                key={path}
-                connId={remote.connId}
-                rootPath={path}
-                label={basename(path) || path}
-                removable
-                defaultCollapsed
-                showHidden={showHiddenRemote}
-                refreshToken={refreshTokenRemote}
-                rootId={`${remote.connId}::${path}`}
-                order={2000 + index}
-                onRemove={() => removeRemotePin(path)}
-              />
-            ))
-          ) : (
-            <div className="filetree__message">
-              No folders yet — click + to open one.
             </div>
-          )
-        ) : (
-          <ConnectionManager />
+            {remotePins.length > 0 ? (
+              remotePins.map((path, index) => (
+                <RootTree
+                  key={path}
+                  connId={remote.connId}
+                  rootPath={path}
+                  label={basename(path) || path}
+                  removable
+                  defaultCollapsed
+                  showHidden={showHiddenRemote}
+                  refreshToken={refreshTokenRemote}
+                  rootId={`${remote.connId}::${path}`}
+                  order={2000 + index}
+                  onRemove={() => removeRemotePin(path)}
+                />
+              ))
+            ) : (
+              <div className="filetree__message">
+                No folders yet — click + to open one.
+              </div>
+            )}
+          </>
+        )}
+        </>
         )}
       </div>
     </div>

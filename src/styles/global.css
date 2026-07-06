@@ -114,6 +114,11 @@
   transition: background 120ms ease, color 120ms ease;
 }
 
+/* The ⌘ button warns when settings.json has problems (details in the palette). */
+.titlebar__btn--warn {
+  color: var(--error);
+}
+
 .titlebar__btn:hover {
   background: var(--bg-tertiary);
   color: var(--fg-primary);
@@ -453,6 +458,17 @@
   padding: var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
+}
+
+/* In the host bar the menu drops below the bar instead of flowing inline. */
+.host-bar .color-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  border: 1px solid var(--border);
+  flex-wrap: wrap;
 }
 
 .color-menu__label {
@@ -2286,9 +2302,11 @@ select option {
 
 /* ------------------------------------------------------- Sidebar roots */
 
-/* Section bars carry the theme's main color; --section-fg is the contrasting
- * text/icon color each theme picks for on-accent readability. */
+/* Section bars: Local / WSL / Remote each carry an identity color (theme keys
+ * section-local / section-wsl / section-remote); --section-fg is the
+ * contrasting text/icon color each theme picks for on-accent readability. */
 .sidebar__section-head {
+  --section-color: var(--accent);
   display: flex;
   align-items: center;
   gap: var(--space-1);
@@ -2298,11 +2316,20 @@ select option {
   letter-spacing: 0.08em;
   background: linear-gradient(
     90deg,
-    var(--accent),
-    color-mix(in srgb, var(--accent) 45%, var(--bg-secondary)) 70%,
-    color-mix(in srgb, var(--accent) 20%, var(--bg-secondary))
+    var(--section-color),
+    color-mix(in srgb, var(--section-color) 45%, var(--bg-secondary)) 70%,
+    color-mix(in srgb, var(--section-color) 20%, var(--bg-secondary))
   );
   color: var(--section-fg);
+}
+
+.sidebar__section-head--local {
+  --section-color: var(--section-local);
+}
+
+.sidebar__section-head--wsl {
+  --section-color: var(--section-wsl);
+  margin-top: var(--space-4);
 }
 
 .sidebar__section-head .icon-btn {
@@ -2340,7 +2367,73 @@ select option {
 }
 
 .sidebar__section-head--remote {
+  --section-color: var(--section-remote);
   margin-top: var(--space-4);
+}
+
+/* L / W / R section toggles in the Explorer header. Off = struck + dimmed;
+ * the connection is untouched, only the section's rendering hides. */
+.section-toggle {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.section-toggle:hover {
+  background: var(--bg-tertiary);
+}
+
+.section-toggle--off {
+  text-decoration: line-through;
+  opacity: 0.4;
+}
+
+/* One connected host under the Remote bar: its identity color as a softer
+ * gradient + edge stripe (right-click opens the color menu). */
+.host-bar {
+  --host-color: var(--section-remote);
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-4) var(--space-1) var(--space-4);
+  font-size: var(--font-size-xs);
+  border-left: 3px solid var(--host-color);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--host-color) 50%, var(--bg-secondary)),
+    color-mix(in srgb, var(--host-color) 16%, var(--bg-secondary))
+  );
+  color: var(--section-fg);
+}
+
+.host-bar__label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.host-bar .icon-btn {
+  flex: 0 0 auto;
+  color: var(--section-fg);
+  opacity: 0.85;
+}
+
+.host-bar .icon-btn:hover {
+  opacity: 1;
+}
+
+.host-bar .sidebar__section-ago {
+  color: color-mix(in srgb, var(--section-fg) 75%, transparent);
 }
 
 .root-tree {
@@ -2554,6 +2647,25 @@ select option {
   white-space: nowrap;
 }
 
+/* Side-by-side editor groups (splits) fill the area under no extra chrome. */
+.editor-area__groups {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.editor-group {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+}
+
+/* With several groups open, the focused one carries an accent stripe on its
+ * tab bar (a lone group doesn't need the hint). */
+.editor-group--focused .editor-tabs {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
 .editor-area__body {
   flex: 1 1 auto;
   min-height: 0;
@@ -2713,6 +2825,11 @@ select option {
   flex: 0 0 auto;
 }
 
+/* WSL/remote tabs carry their host's identity color as a bottom stripe. */
+.editor-tab--host {
+  box-shadow: inset 0 -2px 0 var(--tab-host-color);
+}
+
 .editor-tab:hover {
   background: var(--bg-tertiary);
 }
@@ -2819,6 +2936,7 @@ select option {
 .empty-state__logo {
   width: 64px;
   height: 64px;
+  border-radius: var(--radius-md);
   opacity: 0.5;
 }
 
@@ -2939,8 +3057,24 @@ select option {
   overflow: hidden;
 }
 
-.terminal-host .xterm {
+/* The reparentable inner div xterm actually lives in (see lib/terminalSlots). */
+.terminal-host__inner {
+  width: 100%;
   height: 100%;
+}
+
+.terminal-host .xterm,
+.terminal-host__inner .xterm {
+  height: 100%;
+}
+
+/* A terminal hosted in an editor pane (the inner div is moved here). */
+.terminal-editor-host {
+  position: absolute;
+  inset: 0;
+  padding: var(--space-3) 0 var(--space-3) var(--space-5);
+  overflow: hidden;
+  background: var(--bg-primary);
 }
 
 .terminal-message {
