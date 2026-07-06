@@ -20,7 +20,7 @@ export function EditorTabs({ groupId }: { groupId: number }) {
   const openTabMenu = useAppStore((s) => s.openTabMenu);
   // Subscribed so tab markers re-render when hosts/colors change.
   useAppStore((s) => s.hostColors);
-  useAppStore((s) => s.remote?.connId);
+  useAppStore((s) => s.remotes);
   useAppStore((s) => s.wsl?.connId);
 
   if (tabs.length === 0) return null;

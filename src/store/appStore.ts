@@ -244,6 +244,37 @@ export function remoteHostKey(r: RemoteConnection): string {
   return `${r.user}@${r.host}:${r.port}`;
 }
 
+// ---- multi-remote -----------------------------------------------------------
+
+export const MAX_REMOTES = 3;
+
+/** One attached remote host: its connection plus per-host explorer state.
+ *  The window holds up to MAX_REMOTES of these, each with its own host bar. */
+export interface RemoteWorkspace {
+  conn: RemoteConnection;
+  rootPath: string;
+  pins: string[];
+  showHidden: boolean;
+  refreshToken: number;
+  lastRefresh: number | null;
+  state: ConnectionState;
+}
+
+/** Legacy single-remote fields, mirrored from the primary (first) remote so
+ *  surfaces that only care about "the remote" keep working unchanged. */
+function remoteMirror(remotes: RemoteWorkspace[]) {
+  const p = remotes[0] ?? null;
+  return {
+    remotes,
+    remote: p?.conn ?? null,
+    remoteRootPath: p?.rootPath ?? null,
+    remotePins: p?.pins ?? [],
+    showHiddenRemote: p?.showHidden ?? false,
+    refreshTokenRemote: p?.refreshToken ?? 0,
+    lastRefreshRemote: p?.lastRefresh ?? null,
+  };
+}
+
 // Host identity colors, keyed by `user@host:port` (remote hosts only — Local
 // and WSL use their section colors). Persisted so prod stays "its" color.
 const HOST_COLORS_KEY = "straylight.hostColors";
@@ -396,10 +427,16 @@ interface AppState {
   addPinnedFolder: (path: string) => void;
   removePinnedFolder: (path: string) => void;
 
+  /** All attached remotes (≤ MAX_REMOTES); `remote` etc. mirror the first. */
+  remotes: RemoteWorkspace[];
+  /** Add (or refresh, matched by user@host:port) a connected remote. */
   setRemote: (remote: RemoteConnection, rootPath: string) => void;
-  clearRemote: () => void;
-  addRemotePin: (path: string) => void;
-  removeRemotePin: (path: string) => void;
+  /** Detach one remote (closing its tabs/terminals); no arg = the primary. */
+  clearRemote: (connId?: string) => void;
+  /** Per-remote connection state (host bar dot / reconnect). */
+  setRemoteState: (connId: string, state: ConnectionState, message?: string | null) => void;
+  addRemotePin: (connId: string, path: string) => void;
+  removeRemotePin: (connId: string, path: string) => void;
   setWsl: (wsl: RemoteConnection, rootPath: string) => void;
   clearWsl: () => void;
   addWslPin: (path: string) => void;
@@ -421,13 +458,14 @@ interface AppState {
   setTerminalVisible: (visible: boolean) => void;
   setNewTerminalTarget: (target: TerminalTargetPref) => void;
   toggleHiddenLocal: () => void;
-  toggleHiddenRemote: () => void;
+  toggleHiddenRemote: (connId: string) => void;
   toggleHiddenWsl: () => void;
   /** Set (or null = reset to the auto ramp) a remote host's identity color. */
   setHostColor: (hostKey: string, color: string | null) => void;
   toggleSection: (which: keyof SectionVisibility) => void;
   refreshLocal: () => void;
-  refreshRemote: () => void;
+  /** Refresh one remote's trees, or all remotes when no id is given. */
+  refreshRemote: (connId?: string) => void;
   refreshWsl: () => void;
   /** Refresh whichever section owns this connection (used after file ops). */
   refreshConn: (connId: string) => void;
@@ -581,6 +619,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   localConnId: null,
   pinnedFolders: loadPinned(),
 
+  remotes: [],
   remote: null,
   remoteRootPath: null,
   remotePins: [],
@@ -658,55 +697,82 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }),
 
   setRemote: (remote, rootPath) =>
-    set({
-      remote,
-      remoteRootPath: rootPath,
-      remotePins: loadConnPins(REMOTE_PINS_KEY, remoteHostKey(remote)) ?? [rootPath],
-      connState: "connected",
-      connMessage: null,
+    set((s) => {
+      const key = remoteHostKey(remote);
+      const fresh: RemoteWorkspace = {
+        conn: remote,
+        rootPath,
+        pins: loadConnPins(REMOTE_PINS_KEY, key) ?? [rootPath],
+        showHidden: false,
+        refreshToken: 0,
+        lastRefresh: null,
+        state: "connected",
+      };
+      const idx = s.remotes.findIndex((r) => remoteHostKey(r.conn) === key);
+      const remotes =
+        idx >= 0
+          ? // Re-connect to a known host: keep its pins/toggles, swap the conn.
+            s.remotes.map((r, i) =>
+              i === idx
+                ? { ...fresh, pins: r.pins, showHidden: r.showHidden }
+                : r,
+            )
+          : [...s.remotes, fresh];
+      return { ...remoteMirror(remotes), connState: "connected", connMessage: null };
     }),
 
-  clearRemote: () =>
+  clearRemote: (connId) =>
     set((s) => {
-      // Close any tabs and terminals belonging to the remote.
-      const remoteId = s.remote?.connId;
-      const tabs = remoteId
-        ? s.tabs.filter((t) => t.connId !== remoteId)
-        : s.tabs;
-      const activeTabId = tabs.some((t) => t.id === s.activeTabId)
-        ? s.activeTabId
-        : (tabs[tabs.length - 1]?.id ?? null);
-      const terminals = remoteId
-        ? s.terminals.filter((t) => t.connId !== remoteId)
-        : s.terminals;
+      const target = connId ?? s.remotes[0]?.conn.connId;
+      if (!target) return {};
+      const remotes = s.remotes.filter((r) => r.conn.connId !== target);
+      // Close any tabs and terminals belonging to that remote.
+      const tabs = s.tabs.filter((t) => t.connId !== target);
+      const terminals = s.terminals.filter((t) => t.connId !== target);
       const activeTerminalId = terminals.some((t) => t.id === s.activeTerminalId)
         ? s.activeTerminalId
         : (terminals[terminals.length - 1]?.id ?? null);
       return {
-        remote: null,
-        remoteRootPath: null,
-        remotePins: [],
-        connState: "disconnected",
+        ...remoteMirror(remotes),
+        connState: remotes[0]?.state ?? "disconnected",
         connMessage: null,
-        tabs,
-        activeTabId,
+        ...(tabs.length !== s.tabs.length ? groupsPatch(s, tabs) : {}),
         terminals,
         activeTerminalId,
       };
     }),
 
-  addRemotePin: (path) =>
+  setRemoteState: (connId, state, message = null) =>
     set((s) => {
-      if (s.remotePins.includes(path)) return {};
-      const remotePins = [...s.remotePins, path];
-      if (s.remote) saveConnPins(REMOTE_PINS_KEY, remoteHostKey(s.remote), remotePins);
-      return { remotePins };
+      const remotes = s.remotes.map((r) =>
+        r.conn.connId === connId ? { ...r, state } : r,
+      );
+      const primary = remotes[0]?.conn.connId === connId;
+      return {
+        remotes,
+        ...(primary ? { connState: state, connMessage: message } : {}),
+      };
     }),
-  removeRemotePin: (path) =>
+
+  addRemotePin: (connId, path) =>
     set((s) => {
-      const remotePins = s.remotePins.filter((p) => p !== path);
-      if (s.remote) saveConnPins(REMOTE_PINS_KEY, remoteHostKey(s.remote), remotePins);
-      return { remotePins };
+      const entry = s.remotes.find((r) => r.conn.connId === connId);
+      if (!entry || entry.pins.includes(path)) return {};
+      const pins = [...entry.pins, path];
+      saveConnPins(REMOTE_PINS_KEY, remoteHostKey(entry.conn), pins);
+      return remoteMirror(
+        s.remotes.map((r) => (r.conn.connId === connId ? { ...r, pins } : r)),
+      );
+    }),
+  removeRemotePin: (connId, path) =>
+    set((s) => {
+      const entry = s.remotes.find((r) => r.conn.connId === connId);
+      if (!entry) return {};
+      const pins = entry.pins.filter((p) => p !== path);
+      saveConnPins(REMOTE_PINS_KEY, remoteHostKey(entry.conn), pins);
+      return remoteMirror(
+        s.remotes.map((r) => (r.conn.connId === connId ? { ...r, pins } : r)),
+      );
     }),
 
   setWsl: (wsl, rootPath) =>
@@ -779,8 +845,14 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set({ newTerminalTarget });
   },
   toggleHiddenLocal: () => set((s) => ({ showHiddenLocal: !s.showHiddenLocal })),
-  toggleHiddenRemote: () =>
-    set((s) => ({ showHiddenRemote: !s.showHiddenRemote })),
+  toggleHiddenRemote: (connId) =>
+    set((s) =>
+      remoteMirror(
+        s.remotes.map((r) =>
+          r.conn.connId === connId ? { ...r, showHidden: !r.showHidden } : r,
+        ),
+      ),
+    ),
   toggleHiddenWsl: () => set((s) => ({ showHiddenWsl: !s.showHiddenWsl })),
   setHostColor: (hostKey, color) =>
     set((s) => {
@@ -806,8 +878,16 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }),
   refreshLocal: () =>
     set((s) => ({ refreshTokenLocal: s.refreshTokenLocal + 1 })),
-  refreshRemote: () =>
-    set((s) => ({ refreshTokenRemote: s.refreshTokenRemote + 1 })),
+  refreshRemote: (connId) =>
+    set((s) =>
+      remoteMirror(
+        s.remotes.map((r) =>
+          connId === undefined || r.conn.connId === connId
+            ? { ...r, refreshToken: r.refreshToken + 1 }
+            : r,
+        ),
+      ),
+    ),
   refreshWsl: () => set((s) => ({ refreshTokenWsl: s.refreshTokenWsl + 1 })),
   refreshConn: (connId) =>
     set((s) =>
@@ -815,7 +895,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
         ? { refreshTokenLocal: s.refreshTokenLocal + 1 }
         : connId === s.wsl?.connId
           ? { refreshTokenWsl: s.refreshTokenWsl + 1 }
-          : { refreshTokenRemote: s.refreshTokenRemote + 1 },
+          : remoteMirror(
+              s.remotes.map((r) =>
+                r.conn.connId === connId
+                  ? { ...r, refreshToken: r.refreshToken + 1 }
+                  : r,
+              ),
+            ),
     ),
   markRefreshed: (connId) =>
     set((s) =>
@@ -823,9 +909,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
         ? { lastRefreshLocal: Date.now() }
         : connId === s.wsl?.connId
           ? { lastRefreshWsl: Date.now() }
-          : connId === s.remote?.connId
-            ? { lastRefreshRemote: Date.now() }
-            : {},
+          : remoteMirror(
+              s.remotes.map((r) =>
+                r.conn.connId === connId ? { ...r, lastRefresh: Date.now() } : r,
+              ),
+            ),
     ),
 
   openTerminal: (connId, label, command = null, initialInput = null) =>

@@ -27,6 +27,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 - Terminal tab reordering.
 
+## [0.8.12] - 2026-07-06
+
+### Added
+
+- **Multi-remote: up to 3 SSH hosts in one window.** The Remote section's +
+  attaches additional servers; each gets its own host bar (color, pins,
+  hidden-files toggle, refresh stamp, state dot, per-host reconnect and
+  disconnect) with its tree below. Terminals, version control, search/quick-
+  open scopes, and tab color stripes are all per-host; sessions persist and
+  restore every attached remote (key hosts auto-reconnect; the first password
+  host gets the pre-filled dialog). The title/status bars show the primary
+  (first) remote; transfers pair Local ⇄ the primary for now.
+
 ## [0.8.11] - 2026-07-06
 
 ### Added

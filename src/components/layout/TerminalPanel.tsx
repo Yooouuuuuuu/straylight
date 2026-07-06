@@ -20,7 +20,7 @@ const TARGET_LABELS: Record<(typeof TARGET_OPTIONS)[number], string> = {
 };
 
 export function TerminalPanel() {
-  const remote = useAppStore((s) => s.remote);
+  const remotes = useAppStore((s) => s.remotes);
   const wsl = useAppStore((s) => s.wsl);
   const localConnId = useAppStore((s) => s.localConnId);
   const terminals = useAppStore((s) => s.terminals);
@@ -68,9 +68,9 @@ export function TerminalPanel() {
     if (localConnId) openTerminal(localConnId, p.label, p.command);
   };
 
-  const openRemoteShell = () => {
+  const openRemoteShell = (connId: string, name: string) => {
     setMenuOpen(false);
-    if (remote) openTerminal(remote.connId, remote.name);
+    openTerminal(connId, name);
   };
 
   const openWslShell = () => {
@@ -144,12 +144,18 @@ export function TerminalPanel() {
           <>
             <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />
             <div className="terminal-menu" role="menu">
-              {remote && (
+              {remotes.length > 0 && (
                 <>
-                  <button className="terminal-menu__item" onClick={openRemoteShell}>
-                    {remote.name}
-                    <span className="terminal-menu__hint">remote</span>
-                  </button>
+                  {remotes.map((r) => (
+                    <button
+                      key={r.conn.connId}
+                      className="terminal-menu__item"
+                      onClick={() => openRemoteShell(r.conn.connId, r.conn.name)}
+                    >
+                      {r.conn.name}
+                      <span className="terminal-menu__hint">remote</span>
+                    </button>
+                  ))}
                   <div className="terminal-menu__sep" />
                 </>
               )}

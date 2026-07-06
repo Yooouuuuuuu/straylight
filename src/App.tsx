@@ -58,7 +58,11 @@ export default function App() {
   const setSidebarVisible = useAppStore((s) => s.setSidebarVisible);
   const setTerminalVisible = useAppStore((s) => s.setTerminalVisible);
 
-  const remoteConnId = useAppStore((s) => s.remote?.connId ?? null);
+  // Joined ids of ALL attached remotes, so connect/disconnect of any of them
+  // re-resolves tracked repos.
+  const remoteConnIds = useAppStore((s) =>
+    s.remotes.map((r) => r.conn.connId).join(","),
+  );
   const wslConnId = useAppStore((s) => s.wsl?.connId ?? null);
   const scmVisible = useVcsStore((s) => s.scmVisible);
   const setScmVisible = useVcsStore((s) => s.setScmVisible);
@@ -128,14 +132,14 @@ export default function App() {
   useEffect(() => {
     const unlistenPromise = onSshStatus((status) => {
       const store = useAppStore.getState();
-      const current = store.remote;
-      if (!current || status.connId !== current.connId) return;
-      const wasReconnecting = store.connState === "reconnecting";
-      store.setConnState(status.state, status.message);
+      const entry = store.remotes.find((r) => r.conn.connId === status.connId);
+      if (!entry) return;
+      const wasReconnecting = entry.state === "reconnecting";
+      store.setRemoteState(status.connId, status.state, status.message);
       if (status.state === "connected" && wasReconnecting) {
-        store.refreshRemote();
-        store.restartConnTerminals(current.connId);
-        store.pushNotice("info", "Reconnected.");
+        store.refreshRemote(status.connId);
+        store.restartConnTerminals(status.connId);
+        store.pushNotice("info", `Reconnected to ${entry.conn.name}.`);
       }
     });
     return () => {
@@ -159,7 +163,7 @@ export default function App() {
   // repos get their fs watcher, and newly-online repos populate once.
   useEffect(() => {
     useVcsStore.getState().resolveConns();
-  }, [localConnId, remoteConnId, wslConnId]);
+  }, [localConnId, remoteConnIds, wslConnId]);
 
   // A watched local repo changed on disk (terminal git ops, external edits).
   useEffect(() => {

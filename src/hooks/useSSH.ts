@@ -1,6 +1,7 @@
-/** Remote connection actions: attach/detach the window's single SSH connection
- *  and load its home directory as the remote root. The local session is always
- *  present (created at startup) and managed separately. */
+/** Remote connection actions: attach/detach the window's SSH connections (up
+ *  to MAX_REMOTES simultaneously), loading each host's home directory as its
+ *  root. The local session is always present (created at startup) and managed
+ *  separately. */
 import { useCallback } from "react";
 
 import {
@@ -10,7 +11,12 @@ import {
   sshReconnect,
   type AuthMethod,
 } from "../lib/ipc";
-import { useAppStore, type RemoteConnection } from "../store/appStore";
+import {
+  MAX_REMOTES,
+  remoteHostKey,
+  useAppStore,
+  type RemoteConnection,
+} from "../store/appStore";
 import {
   clearDesiredRemote,
   consumePendingRemoteTabs,
@@ -35,14 +41,26 @@ export function useSSH() {
     async (profile: ConnectProfile, opts?: { onKeyAuthFail?: () => void }) => {
       const store = useAppStore.getState();
 
-      // One remote per window: drop any existing one first.
-      if (store.remote) {
-        try {
-          await sshDisconnect(store.remote.connId);
-        } catch {
-          /* ignore */
+      // Reconnecting to an attached host refreshes it; a NEW host needs a slot.
+      const key = `${profile.user}@${profile.host}:${profile.port}`;
+      const known = store.remotes.some((r) => remoteHostKey(r.conn) === key);
+      if (!known && store.remotes.length >= MAX_REMOTES) {
+        store.pushNotice(
+          "warn",
+          `Up to ${MAX_REMOTES} remotes per window — disconnect one first.`,
+        );
+        throw new Error("remote slots full");
+      }
+      if (known) {
+        // Drop the stale transport before dialing the same host again.
+        const old = store.remotes.find((r) => remoteHostKey(r.conn) === key);
+        if (old) {
+          try {
+            await sshDisconnect(old.conn.connId);
+          } catch {
+            /* ignore */
+          }
         }
-        store.clearRemote();
       }
 
       store.setDialogOpen(false);
@@ -98,32 +116,36 @@ export function useSSH() {
     [],
   );
 
-  const disconnect = useCallback(async () => {
+  const disconnect = useCallback(async (connId?: string) => {
     const store = useAppStore.getState();
-    if (store.remote) {
+    const entry =
+      store.remotes.find((r) => r.conn.connId === connId) ?? store.remotes[0];
+    if (entry) {
       try {
-        await sshDisconnect(store.remote.connId);
+        await sshDisconnect(entry.conn.connId);
       } catch {
         /* ignore */
       }
+      // Explicit disconnect: forget this server so it isn't auto-reconnected
+      // next launch.
+      clearDesiredRemote(remoteHostKey(entry.conn));
+      store.clearRemote(entry.conn.connId);
     }
-    // Explicit disconnect: forget the server so it isn't auto-reconnected next
-    // launch.
-    clearDesiredRemote();
-    store.clearRemote();
   }, []);
 
   // Re-establish a connection the supervisor gave up on. The backend keeps the
   // same connId, so open tabs and the terminal reattach; refresh the tree and
   // restart the terminal once the link is back.
-  const reconnect = useCallback(async () => {
+  const reconnect = useCallback(async (connId?: string) => {
     const store = useAppStore.getState();
-    if (!store.remote) return;
+    const entry =
+      store.remotes.find((r) => r.conn.connId === connId) ?? store.remotes[0];
+    if (!entry) return;
     try {
       // The backend emits reconnecting → connected; the ssh-status handler in
       // App.tsx is the single place that refreshes the tree and restarts the
       // terminal on recovery, so we don't duplicate that here.
-      await sshReconnect(store.remote.connId);
+      await sshReconnect(entry.conn.connId);
     } catch (error) {
       store.pushNotice("error", `Reconnect failed: ${String(error)}`);
     }

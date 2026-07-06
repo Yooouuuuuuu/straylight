@@ -145,8 +145,9 @@ const KEY = "straylight.vcsRepos";
 function connKeyFor(connId: string): string | null {
   const s = useAppStore.getState();
   if (connId === s.localConnId) return "local";
-  if (s.remote && connId === s.remote.connId)
-    return `${s.remote.user}@${s.remote.host}:${s.remote.port}`;
+  const remote = s.remotes.find((r) => r.conn.connId === connId);
+  if (remote)
+    return `${remote.conn.user}@${remote.conn.host}:${remote.conn.port}`;
   if (s.wsl && connId === s.wsl.connId) return `wsl:${s.wsl.name}`;
   return null;
 }
@@ -154,8 +155,10 @@ function connKeyFor(connId: string): string | null {
 function connIdForKey(connKey: string): string | null {
   const s = useAppStore.getState();
   if (connKey === "local") return s.localConnId;
-  if (s.remote && connKey === `${s.remote.user}@${s.remote.host}:${s.remote.port}`)
-    return s.remote.connId;
+  const remote = s.remotes.find(
+    (r) => connKey === `${r.conn.user}@${r.conn.host}:${r.conn.port}`,
+  );
+  if (remote) return remote.conn.connId;
   if (s.wsl && connKey === `wsl:${s.wsl.name}`) return s.wsl.connId;
   return null;
 }

@@ -39,22 +39,18 @@ import {
 
 export function Sidebar() {
   const showHiddenLocal = useAppStore((s) => s.showHiddenLocal);
-  const showHiddenRemote = useAppStore((s) => s.showHiddenRemote);
   const toggleHiddenLocal = useAppStore((s) => s.toggleHiddenLocal);
   const toggleHiddenRemote = useAppStore((s) => s.toggleHiddenRemote);
   const refreshLocal = useAppStore((s) => s.refreshLocal);
   const refreshRemote = useAppStore((s) => s.refreshRemote);
   const refreshTokenLocal = useAppStore((s) => s.refreshTokenLocal);
-  const refreshTokenRemote = useAppStore((s) => s.refreshTokenRemote);
   const lastRefreshLocal = useAppStore((s) => s.lastRefreshLocal);
-  const lastRefreshRemote = useAppStore((s) => s.lastRefreshRemote);
   const localConnId = useAppStore((s) => s.localConnId);
   const pinnedFolders = useAppStore((s) => s.pinnedFolders);
   const addPinnedFolder = useAppStore((s) => s.addPinnedFolder);
   const removePinnedFolder = useAppStore((s) => s.removePinnedFolder);
+  const remotes = useAppStore((s) => s.remotes);
   const remote = useAppStore((s) => s.remote);
-  const remoteRootPath = useAppStore((s) => s.remoteRootPath);
-  const remotePins = useAppStore((s) => s.remotePins);
   const addRemotePin = useAppStore((s) => s.addRemotePin);
   const removeRemotePin = useAppStore((s) => s.removeRemotePin);
   const wsl = useAppStore((s) => s.wsl);
@@ -65,16 +61,17 @@ export function Sidebar() {
   const toggleSection = useAppStore((s) => s.toggleSection);
   const hostColors = useAppStore((s) => s.hostColors);
   const setHostColor = useAppStore((s) => s.setHostColor);
-  const { disconnect } = useSSH();
+  const { disconnect, reconnect } = useSSH();
   // "Connect to another server" while one is already attached (the + on the
   // Remote bar); connecting replaces the current remote, as before.
   const [connectOpen, setConnectOpen] = useState(false);
-  const [hostMenu, setHostMenu] = useState(false);
+  /** Which host bar's color menu is open (connId), if any. */
+  const [hostMenu, setHostMenu] = useState<string | null>(null);
   // A successful connect (or a disconnect) closes the connect panel.
   useEffect(() => {
     setConnectOpen(false);
-    setHostMenu(false);
-  }, [remote?.connId]);
+    setHostMenu(null);
+  }, [remotes.length]);
 
   // Transfer panel (drag between two connections). The three buttons in the
   // Explorer header open it for whichever pairs are connected.
@@ -85,14 +82,16 @@ export function Sidebar() {
   const localConn: TransferConn | null = localConnId
     ? { connId: localConnId, roots: pinnedFolders, label: "Local", color: "#8be9fd" }
     : null;
-  const remoteConn: TransferConn | null = remote
-    ? {
-        connId: remote.connId,
-        roots: remotePins,
-        label: remote.name,
-        color: remote.color,
-      }
-    : null;
+  // Transfers pair with the primary (first) remote for now.
+  const remoteConn: TransferConn | null =
+    remote && remotes[0]
+      ? {
+          connId: remote.connId,
+          roots: remotes[0].pins,
+          label: remote.name,
+          color: remote.color,
+        }
+      : null;
   const wslConn: TransferConn | null = wsl
     ? { connId: wsl.connId, roots: wslPins, label: wsl.name, color: "#bd93f9" }
     : null;
@@ -116,13 +115,12 @@ export function Sidebar() {
     });
   };
 
-  const openRemoteFolder = () => {
-    if (!remote) return;
+  const openRemoteFolder = (connId: string, name: string) => {
     setBrowse({
-      connId: remote.connId,
-      title: `Open a folder on ${remote.name}`,
+      connId,
+      title: `Open a folder on ${name}`,
       onPick: (path) => {
-        addRemotePin(path);
+        addRemotePin(connId, path);
         setBrowse(null);
       },
     });
@@ -138,10 +136,6 @@ export function Sidebar() {
     return fallback;
   };
   const localNewParent = targetIn(localConnId, pinnedFolders[0] ?? null);
-  const remoteNewParent = targetIn(
-    remote?.connId ?? null,
-    remotePins[0] ?? remoteRootPath,
-  );
 
   // Arrow-key navigation of the tree, scoped to when the explorer has focus.
   const contentRef = useRef<HTMLDivElement>(null);
@@ -344,31 +338,35 @@ export function Sidebar() {
           >
             <IconExternal size={13} />
           </button>
-          {remote && (
+          {remotes.length > 0 && remotes.length < 3 && (
             <button
               className={`icon-btn sidebar__section-action ${connectOpen ? "icon-btn--active" : ""}`}
-              title="Connect to a server (replaces the current one)"
+              title="Connect another server (up to 3)"
               onClick={() => setConnectOpen((o) => !o)}
             >
               <IconPlus />
             </button>
           )}
         </div>
-        {(!remote || connectOpen) && <ConnectionManager />}
-        {remote && (
-          <>
+        {(remotes.length === 0 || connectOpen) && <ConnectionManager />}
+        {remotes.map((r, rIdx) => {
+          const conn = r.conn;
+          const key = remoteHostKey(conn);
+          const newParent = targetIn(conn.connId, r.pins[0] ?? r.rootPath);
+          return (
+          <div key={conn.connId}>
             <div
               className="host-bar"
-              style={{ "--host-color": remoteColor(hostColors, remote) } as React.CSSProperties}
-              title={`${remote.name} (${remoteHostKey(remote)}) — right-click: host color`}
+              style={{ "--host-color": remoteColor(hostColors, conn) } as React.CSSProperties}
+              title={`${conn.name} (${key}) — right-click: host color`}
               onContextMenu={(e) => {
                 e.preventDefault();
-                setHostMenu((o) => !o);
+                setHostMenu((o) => (o === conn.connId ? null : conn.connId));
               }}
             >
-              {hostMenu && (
+              {hostMenu === conn.connId && (
                 <div className="color-menu">
-                  <span className="color-menu__label">{remoteHostKey(remote)}</span>
+                  <span className="color-menu__label">{key}</span>
                   {[...HOST_COLOR_RAMP, ...PALETTE].map((c) => (
                     <button
                       key={c}
@@ -376,8 +374,8 @@ export function Sidebar() {
                       style={{ background: c }}
                       title={c.startsWith("var(") ? paletteName(c) : c}
                       onClick={() => {
-                        setHostColor(remoteHostKey(remote), c);
-                        setHostMenu(false);
+                        setHostColor(key, c);
+                        setHostMenu(null);
                       }}
                     />
                   ))}
@@ -385,40 +383,47 @@ export function Sidebar() {
                     className="color-menu__reset"
                     title="Back to the default host color"
                     onClick={() => {
-                      setHostColor(remoteHostKey(remote), null);
-                      setHostMenu(false);
+                      setHostColor(key, null);
+                      setHostMenu(null);
                     }}
                   >
                     Auto
                   </button>
                 </div>
               )}
-              <span className="host-bar__label" title={remoteHostKey(remote)}>
-                {remote.user}@{remote.host}
+              <span className={`dot dot--${r.state}`} />
+              <span className="host-bar__label" title={key}>
+                {conn.user}@{conn.host}
               </span>
+              {r.state === "disconnected" && (
+                <button
+                  className="icon-btn"
+                  title="Reconnect"
+                  onClick={() => void reconnect(conn.connId)}
+                >
+                  <IconRefresh />
+                </button>
+              )}
               <button
-                className={`icon-btn ${showHiddenRemote ? "icon-btn--active" : ""}`}
-                title={
-                  showHiddenRemote ? "Hide hidden files" : "Show hidden files"
-                }
-                onClick={() => toggleHiddenRemote()}
+                className={`icon-btn ${r.showHidden ? "icon-btn--active" : ""}`}
+                title={r.showHidden ? "Hide hidden files" : "Show hidden files"}
+                onClick={() => toggleHiddenRemote(conn.connId)}
               >
-                {showHiddenRemote ? <IconEye /> : <IconEyeOff />}
+                {r.showHidden ? <IconEye /> : <IconEyeOff />}
               </button>
               <button
                 className="icon-btn"
                 title="Open a folder"
-                onClick={openRemoteFolder}
+                onClick={() => openRemoteFolder(conn.connId, conn.name)}
               >
                 <IconPlus />
               </button>
               <button
                 className="icon-btn"
                 title="New file"
-                disabled={!remoteNewParent}
+                disabled={!newParent}
                 onClick={() => {
-                  if (remote && remoteNewParent)
-                    openNewEntry(remote.connId, remoteNewParent, false);
+                  if (newParent) openNewEntry(conn.connId, newParent, false);
                 }}
               >
                 <IconFilePlus />
@@ -426,44 +431,43 @@ export function Sidebar() {
               <button
                 className="icon-btn"
                 title="New folder"
-                disabled={!remoteNewParent}
+                disabled={!newParent}
                 onClick={() => {
-                  if (remote && remoteNewParent)
-                    openNewEntry(remote.connId, remoteNewParent, true);
+                  if (newParent) openNewEntry(conn.connId, newParent, true);
                 }}
               >
                 <IconFolderPlus />
               </button>
               <button
                 className="icon-btn"
-                title="Refresh remote"
-                onClick={() => refreshRemote()}
+                title={`Refresh ${conn.name}`}
+                onClick={() => refreshRemote(conn.connId)}
               >
                 <IconRefresh />
               </button>
-              <RelativeTime at={lastRefreshRemote} />
+              <RelativeTime at={r.lastRefresh} />
               <button
                 className="icon-btn icon-btn--danger sidebar__section-action"
-                title="Disconnect"
-                onClick={() => void disconnect()}
+                title={`Disconnect ${conn.name}`}
+                onClick={() => void disconnect(conn.connId)}
               >
                 <IconLogout />
               </button>
             </div>
-            {remotePins.length > 0 ? (
-              remotePins.map((path, index) => (
+            {r.pins.length > 0 ? (
+              r.pins.map((path, index) => (
                 <RootTree
                   key={path}
-                  connId={remote.connId}
+                  connId={conn.connId}
                   rootPath={path}
                   label={basename(path) || path}
                   removable
                   defaultCollapsed
-                  showHidden={showHiddenRemote}
-                  refreshToken={refreshTokenRemote}
-                  rootId={`${remote.connId}::${path}`}
-                  order={2000 + index}
-                  onRemove={() => removeRemotePin(path)}
+                  showHidden={r.showHidden}
+                  refreshToken={r.refreshToken}
+                  rootId={`${conn.connId}::${path}`}
+                  order={2000 + rIdx * 100 + index}
+                  onRemove={() => removeRemotePin(conn.connId, path)}
                 />
               ))
             ) : (
@@ -471,8 +475,9 @@ export function Sidebar() {
                 No folders yet — click + to open one.
               </div>
             )}
-          </>
-        )}
+          </div>
+          );
+        })}
         </>
         )}
       </div>

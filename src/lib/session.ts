@@ -1,19 +1,24 @@
 /**
- * Session persistence: remember the open tabs, the last remote connection
- * (identity only — never the password), and panel visibility across restarts,
- * and restore them on launch.
+ * Session persistence: remember the open tabs, the attached remotes (identity
+ * only — never passwords), editor splits, and panel visibility across
+ * restarts, and restore them on launch.
  *
- * Storage is `localStorage` (consistent with pinned folders). On startup a
- * key-based remote is auto-reconnected and its tabs reopened; a password remote
- * has its connect dialog pre-filled (its tabs reopen once the user connects).
- * Files are reloaded from disk by path — unsaved buffers are not cached.
+ * Storage is `localStorage` (consistent with pinned folders). On startup each
+ * key-based remote is auto-reconnected and its tabs reopened; password remotes
+ * get the connect dialog pre-filled (first one) — their tabs reopen once the
+ * user connects. Files are reloaded from disk by path — unsaved buffers are
+ * not cached.
  */
 import { openFileByPath } from "./openFile";
-import { useAppStore, type RemoteConnection } from "../store/appStore";
+import {
+  remoteHostKey,
+  useAppStore,
+  type RemoteConnection,
+} from "../store/appStore";
 import type { ConnectProfile } from "../hooks/useSSH";
 
 const SESSION_KEY = "straylight.session";
-const VERSION = 1;
+const VERSION = 2;
 
 type Scope = "local" | "remote";
 
@@ -31,6 +36,8 @@ interface PersistedRemote {
 interface PersistedTab {
   scope: Scope;
   path: string;
+  /** Which remote owns the tab (`user@host:port`); absent for local tabs. */
+  host?: string;
   /** Pinned tabs restore pinned (leftmost, spared by bulk closes). */
   pinned?: boolean;
   /** The one preview (italic) tab restores as a preview. */
@@ -43,20 +50,40 @@ interface PersistedSession {
   version: number;
   sidebarVisible: boolean;
   terminalVisible: boolean;
-  remote: PersistedRemote | null;
+  remotes: PersistedRemote[];
   tabs: PersistedTab[];
   active: PersistedTab | null;
+}
+
+function persistedKey(r: PersistedRemote): string {
+  return `${r.user}@${r.host}:${r.port}`;
 }
 
 function loadSession(): PersistedSession | null {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as PersistedSession;
-    if (!parsed || parsed.version !== VERSION || !Array.isArray(parsed.tabs)) {
-      return null;
+    const parsed = JSON.parse(raw) as PersistedSession & {
+      remote?: PersistedRemote | null; // v1 shape
+    };
+    if (!parsed || !Array.isArray(parsed.tabs)) return null;
+    if (parsed.version === VERSION && Array.isArray(parsed.remotes)) {
+      return parsed;
     }
-    return parsed;
+    if (parsed.version === 1) {
+      // v1 → v2: one remote becomes a list; its tabs get the host key.
+      const remotes = parsed.remote ? [parsed.remote] : [];
+      const key = parsed.remote ? persistedKey(parsed.remote) : undefined;
+      const tabs = parsed.tabs.map((t) =>
+        t.scope === "remote" ? { ...t, host: key } : t,
+      );
+      const active =
+        parsed.active?.scope === "remote"
+          ? { ...parsed.active, host: key }
+          : parsed.active;
+      return { ...parsed, version: VERSION, remotes, tabs, active };
+    }
+    return null;
   } catch {
     return null;
   }
@@ -65,25 +92,24 @@ function loadSession(): PersistedSession | null {
 /** The session as it was on launch — captured before anything can overwrite it. */
 const savedAtStartup = loadSession();
 
-function hostKey(host: string, user: string, port: number): string {
-  return `${user}@${host}:${port}`;
-}
-
-// Remote tabs that should reopen once their host connects (auto or manual).
-let pendingRemoteRestore: { hostKey: string; tabs: PersistedTab[] } | null = null;
+// Remote tabs that should reopen once their host connects (auto or manual),
+// keyed by `user@host:port`.
+const pendingRemoteRestore = new Map<string, PersistedTab[]>();
 
 // While a restore is in progress, persistence is suppressed so a partial
 // snapshot can't be written mid-restore (e.g. before a slow reconnect lands).
 let restoring = false;
 
-// The remote we intend to persist/restore, kept separate from the live
-// connection so a transient drop or a failed launch-time reconnect doesn't
-// forget the server. Cleared only on an explicit disconnect.
-let desiredRemote: PersistedRemote | null = savedAtStartup?.remote ?? null;
+// The remotes we intend to persist/restore, kept separate from the live
+// connections so a transient drop or a failed launch-time reconnect doesn't
+// forget a server. An entry is cleared only on an explicit disconnect.
+const desiredRemotes = new Map<string, PersistedRemote>(
+  (savedAtStartup?.remotes ?? []).map((r) => [persistedKey(r), r]),
+);
 
-/** Remember the connected remote as the one to restore next launch. */
+/** Remember a connected remote as one to restore next launch. */
 export function setDesiredRemote(remote: RemoteConnection): void {
-  desiredRemote = {
+  desiredRemotes.set(remoteHostKey(remote), {
     name: remote.name,
     host: remote.host,
     user: remote.user,
@@ -92,35 +118,34 @@ export function setDesiredRemote(remote: RemoteConnection): void {
     authType: remote.authType,
     identityFile: remote.identityFile,
     proxyJump: remote.proxyJump,
-  };
+  });
 }
 
-/** Forget the saved remote (on an explicit disconnect). */
-export function clearDesiredRemote(): void {
-  desiredRemote = null;
+/** Forget one saved remote (on its explicit disconnect). */
+export function clearDesiredRemote(hostKey: string): void {
+  desiredRemotes.delete(hostKey);
+  pendingRemoteRestore.delete(hostKey);
 }
 
 // --- Writing ---------------------------------------------------------------
 
-function scopeOf(connId: string): Scope | null {
-  const s = useAppStore.getState();
-  if (connId === s.localConnId) return "local";
-  if (s.remote && connId === s.remote.connId) return "remote";
-  return null;
-}
-
 function writeSnapshot(): void {
   const s = useAppStore.getState();
 
-  // Only real file tabs persist; diff/log tabs are ephemeral.
+  // Only real file tabs persist; diff/log/terminal tabs are ephemeral.
   const fileTabs = s.tabs.filter((t) => !t.kind || t.kind === "file");
 
-  const persistTab = (t: (typeof fileTabs)[number], scope: Scope): PersistedTab => {
+  const persistTab = (
+    t: (typeof fileTabs)[number],
+    scope: Scope,
+    host?: string,
+  ): PersistedTab => {
     // Persist the group as its left-to-right index (ids are session-local).
     const group = s.editorGroups.indexOf(t.groupId ?? 0);
     return {
       scope,
       path: t.path,
+      ...(host ? { host } : {}),
       ...(t.pinned ? { pinned: true } : {}),
       ...(t.previewTab ? { preview: true } : {}),
       ...(group > 0 ? { group } : {}),
@@ -131,30 +156,48 @@ function writeSnapshot(): void {
     .filter((t) => t.connId === s.localConnId)
     .map((t) => persistTab(t, "local"));
 
-  // Remote tabs: the open ones while connected, otherwise the set still waiting
-  // to be restored — so an unconnected or failed-to-reconnect remote keeps its
-  // tab list for the next launch.
-  let remoteTabs: PersistedTab[];
-  if (s.remote) {
-    remoteTabs = fileTabs
-      .filter((t) => t.connId === s.remote!.connId)
-      .map((t) => persistTab(t, "remote"));
-  } else if (pendingRemoteRestore) {
-    remoteTabs = pendingRemoteRestore.tabs.map((t) => ({ ...t, scope: "remote" as const }));
-  } else {
-    remoteTabs = [];
+  // Remote tabs: per connected host, the open ones; for hosts still waiting to
+  // (re)connect, the pending set — so an unconnected or failed-to-reconnect
+  // remote keeps its tab list for the next launch.
+  const remoteTabs: PersistedTab[] = [];
+  const connectedKeys = new Set<string>();
+  for (const r of s.remotes) {
+    const key = remoteHostKey(r.conn);
+    connectedKeys.add(key);
+    remoteTabs.push(
+      ...fileTabs
+        .filter((t) => t.connId === r.conn.connId)
+        .map((t) => persistTab(t, "remote", key)),
+    );
+  }
+  for (const [key, tabs] of pendingRemoteRestore) {
+    if (!connectedKeys.has(key)) {
+      remoteTabs.push(...tabs.map((t) => ({ ...t, scope: "remote" as const, host: key })));
+    }
   }
 
   const activeTab = fileTabs.find((t) => t.id === s.activeTabId);
-  const activeScope = activeTab ? scopeOf(activeTab.connId) : null;
-  const active =
-    activeTab && activeScope ? { scope: activeScope, path: activeTab.path } : null;
+  let active: PersistedTab | null = null;
+  if (activeTab) {
+    if (activeTab.connId === s.localConnId) {
+      active = { scope: "local", path: activeTab.path };
+    } else {
+      const owner = s.remotes.find((r) => r.conn.connId === activeTab.connId);
+      if (owner) {
+        active = {
+          scope: "remote",
+          path: activeTab.path,
+          host: remoteHostKey(owner.conn),
+        };
+      }
+    }
+  }
 
   const session: PersistedSession = {
     version: VERSION,
     sidebarVisible: s.sidebarVisible,
     terminalVisible: s.terminalVisible,
-    remote: desiredRemote,
+    remotes: [...desiredRemotes.values()],
     tabs: [...localTabs, ...remoteTabs],
     active,
   };
@@ -203,14 +246,10 @@ function profileFromRemote(r: PersistedRemote): ConnectProfile {
 export async function consumePendingRemoteTabs(
   remote: RemoteConnection,
 ): Promise<void> {
-  if (!pendingRemoteRestore) return;
-  if (pendingRemoteRestore.hostKey !== hostKey(remote.host, remote.user, remote.port)) {
-    // Connected somewhere else — abandon the one-shot restore.
-    pendingRemoteRestore = null;
-    return;
-  }
-  const tabs = pendingRemoteRestore.tabs;
-  pendingRemoteRestore = null;
+  const key = remoteHostKey(remote);
+  const tabs = pendingRemoteRestore.get(key);
+  if (!tabs) return;
+  pendingRemoteRestore.delete(key);
   for (const t of tabs) {
     await openFileByPath(remote.connId, t.path, undefined, {
       preview: t.preview,
@@ -222,7 +261,7 @@ export async function consumePendingRemoteTabs(
 }
 
 /** Reassign restored tabs to their saved editor groups (splits). Runs after
- *  each batch of reopens — local at launch, remote once its host connects. */
+ *  each batch of reopens — local at launch, each remote once it connects. */
 function applyPersistedGroups(): void {
   const saved = savedAtStartup;
   if (!saved) return;
@@ -233,7 +272,8 @@ function applyPersistedGroups(): void {
     const tab = s.tabs.find((t) => {
       if (t.path !== p.path) return false;
       if (p.scope === "local") return t.connId === s.localConnId;
-      return !!s.remote && t.connId === s.remote.connId;
+      const owner = s.remotes.find((r) => remoteHostKey(r.conn) === p.host);
+      return !!owner && t.connId === owner.conn.connId;
     });
     if (tab) map[tab.id] = p.group;
   }
@@ -247,14 +287,15 @@ function restoreActiveTab(): void {
   const tab = s.tabs.find((t) => {
     if (t.path !== want.path) return false;
     if (want.scope === "local") return t.connId === s.localConnId;
-    return !!s.remote && t.connId === s.remote.connId;
+    const owner = s.remotes.find((r) => remoteHostKey(r.conn) === want.host);
+    return !!owner && t.connId === owner.conn.connId;
   });
   if (tab) s.setActiveTab(tab.id);
 }
 
-/** Restore the saved session: panel visibility, local tabs, and the last remote
- *  (auto-reconnect for key hosts; pre-fill the dialog for password hosts). Runs
- *  once, after the local session id is available. */
+/** Restore the saved session: panel visibility, local tabs, and the saved
+ *  remotes (auto-reconnect for key hosts; pre-fill the dialog for the first
+ *  password host). Runs once, after the local session id is available. */
 export async function restoreSession(
   localConnId: string,
   connect: (profile: ConnectProfile) => Promise<void>,
@@ -276,47 +317,54 @@ export async function restoreSession(
     }
     applyPersistedGroups();
 
-    if (s.remote) {
-      const remoteTabs = s.tabs.filter((t) => t.scope === "remote");
-      pendingRemoteRestore = {
-        hostKey: hostKey(s.remote.host, s.remote.user, s.remote.port),
-        tabs: remoteTabs,
-      };
+    let dialogShown = false;
+    for (const r of s.remotes) {
+      const key = persistedKey(r);
+      const remoteTabs = s.tabs.filter(
+        (t) => t.scope === "remote" && t.host === key,
+      );
+      pendingRemoteRestore.set(key, remoteTabs);
 
-      if (s.remote.authType === "auto") {
+      if (r.authType === "auto") {
         try {
           // connect() establishes the remote and (via consumePendingRemoteTabs)
           // reopens its tabs.
-          await connect(profileFromRemote(s.remote));
+          await connect(profileFromRemote(r));
         } catch {
-          /* failure surfaced as a toast by connect(); pendingRemoteRestore is
-             kept so a later reconnect to the same host still restores tabs */
+          /* failure surfaced as a toast by connect(); the pending set is kept
+             so a later reconnect to the same host still restores tabs */
         }
-      } else {
+      } else if (!dialogShown) {
         // Password host: we never stored the password. Pre-fill the dialog so
         // the user can reconnect; tabs reopen on a successful connect.
+        dialogShown = true;
         store.openDialog({
-          name: s.remote.name,
-          hostName: s.remote.host,
-          user: s.remote.user,
-          port: s.remote.port,
+          name: r.name,
+          hostName: r.host,
+          user: r.user,
+          port: r.port,
           identityFile: null,
-          proxyJump: s.remote.proxyJump,
+          proxyJump: r.proxyJump,
         });
         if (remoteTabs.length) {
           store.pushNotice(
             "info",
-            `Reconnect to ${s.remote.name} to restore ${remoteTabs.length} tab(s).`,
+            `Reconnect to ${r.name} to restore ${remoteTabs.length} tab(s).`,
           );
         }
+      } else {
+        store.pushNotice(
+          "info",
+          `Reconnect to ${r.name} (password host) to restore it.`,
+        );
       }
     }
 
     restoreActiveTab();
   } finally {
     restoring = false;
-    // Persist the restored state once (desiredRemote keeps the server even if
-    // its launch reconnect failed; remoteTabs fall back to the pending set).
+    // Persist the restored state once (desiredRemotes keep servers whose
+    // launch reconnect failed; their tabs fall back to the pending sets).
     writeSnapshot();
   }
 }
