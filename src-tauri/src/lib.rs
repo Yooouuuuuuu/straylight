@@ -5,6 +5,7 @@
 //! File operations go through the transport-agnostic [`transport::FileTransport`].
 
 pub mod containers;
+pub mod ports;
 pub mod exec;
 pub mod forward;
 pub mod prefs;
@@ -145,6 +146,7 @@ pub fn run() {
             forward::port_forward_stop,
             forward::port_forward_list,
             containers::container_list,
+            ports::port_list,
             prefs::settings_path,
             vcs::vcs_open,
             vcs::vcs_status,

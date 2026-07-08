@@ -659,6 +659,18 @@ export function wslListDistros(): Promise<WslDistro[]> {
   return invoke("wsl_list_distros");
 }
 
+export interface PortInfo {
+  port: number;
+  address: string;
+  pid: number | null;
+  process: string | null;
+}
+
+/** Listening TCP ports on a host (ss/netstat on unix, PowerShell locally). */
+export function portList(connId: string): Promise<PortInfo[]> {
+  return invoke("port_list", { connId });
+}
+
 /** Provision (if allowed) and connect to a WSL distro; returns its connection
  *  id (a localhost SSH connection) plus the login user (for `user@distro`
  *  labels). Rejects with a `WSL_NEEDS_INSTALL:` prefix when the distro has no

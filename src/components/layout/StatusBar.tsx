@@ -1,17 +1,11 @@
-/** Bottom status bar: connection state, current file path, language, encoding,
- *  line ending, and cursor position (for the active tab). */
+/** Bottom status bar. LEFT: the panel buttons (Explorer · SC · Terminal ·
+ *  Ports · Containers · Forwarding). RIGHT: everything about the active file —
+ *  branch, path, cursor, line ending, encoding, language. Connection state
+ *  lives on the host bars in the explorer, not here. */
 import { useAppStore } from "../../store/appStore";
 import { useVcsStore } from "../../store/vcsStore";
-import { useSSH } from "../../hooks/useSSH";
-import type { ConnectionState } from "../../lib/ipc";
+import { IconBranch, IconFolder, IconTerminalGlyph } from "../icons";
 import { TransferProgressBar } from "../transfer/TransferProgressBar";
-
-const STATE_TEXT: Record<ConnectionState, string> = {
-  connecting: "Connecting…",
-  connected: "Connected",
-  reconnecting: "Reconnecting…",
-  disconnected: "Disconnected",
-};
 
 function prettyLanguage(language: string): string {
   if (language === "plaintext") return "Plain Text";
@@ -21,18 +15,12 @@ function prettyLanguage(language: string): string {
 }
 
 export function StatusBar() {
-  const remote = useAppStore((s) => s.remote);
   const localConnId = useAppStore((s) => s.localConnId);
-  const connState = useAppStore((s) => s.connState);
-  const connMessage = useAppStore((s) => s.connMessage);
   const tabs = useAppStore((s) => s.tabs);
   const activeTabId = useAppStore((s) => s.activeTabId);
-  const terminalVisible = useAppStore((s) => s.terminalVisible);
   const toggleTerminal = useAppStore((s) => s.toggleTerminal);
   const vcsRepos = useVcsStore((s) => s.repos);
   const toggleScm = useVcsStore((s) => s.toggleScm);
-  const setPortsOpen = useAppStore((s) => s.setPortsOpen);
-  const { reconnect } = useSSH();
 
   const active = tabs.find((t) => t.id === activeTabId) ?? null;
 
@@ -50,29 +38,35 @@ export function StatusBar() {
 
   return (
     <footer className="statusbar">
-      <span className="statusbar__item" title={connMessage ?? undefined}>
-        {remote ? (
-          <>
-            <span className={`dot dot--${connState}`} />
-            {remote.name} · {STATE_TEXT[connState]}
-          </>
-        ) : (
-          <>
-            <span className="dot dot--local" />
-            Local
-          </>
-        )}
+      <span
+        className="statusbar__item statusbar__item--button statusbar__panel-btn"
+        onClick={() => useAppStore.getState().toggleSidebar()}
+        title="Toggle the explorer (Ctrl+B)"
+      >
+        <IconFolder size={13} /> EXPLORER
       </span>
 
-      {remote && connState === "disconnected" && (
+      {(vcsRepos.length > 0 || localConnId) && (
         <span
-          className="statusbar__item statusbar__item--button"
-          onClick={() => void reconnect()}
-          title="Reconnect to the server"
+          className="statusbar__item statusbar__item--button statusbar__panel-btn"
+          onClick={() => toggleScm()}
+          title="Toggle Source Control"
         >
-          Reconnect
+          <IconBranch size={13} /> SC
         </span>
       )}
+
+      <span
+        className="statusbar__item statusbar__item--button statusbar__panel-btn"
+        onClick={() => toggleTerminal()}
+        title="Toggle the terminal panel (Ctrl+`) — Ports/Containers/Forwarding live on its top bar"
+      >
+        <IconTerminalGlyph size={13} /> TERMINAL
+      </span>
+
+      <span className="statusbar__spacer" />
+
+      <TransferProgressBar variant="status" />
 
       {activeRepo?.status && (
         <span
@@ -86,53 +80,10 @@ export function StatusBar() {
       )}
 
       {active && (
-        <span className="statusbar__item statusbar__path" title={active.path}>
-          {active.path}
-        </span>
-      )}
-
-      <span className="statusbar__spacer" />
-
-      <TransferProgressBar variant="status" />
-
-      <span
-        className="statusbar__item statusbar__item--button"
-        onClick={() => useAppStore.getState().toggleSidebar()}
-        title="Toggle the explorer (Ctrl+B)"
-      >
-        Explorer
-      </span>
-
-      {(vcsRepos.length > 0 || localConnId) && (
-        <span
-          className="statusbar__item statusbar__item--button"
-          onClick={() => toggleScm()}
-          title="Toggle Source Control"
-        >
-          Source Control
-        </span>
-      )}
-
-      <span
-        className="statusbar__item statusbar__item--button"
-        onClick={() => setPortsOpen(true)}
-        title="Forward a port over SSH"
-      >
-        Ports
-      </span>
-
-      {(remote || localConnId) && (
-        <span
-          className="statusbar__item statusbar__item--button"
-          onClick={() => toggleTerminal()}
-          title="Toggle terminal (Ctrl+`)"
-        >
-          {terminalVisible ? "Hide terminal" : "Show terminal"}
-        </span>
-      )}
-
-      {active && (
         <>
+          <span className="statusbar__item statusbar__path" title={active.path}>
+            {active.path}
+          </span>
           <span className="statusbar__item">
             Ln {active.cursor.line}, Col {active.cursor.column}
           </span>

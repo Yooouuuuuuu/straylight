@@ -152,7 +152,7 @@ export function allCommands(): Command[] {
       },
     },
     { id: "terminal.toggle", title: "Terminal: Toggle", run: () => app().setTerminalVisible(!app().terminalVisible) },
-    { id: "view.portForwarding", title: "View: Port Forwarding…", run: () => app().setPortsOpen(true) },
+    { id: "view.portForwarding", title: "View: Port Forwarding…", run: () => { app().setTerminalView("forwarding"); app().setTerminalVisible(true); } },
     { id: "view.toggleSidebar", title: "View: Toggle Sidebar", run: () => app().toggleSidebar() },
     { id: "view.toggleSourceControl", title: "View: Toggle Source Control", run: () => vcs().toggleScm() },
     { id: "view.zoomIn", title: "View: Zoom In", run: () => setZoomAndPersist(currentZoom() + 0.1) },

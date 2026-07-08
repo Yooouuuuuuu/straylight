@@ -149,6 +149,193 @@
   gap: var(--space-3);
 }
 
+/* Terminal panel, group-bar edition. */
+.terminal-panel--grouped {
+  display: flex;
+  flex-direction: column;
+}
+
+.termgroup__bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Chips share one size and only grow for long names. */
+.termgroup__chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-width: 120px;
+  height: 26px;
+  padding: 0 var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.termgroup__chip--tool {
+  min-width: 96px;
+}
+
+.termgroup__chip--active {
+  background: var(--bg-tertiary);
+  color: var(--fg-primary);
+}
+
+.termgroup__letter {
+  color: var(--host-color, var(--accent));
+  font-weight: 700;
+}
+
+.termgroup__count {
+  color: var(--fg-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.termgroup__new {
+  position: relative;
+}
+
+.termgroup__spacer {
+  flex: 1 1 auto;
+}
+
+.termgroup__collapse {
+  font-size: 14px;
+  transform: rotate(90deg); /* » pointing down */
+}
+
+.terminal-panel__split {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
+.terminal-panel__split .terminal-panel__body {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Drag the list's left edge; all the way right = icon-only rail. */
+.terminal-sidebar__grip {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+.terminal-sidebar__grip:hover {
+  background: var(--border-focus);
+}
+
+.terminal-sidebar--mini .terminal-entry {
+  justify-content: center;
+  padding: var(--space-1);
+}
+
+.terminal-entry__icon {
+  font-family: var(--font-code);
+  font-size: 10px;
+  color: var(--fg-secondary);
+  flex: 0 0 auto;
+}
+
+/* The list carries the active group's host color (set on the sidebar). */
+.terminal-entry--active .terminal-entry__icon {
+  color: var(--host-color, var(--accent));
+}
+
+/* The three panel buttons: uniform width, icon + label, easy targets. */
+.statusbar__panel-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-width: 104px;
+}
+
+/* Ports / Forwarding groups in the terminal panel. */
+.ports-view {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-5);
+}
+
+.ports-view__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+  margin-bottom: var(--space-3);
+}
+
+.ports-view__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.ports-view__host-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ports-view__interval {
+  width: 60px;
+  padding: 0 var(--space-1);
+}
+
+.ports-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.ports-table th {
+  text-align: left;
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+  font-weight: 600;
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.ports-table td {
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+}
+
+.ports-table__host {
+  font-weight: 600;
+}
+
+.ports-table__empty {
+  color: var(--fg-secondary);
+  text-align: center;
+  padding: var(--space-5) !important;
+}
+
 /* Settings / Themes editor tabs. */
 .app-tab {
   position: absolute;
@@ -3167,26 +3354,15 @@ select option {
 .editor-tab--active {
   background: color-mix(in srgb, var(--fg-primary) 22%, var(--bg-secondary));
   color: var(--fg-primary);
-  box-shadow: inset 0 -1.5px 0 var(--green);
+  /* Picked-mark = the tab's HOST color (inline --tab-mark; local = the Local
+   * section color) — one rule for files and terminals alike. */
+  box-shadow: inset 0 -1.5px 0 var(--tab-mark, var(--green));
 }
 
-/* An unfocused group's active file: one level down, green dimmed. */
+/* An unfocused group's active tab: one level down, mark dimmed. */
 .editor-group--multi:not(.editor-group--focused) .editor-tab--active {
   background: color-mix(in srgb, var(--fg-primary) 14%, var(--bg-secondary));
-  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--green) 45%, transparent);
-}
-
-/* Active + host stripe: the host color rides as a band above the green. */
-.editor-tab--host.editor-tab--active {
-  box-shadow:
-    inset 0 -1.5px 0 var(--green),
-    inset 0 -3.5px 0 var(--tab-host-color);
-}
-
-.editor-group--multi:not(.editor-group--focused) .editor-tab--host.editor-tab--active {
-  box-shadow:
-    inset 0 -1px 0 color-mix(in srgb, var(--green) 45%, transparent),
-    inset 0 -3px 0 var(--tab-host-color);
+  box-shadow: inset 0 -1.5px 0 color-mix(in srgb, var(--tab-mark, var(--green)) 45%, transparent);
 }
 
 .editor-tab__icon {
@@ -3365,8 +3541,9 @@ select option {
 /* ------------------------------------------------------------------ Terminal */
 
 .terminal-panel {
+  /* Group-bar layout: the bar on top, then body|list side by side. */
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   height: 100%;
   min-height: 0;
   background: var(--bg-primary);

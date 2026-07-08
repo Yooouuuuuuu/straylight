@@ -32,6 +32,20 @@ export interface Settings {
   /** Per-dialog "ask again?" flags: `false` silences that confirmation. All
    *  don't-ask-again checkboxes write here (visible + hand-restorable). */
   confirms?: Record<string, boolean>;
+  /** Bottom-panel tool groups: hide the ones you never use, and tune how often
+   *  the open tab re-polls (seconds; nothing polls while closed). */
+  panels?: {
+    ports?: boolean;
+    containers?: boolean;
+    forwarding?: boolean;
+    portsInterval?: number;
+    containersInterval?: number;
+    /** Hide well-known/system ports (<1024, SSH/RDP/DNS/SMB…). */
+    hideSystemPorts?: boolean;
+    /** Hosts the Ports tab doesn't monitor ("local" | "wsl:<distro>" |
+     *  "user@host:port") — also drops them from the chip digits. */
+    portsIgnoreHosts?: string[];
+  };
   // ---- theme.json sections ----
   colors?: Record<string, string>;
   editor?: Record<string, string>;
@@ -75,12 +89,23 @@ export const CONFIRM_IDS = [
   "vcs-amend-pushed",
 ];
 
+const PANEL_DEFAULTS = {
+  ports: true,
+  containers: true,
+  forwarding: true,
+  portsInterval: 15,
+  containersInterval: 30,
+  hideSystemPorts: true,
+  portsIgnoreHosts: [] as string[],
+};
+
 function settingsTemplate(): Settings {
   return {
     zoom: 1,
     keybindings: {},
     terminalFont: { family: "Fira Code", size: 13 },
     confirms: Object.fromEntries(CONFIRM_IDS.map((id) => [id, true])),
+    panels: { ...PANEL_DEFAULTS },
   };
 }
 
@@ -146,6 +171,8 @@ export let savedThemes: Record<string, ThemeData> = {};
 export let keybindingOverrides: Record<string, string> = {};
 /** The live zoom value from settings (for the settings UI). */
 export let settingsZoom = 1;
+/** Effective bottom-panel config (visibility + poll intervals, seconds). */
+export let panelsConfig = { ...PANEL_DEFAULTS };
 let confirms: Record<string, boolean> = {};
 
 /** Snapshot of the confirm flags (for the settings UI). */
@@ -285,6 +312,30 @@ async function loadAndApply(): Promise<void> {
       issues.push('terminalFont: must be an object like { "family": "Fira Code", "size": 13 }');
     }
   }
+
+  // Bottom-panel groups (visibility flags + poll intervals, 3–3600 s).
+  const pl = s.panels ?? {};
+  const secs = (v: unknown, dflt: number, name: string) => {
+    if (v === undefined) return dflt;
+    if (typeof v === "number" && v >= 3 && v <= 3600) return v;
+    issues.push(`panels: "${name}" must be a number of seconds (3–3600)`);
+    return dflt;
+  };
+  panelsConfig = {
+    ports: pl.ports !== false,
+    containers: pl.containers !== false,
+    forwarding: pl.forwarding !== false,
+    portsInterval: secs(pl.portsInterval, PANEL_DEFAULTS.portsInterval, "portsInterval"),
+    containersInterval: secs(
+      pl.containersInterval,
+      PANEL_DEFAULTS.containersInterval,
+      "containersInterval",
+    ),
+    hideSystemPorts: pl.hideSystemPorts !== false,
+    portsIgnoreHosts: Array.isArray(pl.portsIgnoreHosts)
+      ? pl.portsIgnoreHosts.filter((h): h is string => typeof h === "string")
+      : [],
+  };
 
   // Silenced ask-dialogs (non-boolean entries are reported and ignored).
   confirms = {};

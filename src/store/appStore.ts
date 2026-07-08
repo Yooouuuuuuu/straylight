@@ -281,9 +281,10 @@ function remoteMirror(remotes: RemoteWorkspace[]) {
 // Host identity colors, keyed by `user@host:port` (remote hosts only — Local
 // and WSL use their section colors). Persisted so prod stays "its" color.
 const HOST_COLORS_KEY = "straylight.hostColors";
-/** Default ramp for newly-seen hosts. Deliberately stops short of pure green —
- *  `var(--green)` means "tracked repo" in the tree. */
-export const HOST_COLOR_RAMP = ["#f30100", "#ff8a00", "#d8e626"];
+/** Default ramp for newly-seen hosts, by remote slot. Starts at the Remote
+ *  section color (NOT red — that's Local's), and stops short of pure green
+ *  (`var(--green)` means "tracked repo" in the tree). */
+export const HOST_COLOR_RAMP = ["var(--section-remote)", "#ff8a00", "#d8e626"];
 
 function loadHostColors(): Record<string, string> {
   try {
@@ -483,9 +484,27 @@ interface AppState {
   ) => void;
   closeTerminal: (id: string) => void;
   setActiveTerminal: (id: string) => void;
-  /** What the terminal panel body shows: the terminals, or the Containers tab. */
-  terminalView: "terminals" | "containers";
-  setTerminalView: (v: "terminals" | "containers") => void;
+  /** What the terminal panel body shows: the terminals, or a tool group. */
+  terminalView: "terminals" | "containers" | "ports" | "forwarding";
+  setTerminalView: (v: "terminals" | "containers" | "ports" | "forwarding") => void;
+  /** Panel group-bar order (conn ids; unknown/new conns append). Draggable. */
+  termGroupOrder: string[];
+  setTermGroupOrder: (order: string[]) => void;
+  /** The right-side terminal list collapsed to icons only. */
+  termListMini: boolean;
+  setTermListMini: (mini: boolean) => void;
+  /** Ports table → Forwarding: prefill for the next forward. */
+  forwardPrefill: { connId: string; port: number } | null;
+  setForwardPrefill: (p: { connId: string; port: number } | null) => void;
+  /** Last-known counts for the tool chips (filled while a tab polls). */
+  portCounts: Record<string, number>;
+  setPortCounts: (c: Record<string, number>) => void;
+  containerCounts: Record<string, number>;
+  setContainerCounts: (c: Record<string, number>) => void;
+  forwardCount: number;
+  setForwardCount: (n: number) => void;
+  /** Reorder terminals in the list (drag). */
+  moveTerminal: (fromId: string, toId: string) => void;
   cycleTerminal: (direction: 1 | -1) => void;
   /** Restart every terminal on a connection (its PTYs died — e.g. a reconnect). */
   restartConnTerminals: (connId: string) => void;
@@ -980,6 +999,29 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set({ activeTerminalId, terminalView: "terminals" }),
 
   setTerminalView: (terminalView) => set({ terminalView }),
+
+  termGroupOrder: [],
+  setTermGroupOrder: (termGroupOrder) => set({ termGroupOrder }),
+  termListMini: false,
+  setTermListMini: (termListMini) => set({ termListMini }),
+  forwardPrefill: null,
+  setForwardPrefill: (forwardPrefill) => set({ forwardPrefill }),
+  portCounts: {},
+  setPortCounts: (portCounts) => set({ portCounts }),
+  containerCounts: {},
+  setContainerCounts: (containerCounts) => set({ containerCounts }),
+  forwardCount: 0,
+  setForwardCount: (forwardCount) => set({ forwardCount }),
+  moveTerminal: (fromId, toId) =>
+    set((s) => {
+      const from = s.terminals.findIndex((t) => t.id === fromId);
+      const to = s.terminals.findIndex((t) => t.id === toId);
+      if (from < 0 || to < 0 || from === to) return {};
+      const terminals = [...s.terminals];
+      const [moved] = terminals.splice(from, 1);
+      terminals.splice(to, 0, moved);
+      return { terminals };
+    }),
 
   cycleTerminal: (direction) =>
     set((s) => {

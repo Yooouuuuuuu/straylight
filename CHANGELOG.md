@@ -27,6 +27,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 - Terminal tab reordering.
 
+## [0.8.14] - 2026-07-09
+
+### Added
+
+- **Terminal panel, group-bar edition.** A draggable top bar with one chip per
+  connection (L/W/R letter in the host color, terminal count only when > 0);
+  each group owns its terminals — + opens pwsh directly for Local (▾ for the
+  shell menu) and the host's shell elsewhere. The terminal list shows the
+  active group only, drag-reorders, and drag-resizes down to an icon-only
+  rail; » (pointing down) collapses the panel.
+- **Ports** (new tool group): listening TCP ports on monitored hosts — VS
+  Code-style table (host in its color, port, address, process, PID), grouped
+  by host then port. Backend runs `ss`/`netstat` (unix) or PowerShell
+  (local), parsed in Rust with tests. Zero cost while closed; polls every
+  `panels.portsInterval` s while open. In-panel controls (persisted to
+  settings.json): per-host monitor toggles, the interval, and a
+  hide-system-ports filter (<1024 + RDP/SSDP/NFS/mDNS…). Forward on a row
+  prefills Forwarding.
+- **Forwarding docked** — the port-forward popup now lives as a tool group in
+  the panel, covering all remotes.
+- **Chip digits**: Ports/Containers chips show one count per connection
+  ("Ports - 4 2"), respecting the Ports ignore list; Forwarding shows its
+  active count. Nothing shows until a tab has polled.
+- **`panels` settings section**: hide any tool group, tune both poll
+  intervals (containers default 30 s, was 5), system-port filter, ignored
+  hosts.
+- **New app icon** (regenerated set + in-app logo).
+
+### Changed
+
+- **Status bar**: left side is just EXPLORER · SC · TERMINAL — uniform
+  icon+label buttons; connection state/Reconnect moved out entirely (host
+  bars own them); the file path + details sit on the right.
+- **Active-tab picked-marks now always use the HOST color** (local = the
+  Local section color) — the green/magenta special cases are gone; the
+  terminal list's active icon follows the group's color.
+- **Remote default colors fixed**: the ramp starts at the Remote section
+  color (was Local's red) and assigns by slot — three remotes get magenta /
+  orange / chartreuse instead of all red.
+- Containers covers all remotes (was primary-only).
+
 ## [0.8.13] - 2026-07-08
 
 ### Added

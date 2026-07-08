@@ -72,14 +72,18 @@ export function EditorTabs({ groupId }: { groupId: number }) {
             tab.id === activeTabId ? "editor-tab--active" : "",
             tab.dirty ? "editor-tab--dirty" : "",
             hostColor ? "editor-tab--host" : "",
+            tab.kind === "terminal" ? "editor-tab--term" : "",
             dropTarget === tab.id ? "editor-tab--drop" : "",
           ]
             .filter(Boolean)
             .join(" ")}
           style={
-            hostColor
-              ? ({ "--tab-host-color": hostColor } as React.CSSProperties)
-              : undefined
+            {
+              // The picked-mark is always the tab's HOST color (local = the
+              // Local section color) — one rule for files and terminals alike.
+              "--tab-mark": hostColor ?? "var(--section-local)",
+              ...(hostColor ? { "--tab-host-color": hostColor } : {}),
+            } as React.CSSProperties
           }
           draggable
           onDragStart={(e) => {

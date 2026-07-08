@@ -46,7 +46,6 @@ import { VcsConfirmDialog } from "./components/vcs/VcsConfirmDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { Finder } from "./components/Finder";
 import { SearchInFiles } from "./components/SearchInFiles";
-import { PortForwards } from "./components/PortForwards";
 import { ToastStack } from "./components/Toast";
 
 export default function App() {
@@ -338,7 +337,6 @@ export default function App() {
       <CommandPalette />
       <Finder />
       <SearchInFiles />
-      <PortForwards />
       <ContextMenu />
       <TabContextMenu />
       <ToastStack />

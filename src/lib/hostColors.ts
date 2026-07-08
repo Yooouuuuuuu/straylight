@@ -13,12 +13,21 @@ export const SECTION_LOCAL = "var(--section-local)";
 export const SECTION_WSL = "var(--section-wsl)";
 export const SECTION_REMOTE = "var(--section-remote)";
 
-/** The identity color for a connected remote. */
+/** A remote's default slot in the ramp (its position in the remotes list). */
+function remoteSlot(hostKey: string): number {
+  const idx = useAppStore
+    .getState()
+    .remotes.findIndex((r) => remoteHostKey(r.conn) === hostKey);
+  return Math.max(0, idx) % HOST_COLOR_RAMP.length;
+}
+
+/** The identity color for a connected remote (custom, else ramp by slot). */
 export function remoteColor(
   hostColors: Record<string, string>,
   remote: RemoteConnection,
 ): string {
-  return hostColors[remoteHostKey(remote)] ?? HOST_COLOR_RAMP[0];
+  const key = remoteHostKey(remote);
+  return hostColors[key] ?? HOST_COLOR_RAMP[remoteSlot(key)];
 }
 
 /** Color for a VC connKey ("local" | "wsl:<distro>" | "user@host:port").
@@ -29,7 +38,7 @@ export function hostColorForConnKey(
 ): string {
   if (connKey === "local") return SECTION_LOCAL;
   if (connKey.startsWith("wsl:")) return hostColors[connKey] ?? SECTION_WSL;
-  return hostColors[connKey] ?? HOST_COLOR_RAMP[0];
+  return hostColors[connKey] ?? HOST_COLOR_RAMP[remoteSlot(connKey)];
 }
 
 /** Marker color for a tab's connection — null for local (local tabs stay

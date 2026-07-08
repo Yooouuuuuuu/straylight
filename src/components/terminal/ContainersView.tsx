@@ -1,10 +1,12 @@
 /** The Containers tab in the terminal panel: running containers (podman or
  *  docker) across every connected host, with their ports. Click one to jump
  *  into a shell inside it (a normal terminal that types the `exec` for you).
- *  Lazy: refreshes when the tab is shown and every 5 s while it stays open. */
+ *  Lazy: refreshes when the tab is shown, then every
+ *  `panels.containersInterval` seconds (settings.json) while it stays open. */
 import { useEffect, useState } from "react";
 
 import { containerList, type ContainerInfo } from "../../lib/ipc";
+import { panelsConfig } from "../../lib/settings";
 import { useAppStore } from "../../store/appStore";
 
 interface HostContainers {
@@ -14,21 +16,27 @@ interface HostContainers {
   containers: ContainerInfo[];
 }
 
-const POLL_MS = 5000;
-
 export function ContainersView() {
   const localConnId = useAppStore((s) => s.localConnId);
-  const remote = useAppStore((s) => s.remote);
+  const remotes = useAppStore((s) => s.remotes);
   const wsl = useAppStore((s) => s.wsl);
   const openTerminal = useAppStore((s) => s.openTerminal);
 
   const [hosts, setHosts] = useState<HostContainers[]>([]);
+  const setContainerCounts = useAppStore((s) => s.setContainerCounts);
+
+  // Feed the group-bar chip digits with the latest per-host counts.
+  useEffect(() => {
+    setContainerCounts(
+      Object.fromEntries(hosts.map((h) => [h.connId, h.containers.length])),
+    );
+  }, [hosts, setContainerCounts]);
 
   useEffect(() => {
     const conns = [
       localConnId ? { connId: localConnId, label: "Local" } : null,
       wsl ? { connId: wsl.connId, label: wsl.name } : null,
-      remote ? { connId: remote.connId, label: remote.name } : null,
+      ...remotes.map((r) => ({ connId: r.conn.connId, label: r.conn.name })),
     ].filter((c): c is { connId: string; label: string } => c !== null);
 
     let alive = true;
@@ -58,12 +66,15 @@ export function ContainersView() {
       }
     };
     refresh();
-    const timer = window.setInterval(refresh, POLL_MS);
+    const timer = window.setInterval(
+      refresh,
+      panelsConfig.containersInterval * 1000,
+    );
     return () => {
       alive = false;
       window.clearInterval(timer);
     };
-  }, [localConnId, remote, wsl]);
+  }, [localConnId, remotes, wsl]);
 
   const enter = (host: HostContainers, c: ContainerInfo) => {
     openTerminal(

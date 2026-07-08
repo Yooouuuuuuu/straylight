@@ -1,91 +1,223 @@
-/** Bottom terminal panel, VS Code style: the active terminal fills the left, a
- *  vertical list of terminal instances sits on the right. The "+" opens a new
- *  terminal on the current workspace; its caret opens a shell-profile menu
- *  (PowerShell / cmd / Git Bash / WSL distros / the remote login shell). */
-import { useEffect, useState } from "react";
+/** Bottom terminal panel, group-bar edition. The TOP bar lists one draggable
+ *  group per connection (Local, WSL, remotes — host colors); each group owns
+ *  its terminals, and + opens a terminal on the active group (a shell menu
+ *  only for Local). The RIGHT side of the bar holds the tool groups (Ports ·
+ *  Containers · Forwarding) and the »-down collapse. The right-side terminal
+ *  list shows the active group's terminals — draggable to reorder,
+ *  collapsible to an icon-only rail. */
+import { useEffect, useMemo, useState } from "react";
 
+import { remoteColor, SECTION_LOCAL, SECTION_WSL } from "../../lib/hostColors";
 import { listTerminalProfiles, type TerminalProfile } from "../../lib/ipc";
-import { pickTerminalTarget } from "../../lib/terminalTarget";
-import { useAppStore } from "../../store/appStore";
+import { panelsConfig } from "../../lib/settings";
+import { remoteHostKey, useAppStore } from "../../store/appStore";
+import { ForwardingView } from "../PortForwards";
 import { ContainersView } from "../terminal/ContainersView";
+import { PortsView } from "../terminal/PortsView";
 import { Terminal } from "../terminal/Terminal";
 import { IconClose, IconPlus } from "../icons";
 
-const TARGET_OPTIONS = ["auto", "remote", "wsl", "local"] as const;
-const TARGET_LABELS: Record<(typeof TARGET_OPTIONS)[number], string> = {
-  auto: "Auto",
-  remote: "Remote",
-  wsl: "WSL",
-  local: "Local",
-};
+const GROUP_MIME = "application/x-straylight-termgroup";
+const TERM_MIME = "application/x-straylight-termentry";
 
 export function TerminalPanel() {
   const remotes = useAppStore((s) => s.remotes);
   const wsl = useAppStore((s) => s.wsl);
   const localConnId = useAppStore((s) => s.localConnId);
+  const hostColors = useAppStore((s) => s.hostColors);
   const terminals = useAppStore((s) => s.terminals);
   const activeTerminalId = useAppStore((s) => s.activeTerminalId);
   const openTerminal = useAppStore((s) => s.openTerminal);
   const closeTerminal = useAppStore((s) => s.closeTerminal);
   const setActiveTerminal = useAppStore((s) => s.setActiveTerminal);
   const setTerminalVisible = useAppStore((s) => s.setTerminalVisible);
-  const newTerminalTarget = useAppStore((s) => s.newTerminalTarget);
-  const setNewTerminalTarget = useAppStore((s) => s.setNewTerminalTarget);
   const terminalView = useAppStore((s) => s.terminalView);
   const setTerminalView = useAppStore((s) => s.setTerminalView);
   const moveTerminalToEditor = useAppStore((s) => s.moveTerminalToEditor);
-  // Terminals living in the editor area stay mounted here (their xterm DOM is
-  // reparented into the editor pane) but leave the panel's tab list.
-  const panelTerminals = terminals.filter((t) => !t.inEditor);
+  const moveTerminal = useAppStore((s) => s.moveTerminal);
+  const termGroupOrder = useAppStore((s) => s.termGroupOrder);
+  const setTermGroupOrder = useAppStore((s) => s.setTermGroupOrder);
 
   const [profiles, setProfiles] = useState<TerminalProfile[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [selGroup, setSelGroup] = useState<string | null>(null);
+  /** Terminal-list width, drag-resizable; narrow enough = icon-only. */
+  const [listWidth, setListWidth] = useState(168);
+  const listMini = listWidth <= 56;
+
+  const startListDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = listWidth;
+    const move = (ev: MouseEvent) => {
+      setListWidth(Math.min(320, Math.max(36, startW + (startX - ev.clientX))));
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
 
   useEffect(() => {
-    let active = true;
+    let live = true;
     listTerminalProfiles()
-      .then((p) => {
-        if (active) setProfiles(p);
-      })
-      .catch(() => {
-        /* no profiles — the + still opens the default shell */
-      });
+      .then((p) => live && setProfiles(p))
+      .catch(() => {});
     return () => {
-      active = false;
+      live = false;
     };
   }, []);
 
-  const newDefault = () => {
-    const target = pickTerminalTarget();
-    if (target) {
-      openTerminal(target.connId, target.label);
-      setTerminalVisible(true);
-    }
+  // Connection groups: Local + WSL + remotes, in the user's dragged order.
+  const groups = useMemo(() => {
+    const all: { connId: string; key: string; label: string; color: string }[] = [];
+    if (localConnId)
+      all.push({ connId: localConnId, key: "local", label: "Local", color: SECTION_LOCAL });
+    if (wsl)
+      all.push({
+        connId: wsl.connId,
+        key: `wsl:${wsl.name}`,
+        label: wsl.name,
+        color: hostColors[`wsl:${wsl.name}`] ?? SECTION_WSL,
+      });
+    for (const r of remotes)
+      all.push({
+        connId: r.conn.connId,
+        key: remoteHostKey(r.conn),
+        label: r.conn.name,
+        color: remoteColor(hostColors, r.conn),
+      });
+    const rank = (id: string) => {
+      const i = termGroupOrder.indexOf(id);
+      return i < 0 ? termGroupOrder.length : i;
+    };
+    return [...all].sort((a, b) => rank(a.connId) - rank(b.connId));
+  }, [localConnId, wsl, remotes, hostColors, termGroupOrder]);
+
+  const activeConn =
+    terminals.find((t) => t.id === activeTerminalId)?.connId ?? null;
+  const activeGroup =
+    (selGroup && groups.some((g) => g.connId === selGroup) && selGroup) ||
+    activeConn ||
+    localConnId;
+  const groupTerminals = terminals.filter(
+    (t) => !t.inEditor && t.connId === activeGroup,
+  );
+
+  const pickGroup = (connId: string) => {
+    setSelGroup(connId);
+    setTerminalView("terminals");
+    const first = terminals.find((t) => !t.inEditor && t.connId === connId);
+    if (first) setActiveTerminal(first.id);
   };
 
-  const openProfile = (p: TerminalProfile) => {
+  const newTerminal = (command?: string[] | null, label?: string) => {
     setMenuOpen(false);
-    if (localConnId) openTerminal(localConnId, p.label, p.command);
+    const g = groups.find((x) => x.connId === activeGroup);
+    if (!g) return;
+    openTerminal(g.connId, label ?? (g.connId === localConnId ? "pwsh" : g.label), command ?? null);
   };
 
-  const openRemoteShell = (connId: string, name: string) => {
-    setMenuOpen(false);
-    openTerminal(connId, name);
+  const dropGroup = (fromId: string, toId: string) => {
+    const order = groups.map((g) => g.connId);
+    const from = order.indexOf(fromId);
+    const to = order.indexOf(toId);
+    if (from < 0 || to < 0 || from === to) return;
+    order.splice(to, 0, ...order.splice(from, 1));
+    setTermGroupOrder(order);
   };
 
-  const openWslShell = () => {
-    setMenuOpen(false);
-    if (wsl) openTerminal(wsl.connId, wsl.name);
+  const portCounts = useAppStore((s) => s.portCounts);
+  const containerCounts = useAppStore((s) => s.containerCounts);
+  const forwardCount = useAppStore((s) => s.forwardCount);
+  useAppStore((s) => s.settingsIssues); // ignore-list changes re-render
+
+  /** "- 4 2" — one digit per (monitored) connection, in group order; "-" = 0.
+   *  Nothing until that tab has polled at least once. */
+  const digitsFor = (counts: Record<string, number>, respectIgnores: boolean) => {
+    const ignored = new Set(panelsConfig.portsIgnoreHosts);
+    const list = respectIgnores ? groups.filter((g) => !ignored.has(g.key)) : groups;
+    if (list.length === 0 || list.every((g) => counts[g.connId] === undefined))
+      return null;
+    return list
+      .map((g) => (counts[g.connId] ? String(counts[g.connId]) : "-"))
+      .join(" ");
   };
+
+  const tool = (
+    view: "ports" | "containers" | "forwarding",
+    label: string,
+    digits: string | null,
+  ) => (
+    <button
+      key={view}
+      className={`termgroup__chip termgroup__chip--tool${terminalView === view ? " termgroup__chip--active" : ""}`}
+      onClick={() => setTerminalView(view)}
+    >
+      {label}
+      {digits && <span className="termgroup__count">{digits}</span>}
+    </button>
+  );
 
   return (
-    <div className="terminal-panel">
-      <div className="terminal-panel__body">
-        {terminalView === "containers" && <ContainersView />}
-        {panelTerminals.length === 0 && terminalView === "terminals" ? (
-          <div className="terminal-message">No terminals — click + to start one.</div>
-        ) : (
-          terminals.map((t) => (
+    <div className="terminal-panel terminal-panel--grouped">
+      <div className="termgroup__bar">
+        {groups.map((g) => (
+          <button
+            key={g.connId}
+            className={`termgroup__chip${terminalView === "terminals" && activeGroup === g.connId ? " termgroup__chip--active" : ""}`}
+            style={{ "--host-color": g.color } as React.CSSProperties}
+            draggable
+            onDragStart={(e) => e.dataTransfer.setData(GROUP_MIME, g.connId)}
+            onDragOver={(e) => {
+              if (e.dataTransfer.types.includes(GROUP_MIME)) e.preventDefault();
+            }}
+            onDrop={(e) => {
+              const id = e.dataTransfer.getData(GROUP_MIME);
+              if (id) dropGroup(id, g.connId);
+            }}
+            onClick={() => pickGroup(g.connId)}
+          >
+            <span className="termgroup__letter">
+              {g.connId === localConnId ? "L" : g.connId === wsl?.connId ? "W" : "R"}
+            </span>
+            {g.label}
+            {(() => {
+              const n = terminals.filter(
+                (t) => !t.inEditor && t.connId === g.connId,
+              ).length;
+              return n > 0 ? <span className="termgroup__count">{n}</span> : null;
+            })()}
+          </button>
+        ))}
+        <span className="termgroup__spacer" />
+        {panelsConfig.ports && tool("ports", "Ports", digitsFor(portCounts, true))}
+        {panelsConfig.containers &&
+          tool("containers", "Containers", digitsFor(containerCounts, false))}
+        {panelsConfig.forwarding &&
+          tool("forwarding", "Forwarding", forwardCount > 0 ? String(forwardCount) : null)}
+        <button
+          className="icon-btn termgroup__collapse"
+          title="Hide terminal (Ctrl+`)"
+          onClick={() => setTerminalVisible(false)}
+        >
+          »
+        </button>
+      </div>
+
+      <div className="terminal-panel__split">
+        <div className="terminal-panel__body">
+          {terminalView === "containers" && <ContainersView />}
+          {terminalView === "ports" && <PortsView />}
+          {terminalView === "forwarding" && <ForwardingView />}
+          {terminalView === "terminals" && groupTerminals.length === 0 && (
+            <div className="terminal-message">
+              No terminals in this group — click + to start one.
+            </div>
+          )}
+          {terminals.map((t) => (
             <div
               key={t.id}
               className="terminal-instance"
@@ -107,149 +239,124 @@ export function TerminalPanel() {
                 initialInput={t.initialInput ?? null}
               />
             </div>
-          ))
-        )}
-      </div>
-
-      <div className="terminal-sidebar">
-        <div className="terminal-sidebar__actions">
-          <div className="terminal-new">
-            <button
-              className="icon-btn"
-              title="New terminal (Ctrl+Shift+`)"
-              onClick={newDefault}
-            >
-              <IconPlus size={15} />
-            </button>
-            <button
-              className="icon-btn terminal-new__caret"
-              title="Select a shell…"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((v) => !v)}
-            >
-              ▾
-            </button>
-          </div>
-          <button
-            className="icon-btn"
-            title="Hide terminal (Ctrl+`)"
-            onClick={() => setTerminalVisible(false)}
-          >
-            <IconClose />
-          </button>
-        </div>
-
-        {menuOpen && (
-          <>
-            <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />
-            <div className="terminal-menu" role="menu">
-              {remotes.length > 0 && (
-                <>
-                  {remotes.map((r) => (
-                    <button
-                      key={r.conn.connId}
-                      className="terminal-menu__item"
-                      onClick={() => openRemoteShell(r.conn.connId, r.conn.name)}
-                    >
-                      {r.conn.name}
-                      <span className="terminal-menu__hint">remote</span>
-                    </button>
-                  ))}
-                  <div className="terminal-menu__sep" />
-                </>
-              )}
-              {wsl && (
-                <>
-                  <button className="terminal-menu__item" onClick={openWslShell}>
-                    {wsl.name}
-                    <span className="terminal-menu__hint">WSL</span>
-                  </button>
-                  <div className="terminal-menu__sep" />
-                </>
-              )}
-              {profiles.length === 0 ? (
-                <div className="terminal-menu__empty">No local shells found</div>
-              ) : (
-                profiles.map((p) => (
-                  <button
-                    key={p.id}
-                    className="terminal-menu__item"
-                    onClick={() => openProfile(p)}
-                  >
-                    {p.label}
-                  </button>
-                ))
-              )}
-              <div className="terminal-menu__sep" />
-              <div className="terminal-menu__pref">
-                <span className="terminal-menu__pref-label">New opens</span>
-                {TARGET_OPTIONS.map((opt) => (
-                  <button
-                    key={opt}
-                    className={`terminal-menu__pref-btn${newTerminalTarget === opt ? " terminal-menu__pref-btn--active" : ""}`}
-                    title={
-                      opt === "auto" ? "remote → WSL → local" : `Prefer ${opt}`
-                    }
-                    onClick={() => setNewTerminalTarget(opt)}
-                  >
-                    {TARGET_LABELS[opt]}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </>
-        )}
-
-        <div className="terminal-sidebar__list" role="tablist">
-          <div
-            role="tab"
-            aria-selected={terminalView === "containers"}
-            className={`terminal-entry${terminalView === "containers" ? " terminal-entry--active" : ""}`}
-            title="Running containers (podman / docker) — click one to shell in"
-            onClick={() => setTerminalView("containers")}
-          >
-            <span className="terminal-entry__label">▣ Containers</span>
-          </div>
-          {panelTerminals.map((t) => (
-            <div
-              key={t.id}
-              role="tab"
-              aria-selected={t.id === activeTerminalId}
-              className={`terminal-entry${t.id === activeTerminalId ? " terminal-entry--active" : ""}`}
-              title={t.title}
-              onClick={() => setActiveTerminal(t.id)}
-              onMouseDown={(e) => {
-                if (e.button === 1) {
-                  e.preventDefault();
-                  closeTerminal(t.id);
-                }
-              }}
-            >
-              <span className="terminal-entry__label">{t.title}</span>
-              <button
-                className="terminal-entry__close terminal-entry__move"
-                title="Move to the editor area (the shell keeps running)"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  moveTerminalToEditor(t.id);
-                }}
-              >
-                ⇱
-              </button>
-              <button
-                className="terminal-entry__close"
-                title="Close terminal"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  closeTerminal(t.id);
-                }}
-              >
-                <IconClose size={11} />
-              </button>
-            </div>
           ))}
         </div>
+
+        {terminalView === "terminals" && (
+          <div
+            className={`terminal-sidebar${listMini ? " terminal-sidebar--mini" : ""}`}
+            style={
+              {
+                flex: `0 0 ${listMini ? 36 : listWidth}px`,
+                "--host-color": groups.find((g) => g.connId === activeGroup)?.color,
+              } as React.CSSProperties
+            }
+          >
+            <div
+              className="terminal-sidebar__grip"
+              title="Drag to resize — all the way right leaves just the icons"
+              onMouseDown={startListDrag}
+            />
+            <div className="terminal-sidebar__actions">
+              <button
+                className="icon-btn"
+                title={
+                  activeGroup === localConnId
+                    ? "New pwsh terminal (Ctrl+Shift+`)"
+                    : "New terminal in this group (Ctrl+Shift+`)"
+                }
+                onClick={() => newTerminal()}
+              >
+                <IconPlus size={14} />
+              </button>
+              {activeGroup === localConnId && (
+                <button
+                  className="icon-btn terminal-new__caret"
+                  title="Select a shell…"
+                  onClick={() => setMenuOpen((v) => !v)}
+                >
+                  ▾
+                </button>
+              )}
+              {menuOpen && (
+                <>
+                  <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />
+                  <div className="terminal-menu" role="menu">
+                    {profiles.length === 0 ? (
+                      <button className="terminal-menu__item" onClick={() => newTerminal()}>
+                        Default shell
+                      </button>
+                    ) : (
+                      profiles.map((p) => (
+                        <button
+                          key={p.id}
+                          className="terminal-menu__item"
+                          onClick={() => newTerminal(p.command, p.label)}
+                        >
+                          {p.label}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="terminal-sidebar__list" role="tablist">
+              {groupTerminals.map((t) => (
+                <div
+                  key={t.id}
+                  role="tab"
+                  aria-selected={t.id === activeTerminalId}
+                  className={`terminal-entry${t.id === activeTerminalId ? " terminal-entry--active" : ""}`}
+                  title={t.title}
+                  draggable
+                  onDragStart={(e) => e.dataTransfer.setData(TERM_MIME, t.id)}
+                  onDragOver={(e) => {
+                    if (e.dataTransfer.types.includes(TERM_MIME)) e.preventDefault();
+                  }}
+                  onDrop={(e) => {
+                    const id = e.dataTransfer.getData(TERM_MIME);
+                    if (id && id !== t.id) moveTerminal(id, t.id);
+                  }}
+                  onClick={() => setActiveTerminal(t.id)}
+                  onMouseDown={(e) => {
+                    if (e.button === 1) {
+                      e.preventDefault();
+                      closeTerminal(t.id);
+                    }
+                  }}
+                >
+                  <span className="terminal-entry__icon">{">_"}</span>
+                  {!listMini && (
+                    <>
+                      <span className="terminal-entry__label">{t.title}</span>
+                      <button
+                        className="terminal-entry__close terminal-entry__move"
+                        title="Move to the editor area (the shell keeps running)"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          moveTerminalToEditor(t.id);
+                        }}
+                      >
+                        ⇱
+                      </button>
+                      <button
+                        className="terminal-entry__close"
+                        title="Close terminal"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          closeTerminal(t.id);
+                        }}
+                      >
+                        <IconClose size={11} />
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

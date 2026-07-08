@@ -30,6 +30,63 @@ export function IconChevron({ size = 16, className }: IconProps) {
   );
 }
 
+/** Plain folder (status bar: Explorer). */
+export function IconFolder({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 2h4.5A1.5 1.5 0 0 1 14 6.5v5A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5v-7Z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Branch fork (status bar: Source Control). */
+export function IconBranch({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="4.5" cy="4" r="1.6" stroke="currentColor" strokeWidth="1.3" />
+      <circle cx="4.5" cy="12" r="1.6" stroke="currentColor" strokeWidth="1.3" />
+      <circle cx="11.5" cy="5.5" r="1.6" stroke="currentColor" strokeWidth="1.3" />
+      <path
+        d="M4.5 5.6v4.8M11.5 7.1c0 2.4-3 2.4-5.2 3.4"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        fill="none"
+      />
+    </svg>
+  );
+}
+
+/** Terminal prompt (status bar: Terminal). */
+export function IconTerminalGlyph({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <rect
+        x="2"
+        y="3"
+        width="12"
+        height="10"
+        rx="1.5"
+        stroke="currentColor"
+        strokeWidth="1.3"
+      />
+      <path
+        d="M4.5 6.5 6.8 8.4 4.5 10.3M8 10.5h3.5"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </svg>
+  );
+}
+
 /** Double chevron for collapsing a side panel ("minimize"). `dir` points the
  *  way the panel slides away — left for the explorer, right for Source
  *  Control. Both panels use this instead of an ×. */
