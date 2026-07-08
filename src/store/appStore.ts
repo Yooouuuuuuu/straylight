@@ -62,7 +62,7 @@ export interface EditorTab {
   cursor: CursorPosition;
   /** "diff" shows a Monaco diff; "log" shows a repo's commit history;
    *  "terminal" hosts a terminal session in the editor area. Default "file". */
-  kind?: "file" | "diff" | "log" | "merge" | "preview" | "terminal";
+  kind?: "file" | "diff" | "log" | "merge" | "preview" | "terminal" | "settings" | "themes";
   /** Which editor group (split) the tab lives in. Absent = group 0. */
   groupId?: number;
   /** The terminal session a kind:"terminal" tab hosts. */
@@ -85,6 +85,9 @@ export type NewTab = Omit<EditorTab, "id" | "dirty" | "cursor">;
 // ---- editor groups (splits) -------------------------------------------------
 
 export const MAX_EDITOR_GROUPS = 3;
+
+/** DataTransfer type for dragging editor tabs (reorder / move / split). */
+export const TAB_DRAG_MIME = "application/x-straylight-tab";
 
 const gidOf = (t: EditorTab): number => t.groupId ?? 0;
 
@@ -497,14 +500,19 @@ interface AppState {
   /** Each group's active tab. `activeTabId` mirrors the focused group's. */
   groupActive: Record<number, string | null>;
   setActiveGroup: (gid: number) => void;
-  /** Move a tab into a new group to the right of its own (creates the split). */
-  splitRight: (tabId: string) => void;
+  /** Move a tab into a new group — right of its own, or at the far right. */
+  splitRight: (tabId: string, opts?: { end?: boolean }) => void;
   /** Move a tab into an existing group. */
   moveTabToGroup: (tabId: string, gid: number) => void;
+  /** Drag-drop: place a tab in `gid` before `beforeId` (null = group end).
+   *  Same group = reorder; different group = move. */
+  moveTabToPosition: (tabId: string, gid: number, beforeId: string | null) => void;
   /** Session restore: reassign tabs to groups in one pass. */
   setTabGroups: (byTabId: Record<string, number>) => void;
   /** Pull a terminal session out of the panel into an editor tab. */
   moveTerminalToEditor: (terminalId: string) => void;
+  /** Open (or focus) the Settings / Themes editor tabs. */
+  openAppTab: (kind: "settings" | "themes") => void;
 
   openTab: (tab: NewTab, opts?: { preview?: boolean; pinned?: boolean }) => void;
   /** Promote a preview tab to permanent (double-click, edit, pin). */
@@ -555,7 +563,10 @@ interface AppState {
   closeTab: (id: string, allowPinned?: boolean) => void;
   forceCloseTab: (id: string) => void;
   setTabDirty: (id: string, dirty: boolean) => void;
-  markTabSaved: (id: string, modified: number) => void;
+  /** Mark a tab written to disk. `content` syncs the tab's seed text so the
+   *  file watcher's reload guard recognizes our own save (else it would
+   *  reload the file and wipe the undo history). */
+  markTabSaved: (id: string, modified: number, content?: string) => void;
   /** Replace a clean tab's content after an external reload (App Refresh). */
   reloadTabContent: (
     id: string,
@@ -1004,6 +1015,31 @@ export const useAppStore = create<AppState>()((set, get) => ({
       };
     }),
 
+  openAppTab: (kind) =>
+    set((s) => {
+      const id = `app::${kind}`;
+      if (s.tabs.some((t) => t.id === id)) return groupsPatch(s, s.tabs, id);
+      const tab: EditorTab = {
+        id,
+        connId: s.localConnId ?? "",
+        path: id,
+        name: kind === "settings" ? "Settings" : "Themes",
+        content: "",
+        language: "plaintext",
+        isBinary: false,
+        encoding: "utf-8",
+        size: 0,
+        modified: 0,
+        truncated: false,
+        lineEnding: "LF",
+        dirty: false,
+        cursor: { line: 1, column: 1 },
+        kind,
+        groupId: s.activeGroupId,
+      };
+      return groupsPatch(s, [...s.tabs, tab], id);
+    }),
+
   openTab: (tab, opts = {}) =>
     set((s) => {
       const existing = s.tabs.find(
@@ -1048,7 +1084,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       return { activeGroupId: gid, activeTabId: s.groupActive[gid] ?? null };
     }),
 
-  splitRight: (tabId) =>
+  splitRight: (tabId, opts = {}) =>
     set((s) => {
       const tab = s.tabs.find((t) => t.id === tabId);
       if (!tab || s.editorGroups.length >= MAX_EDITOR_GROUPS) return {};
@@ -1057,7 +1093,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
         t.id === tabId ? { ...t, groupId: newGid } : t,
       );
       const editorGroups = [...s.editorGroups];
-      editorGroups.splice(editorGroups.indexOf(gidOf(tab)) + 1, 0, newGid);
+      editorGroups.splice(
+        opts.end ? editorGroups.length : editorGroups.indexOf(gidOf(tab)) + 1,
+        0,
+        newGid,
+      );
       return groupsPatch({ ...s, editorGroups }, tabs, tabId);
     }),
 
@@ -1068,6 +1108,29 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const tabs = s.tabs.map((t) =>
         t.id === tabId ? { ...t, groupId: gid } : t,
       );
+      return groupsPatch(s, tabs, tabId);
+    }),
+
+  moveTabToPosition: (tabId, gid, beforeId) =>
+    set((s) => {
+      const tab = s.tabs.find((t) => t.id === tabId);
+      if (!tab || !s.editorGroups.includes(gid)) return {};
+      if (beforeId === tabId) return {};
+      const rest = s.tabs.filter((t) => t.id !== tabId);
+      let idx: number;
+      if (beforeId) {
+        idx = rest.findIndex((t) => t.id === beforeId);
+        if (idx < 0) idx = rest.length;
+      } else {
+        // Append after the target group's last tab.
+        let last = -1;
+        rest.forEach((t, i) => {
+          if (gidOf(t) === gid) last = i;
+        });
+        idx = last >= 0 ? last + 1 : rest.length;
+      }
+      const tabs = rest.slice();
+      tabs.splice(idx, 0, { ...tab, groupId: gid });
       return groupsPatch(s, tabs, tabId);
     }),
 
@@ -1322,9 +1385,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
       ),
     })),
 
-  markTabSaved: (id, modified) =>
+  markTabSaved: (id, modified, content) =>
     set((s) => ({
-      tabs: s.tabs.map((t) => (t.id === id ? { ...t, dirty: false, modified } : t)),
+      tabs: s.tabs.map((t) =>
+        t.id === id
+          ? { ...t, dirty: false, modified, ...(content !== undefined ? { content } : {}) }
+          : t,
+      ),
       conflict: s.conflict?.tabId === id ? null : s.conflict,
     })),
 

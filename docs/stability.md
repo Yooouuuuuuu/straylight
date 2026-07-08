@@ -10,22 +10,29 @@ anything below are breaking changes.
   and its `Area: Action` title. Keybinding overrides reference the ids.
 - **Default keybindings.** The shipped defaults follow OS / VS Code conventions
   and stay put; muscle memory is the point.
-- **`settings.json`** (app config dir) — the only hand-editable file:
+- **`settings.json`** (app config dir) — THE hand-editable file, watched,
+  live-applied, kept a complete template (missing keys are refilled with
+  defaults at launch; your values always win). Behavior on top:
   - `zoom` (number 0.5–3)
-  - `keybindings` (command id → `"ctrl+shift+f"`-style spec; single-stroke, no
-    chords)
-  - `colors` / `editor` — the full UI and Monaco color token sections. The key
-    names are stable; they mirror the CSS custom properties and Monaco token
-    groups. Missing keys fall back to the built-in (Straylight) defaults;
-    theme presets just overwrite these sections.
-  - `terminalLocal` / `terminalWsl` / `terminalRemote` — one full xterm ITheme
-    section per shell kind (pwsh / WSL / SSH), no inheritance between them.
-    Missing sections/keys fall back to the Straylight defaults; presets write
-    all three (local = WSL, remote darker).
+  - `keybindings` (command id → `"ctrl+shift+f"`-style spec; single-stroke,
+    no chords)
   - `terminalFont` (`{ "family": "Fira Code", "size": 13 }`, size 6–40) —
-    user preference, deliberately untouched by theme presets.
-  - Problems never fail silently: parse errors and invalid entries surface as a
-    toast and a warning row in the command palette.
+    never touched by theme picks.
+  - `confirms` — ask-dialog flags (`{ "exit": false }` silences one). Every
+    "don't ask again" checkbox writes here; set a key back to `true` to get
+    the dialog back.
+  Live theme sections at the bottom (a quick-theme pick copies a library
+  entry over them — pure data):
+  - `colors` / `editor` — the full UI and Monaco color token sections. Key
+    names mirror the CSS custom properties and Monaco token groups.
+  - `terminalLocal` / `terminalWsl` / `terminalRemote` — one full xterm
+    ITheme section per shell kind (pwsh / WSL / SSH), no inheritance.
+- **The theme library** lives in a non-user-facing `theme.json` next to it
+  (`themes`: name → full sections), seeded once with every built-in theme and
+  managed via ⚙ → Manage themes (save current / apply / delete — deletions
+  are permanent, built-ins included).
+- Problems never fail silently: parse errors and invalid entries surface as a
+  toast and a warning row in the command palette.
 - **VCS semantics.** Straylight runs **your real `git` / `jj` on the host that
   owns the repo** — hooks, config, identity, signing behave exactly as in your
   terminal. There is no re-implementation to drift.

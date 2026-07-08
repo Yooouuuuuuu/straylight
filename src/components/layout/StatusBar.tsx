@@ -95,6 +95,14 @@ export function StatusBar() {
 
       <TransferProgressBar variant="status" />
 
+      <span
+        className="statusbar__item statusbar__item--button"
+        onClick={() => useAppStore.getState().toggleSidebar()}
+        title="Toggle the explorer (Ctrl+B)"
+      >
+        Explorer
+      </span>
+
       {(vcsRepos.length > 0 || localConnId) && (
         <span
           className="statusbar__item statusbar__item--button"

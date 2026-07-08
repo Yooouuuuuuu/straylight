@@ -32,6 +32,7 @@ import {
   IconFilePlus,
   IconFolderPlus,
   IconLogout,
+  IconPanelCollapse,
   IconPlus,
   IconRefresh,
   IconTransfer,
@@ -181,7 +182,7 @@ export function Sidebar() {
             <button
               key={key}
               className={`section-toggle ${sections[key] ? "" : "section-toggle--off"}`}
-              style={{ color }}
+              style={sections[key] ? { color } : undefined}
               title={
                 sections[key]
                   ? `Hide the ${letter === "L" ? "Local" : letter === "W" ? "WSL" : "Remote"} section (connections stay)`
@@ -219,6 +220,13 @@ export function Sidebar() {
               <IconTransfer />
             </button>
           )}
+          <button
+            className="icon-btn"
+            title="Minimize the explorer (Ctrl+B, or the status bar, to bring it back)"
+            onClick={() => useAppStore.getState().setSidebarVisible(false)}
+          >
+            <IconPanelCollapse size={14} />
+          </button>
         </div>
       </div>
 

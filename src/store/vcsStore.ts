@@ -30,6 +30,7 @@ import {
   type VcsChange,
   type VcsStatus,
 } from "../lib/ipc";
+import { confirmEnabled } from "../lib/settings";
 import { useAppStore } from "./appStore";
 
 export interface TrackedRepo {
@@ -84,7 +85,7 @@ interface VcsState {
   /** Pending discard awaiting confirmation. */
   pendingDiscard: { connKey: string; root: string; changes: VcsChange[] } | null;
   /** A VC action awaiting user confirmation (update/push/pop/amend-pushed…). */
-  vcsConfirm: { title: string; body: string; run: () => void } | null;
+  vcsConfirm: { title: string; body: string; run: () => void; id?: string } | null;
   /** Normalized absolute path → change kind ("child" marks an ancestor folder). */
   decorations: Record<string, string>;
 
@@ -119,7 +120,9 @@ interface VcsState {
   /** Reorder cards: move the repo with id `fromId` to `toId`'s position. Ids
    *  are `${connKey}::${root}` (the card drag payload). */
   moveRepo: (fromId: string, toId: string) => void;
-  askConfirm: (title: string, body: string, run: () => void) => void;
+  /** Show a confirm dialog. With an `id` it gains a "don't ask again"
+   *  checkbox (silenced via settings.json `confirms`; silenced = run now). */
+  askConfirm: (title: string, body: string, run: () => void, id?: string) => void;
   clearConfirm: () => void;
   /** Re-resolve each repo's live connId from the active connections. */
   resolveConns: () => void;
@@ -336,6 +339,7 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       "Add to Source Control?",
       `Track "${basename(path)}" in the Source Control panel? It must be a git or jj repository; its status will then show in the explorer.`,
       () => void get().openRepo(connId, path),
+      "track-repo",
     );
   },
 
@@ -631,7 +635,13 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       return { repos };
     }),
 
-  askConfirm: (title, body, run) => set({ vcsConfirm: { title, body, run } }),
+  askConfirm: (title, body, run, id) => {
+    if (id && !confirmEnabled(id)) {
+      run(); // silenced in settings.json — skip the dialog
+      return;
+    }
+    set({ vcsConfirm: { title, body, run, id } });
+  },
   clearConfirm: () => set({ vcsConfirm: null }),
 
   requestDiscard: (connKey, root, changes) =>

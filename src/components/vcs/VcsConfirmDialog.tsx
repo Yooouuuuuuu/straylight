@@ -1,14 +1,19 @@
 /** Generic confirmation for VC actions that mutate the working tree or publish
- *  (Update/Rebase, Push, stash Pop, amending a pushed commit, jj squash). */
-import { useEffect } from "react";
+ *  (Update/Rebase, Push, stash Pop, amending a pushed commit, jj squash).
+ *  Dialogs opened with an id offer "don't ask again" (settings.json
+ *  `confirms` — delete the key there to bring a dialog back). */
+import { useEffect, useState } from "react";
 
+import { disableConfirm } from "../../lib/settings";
 import { useVcsStore } from "../../store/vcsStore";
 
 export function VcsConfirmDialog() {
   const confirm = useVcsStore((s) => s.vcsConfirm);
   const clearConfirm = useVcsStore((s) => s.clearConfirm);
+  const [silence, setSilence] = useState(false);
 
   useEffect(() => {
+    setSilence(false); // fresh checkbox per dialog
     if (!confirm) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") clearConfirm();
@@ -41,13 +46,24 @@ export function VcsConfirmDialog() {
           </div>
         </div>
         <div className="modal__footer">
+          {confirm.id && (
+            <label className="confirm-silence" title="Saved to settings.json (confirms) — delete the key there to bring this dialog back">
+              <input
+                type="checkbox"
+                checked={silence}
+                onChange={(e) => setSilence(e.target.checked)}
+              />
+              Don't ask again
+            </label>
+          )}
           <button className="btn btn--ghost" onClick={() => clearConfirm()}>
             Cancel
           </button>
           <button
             className="btn btn--primary"
             onClick={() => {
-              const run = confirm.run;
+              const { run, id } = confirm;
+              if (silence && id) void disableConfirm(id);
               clearConfirm();
               run();
             }}

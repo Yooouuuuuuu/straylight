@@ -83,7 +83,13 @@ export function registerGroupEditor(
           shown.getScrollTop() + shown.getLayoutInfo().height >=
             shown.getScrollHeight() - 2 * 20;
         const viewState = shown ? shown.saveViewState() : null;
-        model.setValue(content);
+        // Replace via an edit operation (NOT setValue) so the undo history
+        // survives an external reload — Ctrl+Z steps back across it.
+        model.pushEditOperations(
+          [],
+          [{ range: model.getFullModelRange(), text: content }],
+          () => null,
+        );
         savedVersions.set(id, model.getAlternativeVersionId());
         recomputeDirty(id);
         if (shown && viewState) shown.restoreViewState(viewState);

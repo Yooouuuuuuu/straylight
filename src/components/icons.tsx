@@ -30,6 +30,31 @@ export function IconChevron({ size = 16, className }: IconProps) {
   );
 }
 
+/** Double chevron for collapsing a side panel ("minimize"). `dir` points the
+ *  way the panel slides away — left for the explorer, right for Source
+ *  Control. Both panels use this instead of an ×. */
+export function IconPanelCollapse({
+  size = 16,
+  className,
+  dir = "left",
+}: IconProps & { dir?: "left" | "right" }) {
+  return (
+    <svg
+      {...svgProps(size)}
+      className={className}
+      style={dir === "right" ? { transform: "scaleX(-1)" } : undefined}
+    >
+      <path
+        d="M8 4L4 8l4 4M12 4L8 8l4 4"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function IconRefresh({ size = 16, className }: IconProps) {
   return (
     <svg {...svgProps(size)} className={className}>

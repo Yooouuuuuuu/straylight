@@ -15,7 +15,7 @@ import { vcsBranches, type VcsBranch } from "../../lib/ipc";
 import { vcsClass, vcsLetter } from "../../lib/vcsDecorations";
 import { FolderBrowser } from "../FolderBrowser";
 import { RelativeTime } from "../RelativeTime";
-import { IconClose, IconPlus, IconRefresh } from "../icons";
+import { IconClose, IconPanelCollapse, IconPlus, IconRefresh } from "../icons";
 
 interface ConnChoice {
   connId: string;
@@ -61,10 +61,10 @@ export function ScmPanel() {
         </button>
         <button
           className="icon-btn"
-          title="Hide Source Control"
+          title="Minimize Source Control (status bar to bring it back)"
           onClick={() => setScmVisible(false)}
         >
-          <IconClose />
+          <IconPanelCollapse size={14} dir="right" />
         </button>
       </div>
 
@@ -204,6 +204,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
         "Amend a pushed commit?",
         "The last commit is already on the remote — amending rewrites published history.",
         () => void runCommit(),
+        "vcs-amend-pushed",
       );
     } else {
       void runCommit();
@@ -322,6 +323,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
               "Remove repository?",
               `Remove "${repo.label}" from Source Control? Nothing on disk is touched — you can re-add it any time.`,
               () => removeRepo(repo.connKey, repo.root),
+              "remove-repo",
             )
           }
         >
@@ -403,6 +405,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                   "Merge remote changes?",
                   `Merge the fetched upstream into ${st.ref || "the current branch"}? This modifies your working tree.`,
                   () => void updateFromRemote(repo.connKey, repo.root),
+                  "vcs-update",
                 );
               }}
             >
@@ -418,6 +421,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                   "Rebase onto the remote?",
                   `Rebase your work onto ${st.ref}@origin? This rewrites the local commits' parents.`,
                   () => void updateFromRemote(repo.connKey, repo.root),
+                  "vcs-update",
                 );
               }}
             >
@@ -434,6 +438,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                   ? `Push ${st.ahead ? `${st.ahead} commit${st.ahead === 1 ? "" : "s"}` : "your commits"} upstream?`
                   : "Push bookmarks to the remote (jj git push)?",
                 () => void remoteOp(repo.connKey, repo.root, "push"),
+                "vcs-push",
               );
             }}
           >
@@ -460,6 +465,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                   "Pop the latest stash?",
                   "Apply the most recent stash to your working tree? Conflicts are possible.",
                   () => void stash(repo.connKey, repo.root, "pop", ""),
+                  "vcs-stash-pop",
                 );
               }}
             >
@@ -476,6 +482,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                   "Squash into the last commit?",
                   "Fold all working-copy changes into the last commit? Its message is kept.",
                   () => void squash(repo.connKey, repo.root),
+                  "vcs-squash",
                 );
               }}
             >

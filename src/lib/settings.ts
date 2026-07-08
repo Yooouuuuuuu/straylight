@@ -1,21 +1,25 @@
-/** settings.json — the one hand-editable preferences file (app config dir).
- *
- *  Shape (every part optional; missing keys fall back to defaults):
+/** settings.json — THE hand-editable preferences file (app config dir),
+ *  watched and live-applied, seeded as a complete template. Behavior keys on
+ *  top, the LIVE theme sections at the bottom:
  *    {
- *      "zoom": 1.1,
+ *      "zoom": 1,
  *      "keybindings": { "search.inFiles": "ctrl+alt+f" },
- *      "colors":   { "bg-primary": "#2e3440", ... },   // UI palette
- *      "editor":   { ... },                            // Monaco colors
- *      "terminalLocal":  { ... },                      // xterm ANSI palette, local shells (pwsh)
- *      "terminalWsl":    { ... },                      // WSL shells
- *      "terminalRemote": { ... },                      // SSH shells
- *      "terminalFont": { "family": "Fira Code", "size": 13 }
+ *      "terminalFont": { "family": "Fira Code", "size": 13 },
+ *      "confirms": { "exit": true, ... },  // false = that dialog is silenced
+ *      "colors":         { "bg-primary": "...", ... },  // UI palette (live)
+ *      "editor":         { ... },                       // Monaco colors
+ *      "terminalLocal":  { ... },                       // xterm, local shells
+ *      "terminalWsl":    { ... },
+ *      "terminalRemote": { ... }
  *    }
  *
- *  The color sections ARE the theme — theme presets simply overwrite them with
- *  a known set. Keys mirror the CSS custom properties (minus the `--`). The
- *  file is watched: saving it re-applies everything live. Problems never fail
- *  silently — they surface as a toast and a warning row in the command palette. */
+ *  A second file, theme.json, is NOT user-facing: it stores the theme LIBRARY
+ *  (`themes`: name → full sections), seeded once with every built-in and
+ *  managed via ⚙ → Manage themes (save current / delete). A quick-theme pick
+ *  copies a library entry over settings.json's live sections — pure data.
+ *
+ *  Missing keys fall back to built-in (Straylight) defaults. Problems never
+ *  fail silently — they surface as a toast and a warning row in the palette. */
 import { applyKeybindingOverrides } from "./shortcuts";
 import { applyZoom } from "./zoom";
 import { fileWatch, fsReadFile, fsWriteFile, onFileFsChange, settingsPath } from "./ipc";
@@ -24,6 +28,11 @@ import { useAppStore } from "../store/appStore";
 export interface Settings {
   zoom?: number;
   keybindings?: Record<string, string>;
+  terminalFont?: { family?: string; size?: number };
+  /** Per-dialog "ask again?" flags: `false` silences that confirmation. All
+   *  don't-ask-again checkboxes write here (visible + hand-restorable). */
+  confirms?: Record<string, boolean>;
+  // ---- theme.json sections ----
   colors?: Record<string, string>;
   editor?: Record<string, string>;
   /** One explicit color section per shell kind — no inheritance between them;
@@ -31,11 +40,59 @@ export interface Settings {
   terminalLocal?: Record<string, string>;
   terminalWsl?: Record<string, string>;
   terminalRemote?: Record<string, string>;
-  terminalFont?: { family?: string; size?: number };
+  /** The theme library: name → full color sections. Quick-theme copies an
+   *  entry over the live sections; saving adds one; delete lines to remove. */
+  themes?: Record<string, ThemeData>;
+}
+
+export type ThemeData = Pick<
+  Settings,
+  "colors" | "editor" | "terminalLocal" | "terminalWsl" | "terminalRemote"
+>;
+
+const THEME_SECTION_KEYS = [
+  "colors",
+  "editor",
+  "terminalLocal",
+  "terminalWsl",
+  "terminalRemote",
+] as const;
+
+/** Which top-level keys belong to the hidden library file (theme.json);
+ *  everything else — including the live color sections — is settings.json. */
+const THEME_KEYS = new Set(["themes"]);
+
+/** Every confirm-dialog id, so the template documents them all. */
+export const CONFIRM_IDS = [
+  "exit",
+  "unpin-folder",
+  "track-repo",
+  "remove-repo",
+  "vcs-update",
+  "vcs-push",
+  "vcs-stash-pop",
+  "vcs-squash",
+  "vcs-amend-pushed",
+];
+
+function settingsTemplate(): Settings {
+  return {
+    zoom: 1,
+    keybindings: {},
+    terminalFont: { family: "Fira Code", size: 13 },
+    confirms: Object.fromEntries(CONFIRM_IDS.map((id) => [id, true])),
+  };
+}
+
+/** theme.json's full-template supplier, provided by the theme layer at startup
+ *  (it owns the default color tables; a direct import would be circular). */
+let themeTemplate: (() => Settings) | null = null;
+export function setThemeTemplate(fn: () => Settings): void {
+  themeTemplate = fn;
 }
 
 /** The default (Straylight) UI palette — mirrors src/theme/straylight.css.
- *  These key names are the settings.json contract. */
+ *  These key names are the theme.json `colors` contract. */
 export const UI_COLOR_DEFAULTS: Record<string, string> = {
   "bg-primary": "#151013",
   "bg-secondary": "#0f0b0d",
@@ -58,6 +115,8 @@ export const UI_COLOR_DEFAULTS: Record<string, string> = {
   "section-local": "#f30100",
   "section-wsl": "#ff0180",
   "section-remote": "#ff00ff",
+  titlebar: "#af011c",
+  "titlebar-fg": "#f5e6e8",
   border: "#3a2228",
   "border-focus": "#af011c",
   scrollbar: "#3a2228",
@@ -69,14 +128,31 @@ export const UI_COLOR_DEFAULTS: Record<string, string> = {
   accent: "#af011c",
 };
 
-let file: string | null = null;
 let connId: string | null = null;
+let settingsFile: string | null = null;
+let themeFile: string | null = null;
+
 /** Editor/terminal sections, held for the theme layer to consume. */
 export let editorColors: Record<string, string> = {};
 export let terminalLocalColors: Record<string, string> = {};
 export let terminalWslColors: Record<string, string> = {};
 export let terminalRemoteColors: Record<string, string> = {};
 export let terminalFontConfig: { family?: string; size?: number } = {};
+/** The live `colors` section (for "save current theme"). */
+export let uiColors: Record<string, string> = {};
+/** The theme library from theme.json. */
+export let savedThemes: Record<string, ThemeData> = {};
+/** The raw keybinding overrides (for the settings UI). */
+export let keybindingOverrides: Record<string, string> = {};
+/** The live zoom value from settings (for the settings UI). */
+export let settingsZoom = 1;
+let confirms: Record<string, boolean> = {};
+
+/** Snapshot of the confirm flags (for the settings UI). */
+export function confirmFlags(): Record<string, boolean> {
+  return { ...confirms };
+}
+
 /** Called after every (re)apply so the theme layer can push editor/terminal
  *  colors into Monaco and live terminals. */
 let onApplied: (() => void) | null = null;
@@ -86,7 +162,21 @@ export function setOnSettingsApplied(cb: () => void): void {
 }
 
 export function settingsFilePath(): string | null {
-  return file;
+  return settingsFile;
+}
+
+export function themeFilePath(): string | null {
+  return themeFile;
+}
+
+/** Whether the ask-dialog `id` should show (default yes; settings can silence). */
+export function confirmEnabled(id: string): boolean {
+  return confirms[id] !== false;
+}
+
+/** Silence an ask-dialog permanently (the "don't ask again" checkbox). */
+export async function disableConfirm(id: string): Promise<void> {
+  await updateSettings({ confirms: { ...confirms, [id]: false } });
 }
 
 function applyUiColors(colors: Record<string, string>, issues: string[]): void {
@@ -110,31 +200,54 @@ function applyUiColors(colors: Record<string, string>, issues: string[]): void {
   }
 }
 
-async function loadAndApply(): Promise<void> {
-  if (!file || !connId) return;
-  const issues: string[] = [];
-  let settings: Settings = {};
-
+/** Read + parse one of the files. `missing` distinguishes "no file yet" (pure
+ *  defaults, not an error) from a parse problem (reported). */
+async function readJson(
+  file: string,
+  label: string,
+  issues: string[],
+): Promise<{ data: Settings; missing: boolean }> {
   let raw: string | null = null;
   try {
-    raw = (await fsReadFile(connId, file)).content;
+    raw = (await fsReadFile(connId!, file)).content;
   } catch {
-    raw = null; // no file yet — pure defaults, not an error
+    return { data: {}, missing: true };
   }
-  if (raw && raw.trim()) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object") settings = parsed as Settings;
-      else issues.push("settings.json: top level must be an object");
-    } catch (e) {
-      issues.push(`settings.json: ${String(e).replace("SyntaxError: ", "")}`);
-    }
+  if (!raw || !raw.trim()) return { data: {}, missing: true };
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") return { data: parsed as Settings, missing: false };
+    issues.push(`${label}: top level must be an object`);
+  } catch (e) {
+    issues.push(`${label}: ${String(e).replace("SyntaxError: ", "")}`);
   }
+  return { data: {}, missing: false };
+}
+
+async function writeJson(file: string, data: unknown): Promise<void> {
+  await fsWriteFile(connId!, file, `${JSON.stringify(data, null, 2)}\n`, null);
+}
+
+function splitKeys(data: Settings): { theme: Settings; rest: Settings } {
+  const theme: Record<string, unknown> = {};
+  const rest: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(data)) {
+    (THEME_KEYS.has(k) ? theme : rest)[k] = v;
+  }
+  return { theme: theme as Settings, rest: rest as Settings };
+}
+
+async function loadAndApply(): Promise<void> {
+  if (!settingsFile || !themeFile || !connId) return;
+  const issues: string[] = [];
+
+  const s = (await readJson(settingsFile, "settings.json", issues)).data;
+  const t = (await readJson(themeFile, "theme.json", issues)).data;
 
   // Zoom
-  if (settings.zoom !== undefined) {
-    if (typeof settings.zoom === "number" && settings.zoom >= 0.5 && settings.zoom <= 3) {
-      void applyZoom(settings.zoom);
+  if (s.zoom !== undefined) {
+    if (typeof s.zoom === "number" && s.zoom >= 0.5 && s.zoom <= 3) {
+      void applyZoom(s.zoom);
     } else {
       issues.push('settings.json: "zoom" must be a number between 0.5 and 3');
       void applyZoom(1);
@@ -144,21 +257,14 @@ async function loadAndApply(): Promise<void> {
   }
 
   // Keybindings (invalid entries are reported and skipped, valid ones apply)
-  issues.push(...applyKeybindingOverrides(settings.keybindings ?? {}));
-
-  // Colors
-  applyUiColors(settings.colors ?? {}, issues);
-  editorColors = settings.editor ?? {};
-  // Legacy `terminal` (pre-scoped) seeds any scope section that's absent, so
-  // an old file keeps looking right until the next preset click rewrites it.
-  const legacyTerminal = (settings as { terminal?: Record<string, string> }).terminal ?? {};
-  terminalLocalColors = settings.terminalLocal ?? legacyTerminal;
-  terminalWslColors = settings.terminalWsl ?? legacyTerminal;
-  terminalRemoteColors = settings.terminalRemote ?? legacyTerminal;
+  keybindingOverrides = { ...(s.keybindings ?? {}) };
+  issues.push(...applyKeybindingOverrides(s.keybindings ?? {}));
+  settingsZoom =
+    typeof s.zoom === "number" && s.zoom >= 0.5 && s.zoom <= 3 ? s.zoom : 1;
 
   // Terminal font (family string, size 6–40; invalid entries report + default)
   terminalFontConfig = {};
-  const font = settings.terminalFont;
+  const font = s.terminalFont;
   if (font !== undefined) {
     if (font && typeof font === "object") {
       if (font.family !== undefined) {
@@ -179,6 +285,45 @@ async function loadAndApply(): Promise<void> {
       issues.push('terminalFont: must be an object like { "family": "Fira Code", "size": 13 }');
     }
   }
+
+  // Silenced ask-dialogs (non-boolean entries are reported and ignored).
+  confirms = {};
+  if (s.confirms !== undefined) {
+    if (s.confirms && typeof s.confirms === "object") {
+      for (const [k, v] of Object.entries(s.confirms)) {
+        if (typeof v === "boolean") confirms[k] = v;
+        else issues.push(`confirms: "${k}" must be true or false`);
+      }
+    } else {
+      issues.push('confirms: must be an object like { "exit": false }');
+    }
+  }
+
+  // The live color sections (bottom of settings.json). Legacy pre-split
+  // `terminal` seeds missing scopes; older two-file layouts fall back to the
+  // sections still sitting in theme.json until migration rewrites them.
+  const src = (k: keyof Settings) => (s[k] ?? t[k]) as Record<string, string> | undefined;
+  uiColors = src("colors") ?? {};
+  applyUiColors(uiColors, issues);
+  editorColors = src("editor") ?? {};
+  const legacyTerminal =
+    (s as { terminal?: Record<string, string> }).terminal ?? {};
+  terminalLocalColors = src("terminalLocal") ?? legacyTerminal;
+  terminalWslColors = src("terminalWsl") ?? legacyTerminal;
+  terminalRemoteColors = src("terminalRemote") ?? legacyTerminal;
+
+  // The theme library (hidden file; lightly validated — entries = objects).
+  savedThemes = {};
+  if (t.themes !== undefined) {
+    if (t.themes && typeof t.themes === "object") {
+      for (const [name, data] of Object.entries(t.themes)) {
+        if (data && typeof data === "object") savedThemes[name] = data;
+        else issues.push(`themes: "${name}" must be an object of color sections`);
+      }
+    } else {
+      issues.push("themes: must be an object of named themes");
+    }
+  }
   onApplied?.();
 
   const prev = useAppStore.getState().settingsIssues;
@@ -186,43 +331,106 @@ async function loadAndApply(): Promise<void> {
   if (issues.length > 0 && prev.join("\n") !== issues.join("\n")) {
     useAppStore
       .getState()
-      .pushNotice("error", `settings.json: ${issues.length} problem${issues.length === 1 ? "" : "s"} — see the command palette`);
+      .pushNotice("error", `Settings: ${issues.length} problem${issues.length === 1 ? "" : "s"} — see the command palette`);
   }
 }
 
-/** Merge a patch into settings.json (sections replace wholesale) and re-apply. */
+/** Merge a patch into the right file(s) (sections replace wholesale) and
+ *  re-apply. Theme sections go to theme.json, everything else to settings.json. */
 export async function updateSettings(patch: Partial<Settings>): Promise<void> {
   // Self-heal: a dev hot-reload can reset this module's state — re-init from
   // the live local session instead of silently dropping the write.
-  if (!file || !connId) {
+  if (!settingsFile || !connId) {
     const localConnId = useAppStore.getState().localConnId;
     if (localConnId) await initSettings(localConnId);
   }
-  if (!file || !connId) {
+  if (!settingsFile || !themeFile || !connId) {
     useAppStore
       .getState()
       .pushNotice("error", "Settings not ready yet — try again in a moment.");
     return;
   }
-  let current: Settings = {};
-  try {
-    const raw = (await fsReadFile(connId, file)).content;
-    if (raw.trim()) current = JSON.parse(raw) as Settings;
-  } catch {
-    /* missing or broken — start over from the patch */
+  const { theme: themePatch, rest: settingsPatch } = splitKeys(patch as Settings);
+  const issues: string[] = [];
+  if (Object.keys(settingsPatch).length > 0) {
+    const current = (await readJson(settingsFile, "settings.json", issues)).data;
+    await writeJson(settingsFile, { ...current, ...settingsPatch });
   }
-  const next = { ...current, ...patch };
-  await fsWriteFile(connId, file, `${JSON.stringify(next, null, 2)}\n`, null);
+  if (Object.keys(themePatch).length > 0) {
+    const current = (await readJson(themeFile, "theme.json", issues)).data;
+    await writeJson(themeFile, { ...current, ...themePatch });
+  }
   await loadAndApply();
 }
 
-/** Resolve the file, apply it, and keep it live (re-apply on save). */
+/** Migration + template seeding, run at every launch. settings.json is kept a
+ *  complete template (behavior keys on top, the live color sections at the
+ *  bottom, every key filled — user values always win). theme.json is reduced
+ *  to the hidden library; its `themes` map is seeded with the built-ins ONCE
+ *  (only when absent/empty), so UI deletions of built-ins stick. */
+async function migrateAndSeed(): Promise<void> {
+  const issues: string[] = [];
+  const s = await readJson(settingsFile!, "settings.json", issues);
+  const t = await readJson(themeFile!, "theme.json", issues);
+
+  // Never seed without the theme template (a dev hot-reload can momentarily
+  // leave it unset — writing then would produce degraded, half-empty files).
+  const templ = themeTemplate?.();
+  if (!templ) return;
+
+  // settings.json: behavior template ← user's behavior; then per-key-filled
+  // color sections (template ← sections parked in theme.json by the previous
+  // layout ← sections already here). Confirms merge per-key so new dialog ids
+  // appear over time.
+  const templS = settingsTemplate();
+  const legacy = (s.data as { terminal?: Record<string, string> }).terminal ?? {};
+  const settingsOut: Settings = {
+    ...templS,
+    ...Object.fromEntries(
+      Object.entries(s.data).filter(
+        ([k]) => !THEME_KEYS.has(k) && k !== "terminal" && !THEME_SECTION_KEYS.includes(k as never),
+      ),
+    ),
+    confirms: { ...templS.confirms, ...(s.data.confirms ?? {}) },
+  };
+  for (const key of THEME_SECTION_KEYS) {
+    settingsOut[key] = {
+      ...(templ[key] ?? {}),
+      ...(key.startsWith("terminal") ? legacy : {}),
+      ...(t.data[key] ?? {}),
+      ...(s.data[key] ?? {}),
+    };
+  }
+  if (s.missing || JSON.stringify(settingsOut) !== JSON.stringify(s.data)) {
+    await writeJson(settingsFile!, settingsOut);
+  }
+
+  // theme.json: the library only. Seed built-ins when there's no usable map.
+  const userThemes = t.data.themes;
+  const hasThemes =
+    userThemes && typeof userThemes === "object" && Object.keys(userThemes).length > 0;
+  const themeOut: Settings = {
+    themes: hasThemes ? userThemes : { ...(templ.themes ?? {}) },
+  };
+  if (t.missing || JSON.stringify(themeOut) !== JSON.stringify(t.data)) {
+    await writeJson(themeFile!, themeOut);
+  }
+}
+
+/** Resolve the files, migrate/seed once, apply, and keep both live. */
 export async function initSettings(localConnId: string): Promise<void> {
   connId = localConnId;
-  file = await settingsPath();
+  settingsFile = await settingsPath();
+  themeFile = settingsFile.replace(/settings\.json$/i, "theme.json");
+  try {
+    await migrateAndSeed();
+  } catch {
+    /* seeding is best-effort; missing files still apply as pure defaults */
+  }
   await loadAndApply();
-  fileWatch(localConnId, file).catch(() => {});
+  fileWatch(localConnId, settingsFile).catch(() => {});
+  fileWatch(localConnId, themeFile).catch(() => {});
   void onFileFsChange((c) => {
-    if (file && c.path === file) void loadAndApply();
+    if (c.path === settingsFile || c.path === themeFile) void loadAndApply();
   });
 }

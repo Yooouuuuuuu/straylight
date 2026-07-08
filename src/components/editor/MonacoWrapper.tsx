@@ -52,6 +52,9 @@ export function MonacoWrapper({ groupId }: { groupId: number }) {
       renderWhitespace: "selection",
       cursorBlinking: "smooth",
       guides: { indentation: true },
+      // VS Code's pinned block/function headers at the top while scrolling.
+      // Falls back to folding/indentation where no symbol provider exists.
+      stickyScroll: { enabled: true },
     });
     editorRef.current = editor;
     const unregister = registerGroupEditor(editor);

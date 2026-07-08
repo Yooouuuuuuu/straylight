@@ -21,13 +21,14 @@ export function remoteColor(
   return hostColors[remoteHostKey(remote)] ?? HOST_COLOR_RAMP[0];
 }
 
-/** Color for a VC connKey ("local" | "wsl:<distro>" | "user@host:port"). */
+/** Color for a VC connKey ("local" | "wsl:<distro>" | "user@host:port").
+ *  WSL distros can be recolored per distro (right-click their host bar). */
 export function hostColorForConnKey(
   hostColors: Record<string, string>,
   connKey: string,
 ): string {
   if (connKey === "local") return SECTION_LOCAL;
-  if (connKey.startsWith("wsl:")) return SECTION_WSL;
+  if (connKey.startsWith("wsl:")) return hostColors[connKey] ?? SECTION_WSL;
   return hostColors[connKey] ?? HOST_COLOR_RAMP[0];
 }
 
@@ -36,7 +37,8 @@ export function hostColorForConnKey(
 export function tabHostColor(connId: string): string | null {
   const s = useAppStore.getState();
   if (!connId || connId === s.localConnId) return null;
-  if (s.wsl?.connId === connId) return SECTION_WSL;
+  if (s.wsl?.connId === connId)
+    return s.hostColors[`wsl:${s.wsl.name}`] ?? SECTION_WSL;
   const remote = s.remotes.find((r) => r.conn.connId === connId);
   if (remote) return remoteColor(s.hostColors, remote.conn);
   return null;

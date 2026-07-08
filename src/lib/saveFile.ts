@@ -30,7 +30,9 @@ export async function saveTab(tabId: string): Promise<SaveOutcome> {
       store.setConflict(tab.id, content);
       return "conflict";
     }
-    store.markTabSaved(tab.id, result.modified);
+    // Passing `content` keeps the tab's seed in sync, so the file watcher
+    // recognizes our own write and skips the reload (which would reset undo).
+    store.markTabSaved(tab.id, result.modified, content);
     if (versionId !== null) markTabSavedVersion(tab.id, versionId);
     // An eager repo containing this file re-checks its status.
     useVcsStore.getState().onFileChanged(tab.connId, tab.path);
@@ -59,7 +61,7 @@ export async function overwritePendingFile(): Promise<void> {
   const versionId = getTabVersionId(tab.id);
   try {
     const result = await fsWriteFile(tab.connId, tab.path, pending.content, null);
-    store.markTabSaved(tab.id, result.modified);
+    store.markTabSaved(tab.id, result.modified, pending.content);
     if (versionId !== null) markTabSavedVersion(tab.id, versionId);
     useVcsStore.getState().onFileChanged(tab.connId, tab.path);
   } catch (error) {

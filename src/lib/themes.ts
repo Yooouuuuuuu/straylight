@@ -8,14 +8,20 @@ import type { ITheme, Terminal } from "@xterm/xterm";
 import { monaco } from "./monaco";
 import {
   editorColors,
+  savedThemes,
   setOnSettingsApplied,
+  setThemeTemplate,
   terminalFontConfig,
   terminalLocalColors,
   terminalRemoteColors,
   terminalWslColors,
+  UI_COLOR_DEFAULTS,
+  uiColors,
   updateSettings,
   type Settings,
+  type ThemeData,
 } from "./settings";
+import { useAppStore } from "../store/appStore";
 
 // ---- contract keys + Straylight (built-in default) values -------------------
 
@@ -211,9 +217,25 @@ function applyThemeLayers(): void {
   }
 }
 
-/** Hook the theme layer into settings (called once at startup). */
+/** Hook the theme layer into settings (called once at startup). Also supplies
+ *  theme.json's first-run template: the FULL default (Straylight) sections, so
+ *  the file documents every customizable key. */
 export function initThemes(): void {
   setOnSettingsApplied(applyThemeLayers);
+  setThemeTemplate(() => ({
+    colors: { ...UI_COLOR_DEFAULTS },
+    editor: { ...EDITOR_DEFAULTS },
+    terminalLocal: { ...TERMINAL_DEFAULTS },
+    terminalWsl: { ...TERMINAL_DEFAULTS },
+    terminalRemote: {
+      ...TERMINAL_DEFAULTS,
+      background: "#070406",
+      cursorAccent: "#070406",
+      black: "#1a1114",
+      selectionBackground: "#381b22",
+    },
+    themes: builtinThemeData(),
+  }));
 }
 
 // ---- presets ----------------------------------------------------------------
@@ -293,14 +315,14 @@ export const THEME_PRESETS: ThemePreset[] = [
   {
     // The signature theme and the built-in default: near-black with a plum
     // cast, #AF011C as the chrome accent, supports used semantically
-    // (green=success, magenta=special, bright red=errors/cursor).
+    // (green=success, magenta=special, bright red=errors/cursor). Written out
+    // in full like every theme — a quick-theme pick is a pure data copy.
     id: "theme.straylight",
     title: "Theme: Straylight (default)",
-    // Empty sections = every key falls back to the built-in defaults.
-    ui: {},
-    editor: {},
-    terminalLocal: {},
-    terminalWsl: {},
+    ui: { ...UI_COLOR_DEFAULTS },
+    editor: { ...EDITOR_DEFAULTS },
+    terminalLocal: { ...TERMINAL_DEFAULTS },
+    terminalWsl: { ...TERMINAL_DEFAULTS },
     terminalRemote: {
       ...TERMINAL_DEFAULTS,
       background: "#070406", cursorAccent: "#070406", black: "#1a1114",
@@ -319,6 +341,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       purple: "#ff4d6d", red: "#f30100", yellow: "#ffb454",
       "tree-root": "#f5e6e8", "tree-dir": "#f5e6e8", "section-fg": "#f5e6e8",
       "section-local": "#f30100", "section-wsl": "#ff0180", "section-remote": "#ff00ff",
+      titlebar: "#f30100", "titlebar-fg": "#f5e6e8",
       "icon-folder": "#ff4d6d", "icon-folder-open": "#ff8fb0",
       border: "#4d1622", "border-focus": "#f30100",
       scrollbar: "#4d1622", "scrollbar-hover": "#6b1e2e",
@@ -351,6 +374,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       purple: "#ff1744", red: "#f30100", yellow: "#9dff5c",
       "tree-root": "#eeeeee", "tree-dir": "#eeeeee", "section-fg": "#eeeeee",
       "section-local": "#f30100", "section-wsl": "#ff0180", "section-remote": "#ff00ff",
+      titlebar: "#f30100", "titlebar-fg": "#eeeeee",
       "icon-folder": "#f30100", "icon-folder-open": "#ff00ff",
       border: "#2b0f14", "border-focus": "#f30100",
       scrollbar: "#331016", "scrollbar-hover": "#4d1620",
@@ -382,6 +406,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       purple: "#bd93f9", red: "#ff5555", yellow: "#f1fa8c",
       "tree-root": "#f8f8f2", "tree-dir": "#f8f8f2", "section-fg": "#21222c",
       "section-local": "#ff5555", "section-wsl": "#ff79c6", "section-remote": "#bd93f9",
+      titlebar: "#21222c", "titlebar-fg": "#f8f8f2",
       "icon-folder": "#bd93f9", "icon-folder-open": "#8be9fd",
       border: "#44475a", "border-focus": "#6272a4",
       scrollbar: "#44475a", "scrollbar-hover": "#6272a4",
@@ -409,6 +434,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       purple: "#81a1c1", red: "#bf616a", yellow: "#ebcb8b",
       "tree-root": "#eceff4", "tree-dir": "#eceff4", "section-fg": "#2e3440",
       "section-local": "#bf616a", "section-wsl": "#b48ead", "section-remote": "#81a1c1",
+      titlebar: "#3b4252", "titlebar-fg": "#eceff4",
       "icon-folder": "#81a1c1", "icon-folder-open": "#88c0d0",
       border: "#434c5e", "border-focus": "#7b88a1",
       scrollbar: "#434c5e", "scrollbar-hover": "#4c566a",
@@ -442,6 +468,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       purple: "#6c71c4", red: "#dc322f", yellow: "#b58900",
       "tree-root": "#586e75", "tree-dir": "#586e75", "section-fg": "#fdf6e3",
       "section-local": "#dc322f", "section-wsl": "#d33682", "section-remote": "#6c71c4",
+      titlebar: "#eee8d5", "titlebar-fg": "#586e75",
       "icon-folder": "#268bd2", "icon-folder-open": "#2aa198",
       border: "#d8d0b8", "border-focus": "#93a1a1",
       scrollbar: "#d8d0b8", "scrollbar-hover": "#c2b998",
@@ -465,17 +492,69 @@ export const THEME_PRESETS: ThemePreset[] = [
   },
 ];
 
-/** Overwrite settings.json's color sections with a preset's values. The
- *  `terminalFont` section is the user's, not the theme's — presets leave it. */
-export async function applyThemePreset(preset: ThemePreset): Promise<void> {
+const presetName = (p: ThemePreset) =>
+  p.title.replace("Theme: ", "").replace(" (default)", "");
+
+/** The built-in themes as pure data — seeds theme.json's `themes` library. */
+export function builtinThemeData(): Record<string, ThemeData> {
+  return Object.fromEntries(
+    THEME_PRESETS.map((p) => [
+      presetName(p),
+      {
+        colors: p.ui,
+        editor: p.editor,
+        terminalLocal: p.terminalLocal,
+        terminalWsl: p.terminalWsl,
+        terminalRemote: p.terminalRemote,
+      },
+    ]),
+  );
+}
+
+/** Names in theme.json's library (built-ins seeded + user-saved). */
+export function savedThemeNames(): string[] {
+  return Object.keys(savedThemes);
+}
+
+/** Quick theme: copy a library entry over the live sections — pure data, no
+ *  logic. `terminalFont` and everything in settings.json are untouched. */
+export async function applyTheme(name: string): Promise<void> {
+  const th = savedThemes[name];
+  if (!th) {
+    useAppStore.getState().pushNotice("error", `Theme "${name}" not found in theme.json.`);
+    return;
+  }
   await updateSettings({
-    colors: preset.ui,
-    editor: preset.editor,
-    terminalLocal: preset.terminalLocal,
-    terminalWsl: preset.terminalWsl,
-    terminalRemote: preset.terminalRemote,
+    colors: th.colors ?? {},
+    editor: th.editor ?? {},
+    terminalLocal: th.terminalLocal ?? {},
+    terminalWsl: th.terminalWsl ?? {},
+    terminalRemote: th.terminalRemote ?? {},
     // Drop the pre-scoped `terminal` section from older files (undefined keys
     // vanish in JSON.stringify).
     terminal: undefined,
   } as Partial<Settings> & { terminal?: undefined });
+}
+
+/** Remove a library entry (built-ins included — they don't come back). */
+export async function deleteTheme(name: string): Promise<void> {
+  const themes = { ...savedThemes };
+  delete themes[name];
+  await updateSettings({ themes });
+}
+
+/** Save the live sections as a named library entry (same name overwrites). */
+export async function saveCurrentTheme(name: string): Promise<void> {
+  await updateSettings({
+    themes: {
+      ...savedThemes,
+      [name]: {
+        colors: { ...uiColors },
+        editor: { ...editorColors },
+        terminalLocal: { ...terminalLocalColors },
+        terminalWsl: { ...terminalWslColors },
+        terminalRemote: { ...terminalRemoteColors },
+      },
+    },
+  });
 }

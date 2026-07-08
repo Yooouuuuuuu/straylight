@@ -27,6 +27,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 - Terminal tab reordering.
 
+## [0.8.13] - 2026-07-08
+
+### Added
+
+- **Settings & Themes as editor tabs** (⚙ menu / palette): Settings — zoom,
+  terminal font, per-dialog confirmation checkboxes, and click-to-record
+  keybindings; Themes — save/apply/delete library themes and edit every live
+  color via swatch cards. All writes go through settings.json (UI, file, and
+  hand-edits stay in sync).
+- **Config architecture:** settings.json is the ONE user file — behavior keys
+  on top, the live color sections at the bottom, kept a complete template
+  (missing keys refill at launch; user values win). theme.json is a hidden
+  library (`themes`: name → full sections) seeded once with all built-ins;
+  quick-theme picks are pure data copies. Legacy/combined files migrate
+  automatically.
+- **Confirm dialogs got "don't ask again" checkboxes** (exit, unpin, track/
+  remove repo, update, push, stash pop, squash, amend-pushed), persisted in
+  settings.json `confirms`; applied only on confirm, never on cancel.
+- **WSL section redesigned like Remote**: permanent WSL bar (+ swaps distros,
+  properly disconnecting the old one); the connected distro is a `user@distro`
+  host bar with its own right-click color (persisted per distro).
+- **Draggable tabs**: reorder within a strip, drag onto another strip to move
+  groups, drag onto the last group's right half (⧉ zone) to split. VC card
+  drag-reorder shipped earlier now has company.
+- **Breadcrumb bar** under the tab strip (`pin › folder › file`, per pinned
+  root) hosting ¶ Preview; **sticky scroll** in the editor (function/block
+  headers pin to the top).
+- **Exit confirmation** on the window × (Enter closes / Esc stays), silenceable.
+- Explorer/Source Control **panel minimize buttons** (« »), status-bar
+  Explorer toggle, title-bar ⌘/⚙ spacing, themable title bar
+  (`titlebar`/`titlebar-fg`, default #AF011C), pinned tabs show a magenta ⌖.
+
+### Fixed
+
+- **Ctrl+Z after Ctrl+S was dead**: saving triggered our own file watcher,
+  whose reload reset Monaco's undo stack. Saves now sync the watcher's guard,
+  and external reloads use undo-preserving edits.
+- Tab-strip design system: chip tabs (no separators), a grey rail with green
+  active-file marks (thicker in the focused group), an on-demand 12px scroll
+  lane UNDER the rail (tabs never squeeze), always-visible pink group
+  dividers, and stable handle ids for the 3-group overlap.
+
 ## [0.8.12] - 2026-07-06
 
 ### Added

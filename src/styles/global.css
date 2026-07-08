@@ -47,8 +47,9 @@
   flex: 0 0 var(--titlebar-height);
   display: flex;
   align-items: center;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
+  /* Themable (settings.json `titlebar` / `titlebar-fg`) — flat color. */
+  background: var(--titlebar);
+  color: var(--titlebar-fg);
   padding-left: var(--space-5);
   /* Accent tint from the workspace color is applied inline as a left border. */
   border-left: 3px solid transparent;
@@ -74,20 +75,19 @@
 .titlebar__logo {
   width: 16px;
   height: 16px;
-  border-radius: var(--radius-sm);
   display: block;
 }
 
 .titlebar__title {
   font-size: var(--font-size-md);
-  color: var(--fg-primary);
+  color: var(--titlebar-fg);
 }
 
 .titlebar__status {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  color: var(--fg-secondary);
+  color: color-mix(in srgb, var(--titlebar-fg) 80%, transparent);
   font-size: var(--font-size-sm);
   min-width: 0;
   overflow: hidden;
@@ -106,7 +106,7 @@
   height: 100%;
   border: none;
   background: transparent;
-  color: var(--fg-secondary);
+  color: color-mix(in srgb, var(--titlebar-fg) 85%, transparent);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -117,6 +117,206 @@
 /* The ⌘ button warns when settings.json has problems (details in the palette). */
 .titlebar__btn--warn {
   color: var(--error);
+}
+
+/* Breathing room between the app buttons (⌘ ⚙) and the window controls. */
+.titlebar__btn--winctl {
+  margin-left: calc(var(--space-4) * 3);
+}
+
+/* Close-confirm dialog (silenceable via settings.json "confirms"). */
+.exit-ask {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  min-width: 320px;
+}
+
+.exit-ask__title {
+  font-weight: 600;
+  color: var(--fg-primary);
+}
+
+.exit-ask__hint {
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+}
+
+.exit-ask__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+/* Settings / Themes editor tabs. */
+.app-tab {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding: var(--space-5) var(--space-6);
+}
+
+.app-tab__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-lg);
+  color: var(--fg-primary);
+}
+
+.app-tab__section {
+  margin: var(--space-6) 0 var(--space-2);
+  font-size: var(--font-size-md);
+  color: var(--accent);
+}
+
+.app-tab__hint {
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+  margin-bottom: var(--space-3);
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+}
+
+.settings-row__label {
+  flex: 1 1 auto;
+  min-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Inputs keep a fixed footprint so labels never get squeezed. */
+.settings-row .input {
+  flex: 0 0 auto;
+  width: 240px;
+}
+
+.settings-row .input.settings-row__num {
+  width: 90px;
+}
+
+.settings-row--check {
+  cursor: pointer;
+  user-select: none;
+}
+
+.kbd-btn {
+  min-width: 120px;
+  padding: 2px var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--fg-primary);
+  font-family: var(--font-code);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.kbd-btn--recording {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Color cards grid on the Themes tab. */
+.theme-cards__head {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-2) 0;
+  background: none;
+  border: none;
+  color: var(--fg-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.theme-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.theme-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.theme-card input[type="color"] {
+  width: 26px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.theme-card__name {
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Manage-themes dialog: save row + deletable list. */
+.theme-manage__save {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.theme-manage__save .input {
+  flex: 1 1 auto;
+}
+
+.theme-manage__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.theme-manage__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.theme-manage__row:hover {
+  background: var(--bg-tertiary);
+}
+
+.theme-manage__name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* "Don't ask again" checkbox in confirm dialogs (persists to settings.json). */
+.confirm-silence {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-right: auto;
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  user-select: none;
 }
 
 .titlebar__btn:hover {
@@ -1719,7 +1919,7 @@
   color: var(--fg-secondary);
 }
 
-/* Preview tabs render italic (VS Code-style); pinned tabs show ⊙ instead of × */
+/* Preview tabs render italic (VS Code-style); pinned tabs show ⌖ instead of × */
 .editor-tab__name--preview {
   font-style: italic;
   opacity: 0.85;
@@ -1727,8 +1927,11 @@
 
 .editor-tab__pin {
   opacity: 1;
-  color: var(--purple);
-  font-size: 12px;
+  /* The ⌖ reticle: "locked on" — magenta so it pops off the strip without
+   * colliding with green (active file) or host stripes. */
+  color: var(--pink);
+  font-size: 14px;
+  line-height: 1;
 }
 
 /* ----------------------------------------------------------- Command palette */
@@ -2389,9 +2592,10 @@ select option {
   background: var(--bg-tertiary);
 }
 
+/* A hidden section's letter goes plain gray (no strikethrough). */
 .section-toggle--off {
-  text-decoration: line-through;
-  opacity: 0.4;
+  color: var(--fg-secondary);
+  opacity: 0.6;
 }
 
 /* One connected host under the Remote bar: its identity color as a softer
@@ -2608,11 +2812,31 @@ select option {
 /* ------------------------------------------------------------------ Editor area */
 
 .editor-area {
+  position: relative; /* anchors the drag-to-split drop zone */
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
   background: var(--bg-primary);
+}
+
+/* Split target shown only while a tab is being dragged: it covers the right
+ * HALF of the last group; drop = new split. Absent otherwise, so it can never
+ * block clicks. */
+.editor-split-drop {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 50%;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+  border-left: 2px dashed var(--green);
 }
 
 .editor-area__header {
@@ -2654,16 +2878,78 @@ select option {
 }
 
 .editor-group {
+  position: relative; /* anchors the drag-to-split drop zone */
   display: flex;
   flex-direction: column;
   height: 100%;
   min-width: 0;
 }
 
-/* With several groups open, the focused one carries an accent stripe on its
- * tab bar (a lone group doesn't need the hint). */
-.editor-group--focused .editor-tabs {
-  box-shadow: inset 0 2px 0 var(--accent);
+/* Scheme: grey means structure, green means "active file". The rail under the
+ * tab strips is neutral and continuous (bridged across the divider below);
+ * green appears ONLY as the active-file bump — full in the focused group,
+ * dimmed in the others. */
+/* Group dividers are pulled constantly — keep them visible at all times
+ * (pink slot = #ff00ff under Straylight), brightening on grab. */
+.editor-area__groups .resize-handle {
+  position: relative;
+  background: color-mix(in srgb, var(--pink) 40%, var(--bg-secondary));
+}
+
+.editor-area__groups .resize-handle:hover,
+.editor-area__groups .resize-handle[data-resize-handle-state="drag"] {
+  background: var(--pink);
+}
+
+.editor-area__groups .resize-handle::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* The rail's fixed position: tab-bottom height, regardless of scroll lane. */
+  top: calc(var(--panel-header-height) - 2px);
+  height: 2px;
+  background: var(--border);
+}
+
+/* Breadcrumb bar under the tabs: pin › folders › file. Borderless — the
+ * background shift is boundary enough. */
+.editor-crumbs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 var(--space-5);
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+  background: var(--bg-primary);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.editor-crumbs__sep {
+  opacity: 0.6;
+}
+
+.editor-crumbs__leaf {
+  color: var(--fg-primary);
+}
+
+/* Per-file action at the breadcrumb's right edge (¶ Preview for Markdown). */
+.editor-crumbs__action {
+  margin-left: auto;
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  color: var(--info);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  padding: 0 var(--space-2);
+}
+
+.editor-crumbs__action:hover {
+  text-decoration: underline;
 }
 
 .editor-area__body {
@@ -2801,24 +3087,53 @@ select option {
 /* ------------------------------------------------------------- Editor tabs */
 
 .editor-tabs {
+  --rail-color: var(--border);
   height: var(--panel-header-height);
-  flex: 0 0 var(--panel-header-height);
+  flex: 0 0 auto;
   display: flex;
-  align-items: stretch;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
+  align-items: flex-start;
+  gap: 2px;
+  /* The neutral rail (structure, not signal — green is the active-file bump)
+   * is painted as a background band pinned at tab-bottom height, so the
+   * scroll lane below it never moves it. Bridged across split dividers via
+   * .resize-handle; brighter under the focused group. */
+  background: linear-gradient(
+    var(--bg-secondary) 0,
+    var(--bg-secondary) calc(var(--panel-header-height) - 2px),
+    var(--rail-color) calc(var(--panel-header-height) - 2px),
+    var(--rail-color) var(--panel-header-height),
+    var(--bg-secondary) var(--panel-header-height)
+  );
   overflow-x: auto;
   overflow-y: hidden;
 }
 
+/* Only when the tabs actually overflow: a +12px lane UNDER the rail for the
+ * scrollbar (same size as the app's other scrollbars). Tabs keep their size. */
+.editor-tabs--overflow {
+  height: calc(var(--panel-header-height) + 12px);
+}
+
+.editor-tabs::-webkit-scrollbar-thumb {
+  border-color: var(--bg-secondary); /* thumb inset matches the strip */
+}
+
+.editor-group--multi.editor-group--focused .editor-tabs {
+  --rail-color: color-mix(in srgb, var(--fg-secondary) 55%, var(--border));
+}
+
 .editor-tab {
+  height: calc(var(--panel-header-height) - 2px);
   display: flex;
   align-items: center;
   gap: var(--space-3);
   padding: 0 var(--space-3) 0 var(--space-5);
   max-width: 200px;
-  border-right: 1px solid var(--border);
-  background: var(--bg-secondary);
+  /* No hard separators — tabs read as chips. The brightness ladder mixes the
+   * theme's FOREGROUND into the strip color (7% → 14% → 22%), so the steps
+   * stay visible on themes whose background slots sit close together. */
+  background: color-mix(in srgb, var(--fg-primary) 7%, var(--bg-secondary));
+  border-radius: 4px 4px 0 0;
   color: var(--fg-secondary);
   cursor: pointer;
   white-space: nowrap;
@@ -2830,14 +3145,48 @@ select option {
   box-shadow: inset 0 -2px 0 var(--tab-host-color);
 }
 
+/* A dragged tab would be inserted before this one. */
+.editor-tab--drop {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.editor-tab--host.editor-tab--drop {
+  box-shadow:
+    inset 2px 0 0 var(--accent),
+    inset 0 -2px 0 var(--tab-host-color);
+}
+
 .editor-tab:hover {
   background: var(--bg-tertiary);
 }
 
+/* Four background levels: strip (darkest) < unselected tab < opened file
+ * (active in an unfocused group) < selected opened file (active in the
+ * focused group, brightest) — plus the hairline green mark, the ONLY green
+ * in the strip, full strength in the focused group. */
 .editor-tab--active {
-  background: var(--bg-primary);
+  background: color-mix(in srgb, var(--fg-primary) 22%, var(--bg-secondary));
   color: var(--fg-primary);
-  box-shadow: inset 0 2px 0 var(--purple);
+  box-shadow: inset 0 -1.5px 0 var(--green);
+}
+
+/* An unfocused group's active file: one level down, green dimmed. */
+.editor-group--multi:not(.editor-group--focused) .editor-tab--active {
+  background: color-mix(in srgb, var(--fg-primary) 14%, var(--bg-secondary));
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--green) 45%, transparent);
+}
+
+/* Active + host stripe: the host color rides as a band above the green. */
+.editor-tab--host.editor-tab--active {
+  box-shadow:
+    inset 0 -1.5px 0 var(--green),
+    inset 0 -3.5px 0 var(--tab-host-color);
+}
+
+.editor-group--multi:not(.editor-group--focused) .editor-tab--host.editor-tab--active {
+  box-shadow:
+    inset 0 -1px 0 color-mix(in srgb, var(--green) 45%, transparent),
+    inset 0 -3px 0 var(--tab-host-color);
 }
 
 .editor-tab__icon {
@@ -2936,7 +3285,6 @@ select option {
 .empty-state__logo {
   width: 64px;
   height: 64px;
-  border-radius: var(--radius-md);
   opacity: 0.5;
 }
 

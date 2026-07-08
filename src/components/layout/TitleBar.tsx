@@ -2,14 +2,18 @@
  *  accent, an appearance menu (themes / settings — non-functional preferences
  *  live here, not in the command palette), and window controls. The center
  *  region is a Tauri drag handle. */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import appIcon from "../../assets/icon.png";
 import { remoteColor } from "../../lib/hostColors";
 import { openFileByPath } from "../../lib/openFile";
-import { settingsFilePath } from "../../lib/settings";
-import { applyThemePreset, THEME_PRESETS } from "../../lib/themes";
+import {
+  confirmEnabled,
+  disableConfirm,
+  settingsFilePath,
+} from "../../lib/settings";
+import { applyTheme, savedThemeNames } from "../../lib/themes";
 import { useAppStore } from "../../store/appStore";
 import type { ConnectionState } from "../../lib/ipc";
 import { IconClose, IconMaximize, IconMinimize } from "../icons";
@@ -40,8 +44,49 @@ export function TitleBar() {
   const hostColors = useAppStore((s) => s.hostColors);
   const settingsIssues = useAppStore((s) => s.settingsIssues);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [exitAsk, setExitAsk] = useState(false);
+  const [exitSilence, setExitSilence] = useState(false);
+  const exitRef = useRef<HTMLDivElement>(null);
 
   const appWindow = getCurrentWindow();
+
+  const requestClose = () => {
+    if (confirmEnabled("exit")) {
+      setExitSilence(false); // fresh checkbox per dialog
+      setExitAsk(true);
+    } else void appWindow.close();
+  };
+
+  // Confirming applies the checkbox; canceling discards it (no settings write).
+  // The write must land BEFORE the window closes, or it dies with the process.
+  const confirmClose = async () => {
+    if (exitSilence) {
+      try {
+        await disableConfirm("exit");
+      } catch {
+        /* closing anyway */
+      }
+    }
+    void appWindow.close();
+  };
+
+  // The exit dialog answers to the keyboard: Enter closes, Esc stays.
+  useEffect(() => {
+    if (!exitAsk) return;
+    exitRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        void confirmClose();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        setExitAsk(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exitAsk, exitSilence]);
   // The window carries its remote's identity color (host bars use the same).
   const accent = remote ? remoteColor(hostColors, remote) : "transparent";
 
@@ -55,11 +100,10 @@ export function TitleBar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remote?.connId]);
 
-  const openSettingsFile = () => {
+  const openPrefFile = (path: string | null, name: string) => {
     setMenuOpen(false);
-    const path = settingsFilePath();
     const localConnId = useAppStore.getState().localConnId;
-    if (path && localConnId) void openFileByPath(localConnId, path, "settings.json");
+    if (path && localConnId) void openFileByPath(localConnId, path, name);
   };
 
   return (
@@ -103,7 +147,7 @@ export function TitleBar() {
         </button>
         <button
           className="titlebar__btn"
-          title="Appearance & settings"
+          title="Settings"
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((v) => !v)}
@@ -114,28 +158,50 @@ export function TitleBar() {
           <>
             <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />
             <div className="titlebar__menu" role="menu">
-              <div className="titlebar__menu-label">Color theme</div>
-              {THEME_PRESETS.map((p) => (
+              <div className="titlebar__menu-label">Settings</div>
+              <button
+                className="terminal-menu__item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  useAppStore.getState().openAppTab("settings");
+                }}
+              >
+                Settings
+              </button>
+              <button
+                className="terminal-menu__item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  useAppStore.getState().openAppTab("themes");
+                }}
+              >
+                Themes
+              </button>
+              <button
+                className="terminal-menu__item"
+                onClick={() => openPrefFile(settingsFilePath(), "settings.json")}
+              >
+                Open settings.json
+              </button>
+              <div className="terminal-menu__sep" />
+              <div className="titlebar__menu-label">Quick theme</div>
+              {savedThemeNames().map((name) => (
                 <button
-                  key={p.id}
+                  key={name}
                   className="terminal-menu__item"
                   onClick={() => {
                     setMenuOpen(false);
-                    void applyThemePreset(p);
+                    void applyTheme(name);
                   }}
                 >
-                  {p.title.replace("Theme: ", "")}
+                  {name}
                 </button>
               ))}
-              <div className="terminal-menu__sep" />
-              <button className="terminal-menu__item" onClick={openSettingsFile}>
-                Open settings.json
-              </button>
             </div>
           </>
         )}
         <button
-          className="titlebar__btn"
+          className="titlebar__btn titlebar__btn--winctl"
           title="Minimize"
           onClick={() => void appWindow.minimize()}
         >
@@ -151,11 +217,46 @@ export function TitleBar() {
         <button
           className="titlebar__btn titlebar__btn--close"
           title="Close"
-          onClick={() => void appWindow.close()}
+          onClick={requestClose}
         >
           <IconClose />
         </button>
       </div>
+      {exitAsk && (
+        <div className="modal-overlay" onClick={() => setExitAsk(false)}>
+          <div
+            ref={exitRef}
+            className="modal exit-ask"
+            role="dialog"
+            tabIndex={-1}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="exit-ask__title">Close Straylight?</div>
+            <div className="exit-ask__hint">
+              <kbd>Enter</kbd> closes · <kbd>Esc</kbd> stays
+            </div>
+            <div className="exit-ask__actions">
+              <label
+                className="confirm-silence"
+                title='Saved to settings.json ("confirms") only if you close — Cancel discards it'
+              >
+                <input
+                  type="checkbox"
+                  checked={exitSilence}
+                  onChange={(e) => setExitSilence(e.target.checked)}
+                />
+                Don't ask again
+              </label>
+              <button className="btn btn--ghost" onClick={() => setExitAsk(false)}>
+                Cancel
+              </button>
+              <button className="btn btn--primary" onClick={() => void confirmClose()}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

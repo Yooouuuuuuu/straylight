@@ -364,6 +364,7 @@ export function RootTree({
                 "Unpin folder?",
                 `Remove "${label}" from the sidebar? Nothing on disk is touched — you can pin it again any time.`,
                 () => onRemove?.(),
+                "unpin-folder",
               );
             }}
           >

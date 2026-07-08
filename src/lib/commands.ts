@@ -111,6 +111,16 @@ export function allCommands(): Command[] {
     { id: "file.quickOpen", title: "File: Quick Open…", run: () => app().setFinderOpen(true) },
     { id: "file.save", title: "File: Save", run: () => saveActiveFile() },
     {
+      id: "preferences.settings",
+      title: "Preferences: Settings",
+      run: () => app().openAppTab("settings"),
+    },
+    {
+      id: "preferences.themes",
+      title: "Preferences: Themes",
+      run: () => app().openAppTab("themes"),
+    },
+    {
       id: "preferences.openSettings",
       title: "Preferences: Open settings.json",
       run: () => {

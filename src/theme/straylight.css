@@ -31,6 +31,9 @@
   --section-local: #f30100;
   --section-wsl: #ff0180;
   --section-remote: #ff00ff;
+  /* The window's top bar (app name + window controls) */
+  --titlebar: #af011c;
+  --titlebar-fg: #f5e6e8;
 
   /* Semantic mapping */
   --border: #3a2228;
