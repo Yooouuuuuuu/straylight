@@ -32,12 +32,17 @@ export interface Settings {
   /** Per-dialog "ask again?" flags: `false` silences that confirmation. All
    *  don't-ask-again checkboxes write here (visible + hand-restorable). */
   confirms?: Record<string, boolean>;
+  /** Startup reconnects: "ask" (default) pops a confirm on launch, "always"
+   *  connects silently, "never" skips. The ask dialog's checkbox sets
+   *  "always". */
+  autoConnect?: { wsl?: string; remote?: string };
   /** Bottom-panel tool groups: hide the ones you never use, and tune how often
    *  the open tab re-polls (seconds; nothing polls while closed). */
   panels?: {
     ports?: boolean;
     containers?: boolean;
     forwarding?: boolean;
+    transfers?: boolean;
     portsInterval?: number;
     containersInterval?: number;
     /** Hide well-known/system ports (<1024, SSH/RDP/DNS/SMB…). */
@@ -93,6 +98,7 @@ const PANEL_DEFAULTS = {
   ports: true,
   containers: true,
   forwarding: true,
+  transfers: true,
   portsInterval: 15,
   containersInterval: 30,
   hideSystemPorts: true,
@@ -105,6 +111,7 @@ function settingsTemplate(): Settings {
     keybindings: {},
     terminalFont: { family: "Fira Code", size: 13 },
     confirms: Object.fromEntries(CONFIRM_IDS.map((id) => [id, true])),
+    autoConnect: { wsl: "ask", remote: "ask" },
     panels: { ...PANEL_DEFAULTS },
   };
 }
@@ -136,6 +143,7 @@ export const UI_COLOR_DEFAULTS: Record<string, string> = {
   "tree-dir": "#f0e7e9",
   "icon-folder": "#e0446a",
   "icon-folder-open": "#ff7a9c",
+  pin: "#ff00ff",
   "section-fg": "#f5e6e8",
   "section-local": "#f30100",
   "section-wsl": "#ff0180",
@@ -173,6 +181,11 @@ export let keybindingOverrides: Record<string, string> = {};
 export let settingsZoom = 1;
 /** Effective bottom-panel config (visibility + poll intervals, seconds). */
 export let panelsConfig = { ...PANEL_DEFAULTS };
+/** Startup reconnect policy per connection kind. */
+export let autoConnectConfig: { wsl: "ask" | "always" | "never"; remote: "ask" | "always" | "never" } = {
+  wsl: "ask",
+  remote: "ask",
+};
 let confirms: Record<string, boolean> = {};
 
 /** Snapshot of the confirm flags (for the settings UI). */
@@ -313,6 +326,18 @@ async function loadAndApply(): Promise<void> {
     }
   }
 
+  // Startup reconnect policy ("ask" | "always" | "never").
+  const mode = (v: unknown, name: string): "ask" | "always" | "never" => {
+    if (v === undefined) return "ask";
+    if (v === "ask" || v === "always" || v === "never") return v;
+    issues.push(`autoConnect: "${name}" must be "ask", "always", or "never"`);
+    return "ask";
+  };
+  autoConnectConfig = {
+    wsl: mode(s.autoConnect?.wsl, "wsl"),
+    remote: mode(s.autoConnect?.remote, "remote"),
+  };
+
   // Bottom-panel groups (visibility flags + poll intervals, 3–3600 s).
   const pl = s.panels ?? {};
   const secs = (v: unknown, dflt: number, name: string) => {
@@ -325,6 +350,7 @@ async function loadAndApply(): Promise<void> {
     ports: pl.ports !== false,
     containers: pl.containers !== false,
     forwarding: pl.forwarding !== false,
+    transfers: pl.transfers !== false,
     portsInterval: secs(pl.portsInterval, PANEL_DEFAULTS.portsInterval, "portsInterval"),
     containersInterval: secs(
       pl.containersInterval,

@@ -64,7 +64,7 @@ function EmptyState() {
       </div>
       {!remote && (
         <button className="btn btn--primary" onClick={() => openDialog()}>
-          Connect to a server
+          Connect to a new server
         </button>
       )}
       <div className="empty-state__keys">

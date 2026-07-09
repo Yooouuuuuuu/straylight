@@ -30,6 +30,77 @@ export function IconChevron({ size = 16, className }: IconProps) {
   );
 }
 
+/** "Send this panel's content to the editor" — panel with an outgoing arrow. */
+export function IconPanelToEditor({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M6 3H3.5A1.5 1.5 0 0 0 2 4.5v7A1.5 1.5 0 0 0 3.5 13h7a1.5 1.5 0 0 0 1.5-1.5V9"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        fill="none"
+      />
+      <path
+        d="M9 3h4v4M13 3 7.5 8.5"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </svg>
+  );
+}
+
+/** Ethernet jack (Ports tool group). */
+export function IconEthernet({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M3 6h10v7H3zM5.5 3h5v3h-5z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <path d="M5.5 13v-2M8 13v-2M10.5 13v-2" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
+/** Cube (Containers tool group). */
+export function IconCube({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M8 2 13.5 5v6L8 14 2.5 11V5L8 2ZM2.5 5 8 8l5.5-3M8 8v6"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </svg>
+  );
+}
+
+/** Tunnel arrow (Forwarding tool group). */
+export function IconTunnel({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M2 8h8M8 5l3 3-3 3"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <path d="M12.5 3.5v9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** Plain folder (status bar: Explorer). */
 export function IconFolder({ size = 16, className }: IconProps) {
   return (

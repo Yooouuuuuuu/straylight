@@ -336,6 +336,10 @@ pub async fn vcs_commit(
 pub struct VcsBranch {
     pub name: String,
     pub current: bool,
+    /// A remote-tracking branch (e.g. "origin/x") — checking it out creates
+    /// the local tracking branch.
+    #[serde(default)]
+    pub remote: bool,
 }
 
 /// List local branches / bookmarks, marking the current one.
@@ -370,6 +374,7 @@ pub async fn vcs_branches(
             .map(|n| VcsBranch {
                 name: n.to_string(),
                 current: current.contains(n),
+                remote: false,
             })
             .collect())
     } else {
@@ -385,7 +390,7 @@ pub async fn vcs_branches(
         if list.code != 0 {
             return Err(list.stderr.trim().to_string());
         }
-        Ok(list
+        let mut out: Vec<VcsBranch> = list
             .stdout
             .lines()
             .map(str::trim)
@@ -393,9 +398,109 @@ pub async fn vcs_branches(
             .map(|n| VcsBranch {
                 name: n.to_string(),
                 current: n == current,
+                remote: false,
             })
-            .collect())
+            .collect();
+        // Remote-tracking branches (after any fetch); skip the origin/HEAD
+        // pointer and remotes shadowed by an existing local branch.
+        if let Ok(remotes) = run_command(
+            &state,
+            &conn_id,
+            &root,
+            &["git", "for-each-ref", "--format=%(refname:short)", "refs/remotes"],
+        )
+        .await
+        {
+            let locals: std::collections::HashSet<String> =
+                out.iter().map(|b| b.name.clone()).collect();
+            for n in remotes.stdout.lines().map(str::trim) {
+                if n.is_empty() || n.ends_with("/HEAD") {
+                    continue;
+                }
+                let short = n.split_once('/').map(|(_, s)| s).unwrap_or(n);
+                if locals.contains(short) {
+                    continue;
+                }
+                out.push(VcsBranch {
+                    name: n.to_string(),
+                    current: false,
+                    remote: true,
+                });
+            }
+        }
+        Ok(out)
     }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IncomingCommit {
+    pub id: String,
+    pub subject: String,
+    pub author: String,
+    pub timestamp: Option<i64>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IncomingInfo {
+    /// The upstream ref name, or None when the branch tracks nothing.
+    pub upstream: Option<String>,
+    pub commits: Vec<IncomingCommit>,
+}
+
+/// Commits on the current branch's upstream that aren't local yet (git only —
+/// reads the last fetch, no network). The Incoming block in the history panel.
+#[tauri::command]
+pub async fn vcs_incoming(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    backend: String,
+) -> Result<IncomingInfo, String> {
+    if backend == "jj" {
+        return Ok(IncomingInfo { upstream: None, commits: Vec::new() });
+    }
+    let up = run_command(
+        &state,
+        &conn_id,
+        &root,
+        &["git", "rev-parse", "--abbrev-ref", "@{upstream}"],
+    )
+    .await?;
+    if up.code != 0 {
+        return Ok(IncomingInfo { upstream: None, commits: Vec::new() });
+    }
+    let upstream = up.stdout.trim().to_string();
+    let log = run_command(
+        &state,
+        &conn_id,
+        &root,
+        &[
+            "git",
+            "log",
+            "--format=%h%x1f%s%x1f%an%x1f%ct",
+            "HEAD..@{upstream}",
+        ],
+    )
+    .await?;
+    if log.code != 0 {
+        return Err(log.stderr.trim().to_string());
+    }
+    let commits = log
+        .stdout
+        .lines()
+        .filter_map(|l| {
+            let mut f = l.split('\u{1f}');
+            Some(IncomingCommit {
+                id: f.next()?.to_string(),
+                subject: f.next().unwrap_or("").to_string(),
+                author: f.next().unwrap_or("").to_string(),
+                timestamp: f.next().and_then(|t| t.trim().parse().ok()),
+            })
+        })
+        .collect();
+    Ok(IncomingInfo { upstream: Some(upstream), commits })
 }
 
 /// Switch to an existing branch / bookmark (jj: start a new change on it).

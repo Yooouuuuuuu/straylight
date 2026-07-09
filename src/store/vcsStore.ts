@@ -52,6 +52,8 @@ export interface TrackedRepo {
   uiCommitOpen?: boolean;
   /** A stash pop hit conflicts — offer "drop stash" once resolved (transient). */
   stashConflict?: boolean;
+  /** Colocated jj+git repo — the backend badge toggles which view drives. */
+  colocated?: boolean;
 }
 
 /** The fixed "this is a tracked repo" color in the explorer (green). Host
@@ -120,6 +122,12 @@ interface VcsState {
   /** Reorder cards: move the repo with id `fromId` to `toId`'s position. Ids
    *  are `${connKey}::${root}` (the card drag payload). */
   moveRepo: (fromId: string, toId: string) => void;
+  /** Colocated repos: flip the driving backend (jj ⇄ git) and refresh. */
+  toggleBackend: (connKey: string, root: string) => void;
+  /** Incoming block dismissals (session-only; ⇣ un-dismisses). */
+  incomingHidden: Record<string, boolean>;
+  dismissIncoming: (connKey: string, root: string) => void;
+  unhideIncoming: (connKey: string, root: string) => void;
   /** Show a confirm dialog. With an `id` it gains a "don't ask again"
    *  checkbox (silenced via settings.json `confirms`; silenced = run now). */
   askConfirm: (title: string, body: string, run: () => void, id?: string) => void;
@@ -182,6 +190,7 @@ function persist(repos: TrackedRepo[]): void {
           status: r.status,
           lastUpdated: r.lastUpdated,
           uiCommitOpen: r.uiCommitOpen,
+          colocated: r.colocated ?? false,
         })),
       ),
     );
@@ -206,6 +215,7 @@ function load(): TrackedRepo[] {
       error: null,
       lastUpdated: d.lastUpdated ?? null,
       uiCommitOpen: !!d.uiCommitOpen,
+      colocated: !!d.colocated,
     }));
   } catch {
     return [];
@@ -621,6 +631,31 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       persist(repos);
       return { repos };
     }),
+
+  toggleBackend: (connKey, root) => {
+    set((s) => {
+      const repos = mapRepo(s.repos, connKey, root, (r) => ({
+        ...r,
+        backend: r.backend === "jj" ? "git" : "jj",
+        colocated: true,
+        status: null,
+        lastUpdated: null,
+      }));
+      persist(repos);
+      return { repos };
+    });
+    void get().refreshRepo(connKey, root);
+  },
+
+  incomingHidden: {},
+  dismissIncoming: (connKey, root) =>
+    set((s) => ({
+      incomingHidden: { ...s.incomingHidden, [repoId(connKey, root)]: true },
+    })),
+  unhideIncoming: (connKey, root) =>
+    set((s) => ({
+      incomingHidden: { ...s.incomingHidden, [repoId(connKey, root)]: false },
+    })),
 
   moveRepo: (fromId, toId) =>
     set((s) => {

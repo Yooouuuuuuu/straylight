@@ -44,6 +44,8 @@ import { PropertiesDialog } from "./components/filetree/PropertiesDialog";
 import { DiscardDialog } from "./components/vcs/DiscardDialog";
 import { VcsConfirmDialog } from "./components/vcs/VcsConfirmDialog";
 import { CommandPalette } from "./components/CommandPalette";
+import { TabSwitcher } from "./components/TabSwitcher";
+import { StartupAskDialog } from "./components/StartupAskDialog";
 import { Finder } from "./components/Finder";
 import { SearchInFiles } from "./components/SearchInFiles";
 import { ToastStack } from "./components/Toast";
@@ -264,19 +266,14 @@ export default function App() {
             onCollapse={() => setSidebarVisible(false)}
             onExpand={() => setSidebarVisible(true)}
           >
-            <PanelGroup direction="vertical" autoSaveId="straylight.layout.sidebar">
-              {historyOpen && (
-                <>
-                  <Panel id="history" order={1} defaultSize={45} minSize={15} maxSize={80}>
-                    <HistoryPanel />
-                  </Panel>
-                  <PanelResizeHandle className="resize-handle" />
-                </>
-              )}
-              <Panel id="explorer" order={2} minSize={20}>
-                <Sidebar />
-              </Panel>
-            </PanelGroup>
+            {/* History takes the whole column while open; the explorer stays
+                mounted underneath (hidden) so its state survives. */}
+            <div style={{ display: historyOpen ? "block" : "none", height: "100%" }}>
+              {historyOpen && <HistoryPanel />}
+            </div>
+            <div style={{ display: historyOpen ? "none" : "block", height: "100%" }}>
+              <Sidebar />
+            </div>
           </Panel>
           <PanelResizeHandle className="resize-handle" />
           <Panel id="main" order={2} minSize={30}>
@@ -334,7 +331,9 @@ export default function App() {
       <PropertiesDialog />
       <DiscardDialog />
       <VcsConfirmDialog />
+      <StartupAskDialog />
       <CommandPalette />
+      <TabSwitcher />
       <Finder />
       <SearchInFiles />
       <ContextMenu />

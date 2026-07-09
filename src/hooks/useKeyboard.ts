@@ -9,7 +9,6 @@ import { saveActiveFile } from "../lib/saveFile";
 import { matchShortcut } from "../lib/shortcuts";
 import { adjustTerminalFontSize } from "../lib/themes";
 import { focusTerminal } from "../lib/terminalFocus";
-import { pickTerminalTarget } from "../lib/terminalTarget";
 import { focusExplorer } from "../lib/treeNav";
 import { useAppStore } from "../store/appStore";
 
@@ -168,9 +167,22 @@ export function useKeyboard() {
           }
           break;
         case "newTerminal": {
-          const target = pickTerminalTarget();
-          if (target) {
-            store.openTerminal(target.connId, target.label);
+          // Only while a terminal is focused — the new one opens on THAT
+          // terminal's host. Elsewhere (editor, tools) the shortcut is inert:
+          // click into a host's terminal first.
+          const connId = inTerminal
+            ? (target?.closest(".terminal-host") as HTMLElement | null)
+                ?.dataset.connId
+            : undefined;
+          if (connId) {
+            const label =
+              connId === store.localConnId
+                ? "pwsh"
+                : store.wsl?.connId === connId
+                  ? store.wsl.name
+                  : (store.remotes.find((r) => r.conn.connId === connId)?.conn
+                      .name ?? "shell");
+            store.openTerminal(connId, label);
             store.setTerminalVisible(true);
             event.preventDefault();
           }

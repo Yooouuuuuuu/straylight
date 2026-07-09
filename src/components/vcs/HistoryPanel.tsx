@@ -1,10 +1,10 @@
-/** Commit-history panel, shown as a column just left of the Source Control
- *  panel and expanded by the ⎇ button on a repo card. It renders the same log
- *  view used by the editor-tab version, plus a button to pop it out into a
- *  full-width editor tab. */
+/** Commit-history panel, taking the whole left column while open (the
+ *  explorer hides behind it). The log itself carries the Incoming block and
+ *  per-commit details (click a commit to expand its files); ⧉→ opens the full
+ *  log as an editor tab AND closes this panel. */
 import { useAppStore } from "../../store/appStore";
 import { useVcsStore } from "../../store/vcsStore";
-import { IconClose } from "../icons";
+import { IconClose, IconPanelToEditor } from "../icons";
 import { VcsLogView } from "./VcsLogView";
 
 export function HistoryPanel() {
@@ -44,17 +44,18 @@ export function HistoryPanel() {
         </span>
         <button
           className="icon-btn"
-          title="Open in editor"
-          onClick={() =>
+          title="Open in the editor (closes this panel)"
+          onClick={() => {
             openLogTab({
               connId: repo.connId!,
               root: repo.root,
               backend: repo.backend,
               label: repo.label,
-            })
-          }
+            });
+            closeHistory();
+          }}
         >
-          ⧉
+          <IconPanelToEditor size={14} />
         </button>
         <button className="icon-btn" title="Close" onClick={() => closeHistory()}>
           <IconClose />

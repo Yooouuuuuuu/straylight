@@ -24,7 +24,6 @@ import { WslSection } from "../connection/WslSection";
 import { FolderBrowser } from "../FolderBrowser";
 import { RelativeTime } from "../RelativeTime";
 import { RootTree } from "../filetree/RootTree";
-import { TransferPanel, type TransferConn } from "../transfer/TransferPanel";
 import {
   IconExternal,
   IconEye,
@@ -33,9 +32,9 @@ import {
   IconFolderPlus,
   IconLogout,
   IconPanelCollapse,
+  IconPlug,
   IconPlus,
   IconRefresh,
-  IconTransfer,
 } from "../icons";
 
 export function Sidebar() {
@@ -51,11 +50,8 @@ export function Sidebar() {
   const addPinnedFolder = useAppStore((s) => s.addPinnedFolder);
   const removePinnedFolder = useAppStore((s) => s.removePinnedFolder);
   const remotes = useAppStore((s) => s.remotes);
-  const remote = useAppStore((s) => s.remote);
   const addRemotePin = useAppStore((s) => s.addRemotePin);
   const removeRemotePin = useAppStore((s) => s.removeRemotePin);
-  const wsl = useAppStore((s) => s.wsl);
-  const wslPins = useAppStore((s) => s.wslPins);
   const selected = useAppStore((s) => s.selected);
   const openNewEntry = useAppStore((s) => s.openNewEntry);
   const sections = useAppStore((s) => s.sections);
@@ -73,29 +69,6 @@ export function Sidebar() {
     setConnectOpen(false);
     setHostMenu(null);
   }, [remotes.length]);
-
-  // Transfer panel (drag between two connections). The three buttons in the
-  // Explorer header open it for whichever pairs are connected.
-  const [transfer, setTransfer] = useState<{
-    a: TransferConn;
-    b: TransferConn;
-  } | null>(null);
-  const localConn: TransferConn | null = localConnId
-    ? { connId: localConnId, roots: pinnedFolders, label: "Local", color: "#8be9fd" }
-    : null;
-  // Transfers pair with the primary (first) remote for now.
-  const remoteConn: TransferConn | null =
-    remote && remotes[0]
-      ? {
-          connId: remote.connId,
-          roots: remotes[0].pins,
-          label: remote.name,
-          color: remote.color,
-        }
-      : null;
-  const wslConn: TransferConn | null = wsl
-    ? { connId: wsl.connId, roots: wslPins, label: wsl.name, color: "#bd93f9" }
-    : null;
 
   // In-app folder picker (replaces the OS dialog so local matches WSL/remote).
   const [browse, setBrowse] = useState<{
@@ -193,33 +166,6 @@ export function Sidebar() {
               {letter}
             </button>
           ))}
-          {localConn && remoteConn && (
-            <button
-              className="icon-btn"
-              title={`Transfer: Local ⇄ ${remoteConn.label}`}
-              onClick={() => setTransfer({ a: localConn, b: remoteConn })}
-            >
-              <IconTransfer />
-            </button>
-          )}
-          {localConn && wslConn && (
-            <button
-              className="icon-btn"
-              title={`Transfer: Local ⇄ ${wslConn.label}`}
-              onClick={() => setTransfer({ a: localConn, b: wslConn })}
-            >
-              <IconTransfer />
-            </button>
-          )}
-          {wslConn && remoteConn && (
-            <button
-              className="icon-btn"
-              title={`Transfer: ${wslConn.label} ⇄ ${remoteConn.label}`}
-              onClick={() => setTransfer({ a: wslConn, b: remoteConn })}
-            >
-              <IconTransfer />
-            </button>
-          )}
           <button
             className="icon-btn"
             title="Minimize the explorer (Ctrl+B, or the status bar, to bring it back)"
@@ -249,6 +195,20 @@ export function Sidebar() {
         <>
         <div className="sidebar__section-head sidebar__section-head--local">
           <span className="sidebar__section-label">Local</span>
+        </div>
+        {/* Per-host function line: same shape for every host. */}
+        <div
+          className="host-tools"
+          style={{ "--host-color": "var(--section-local)" } as React.CSSProperties}
+        >
+          <button
+            className="icon-btn"
+            title="Pin a local folder"
+            disabled={!localConnId}
+            onClick={openLocalFolder}
+          >
+            <IconPlus />
+          </button>
           <button
             className={`icon-btn ${showHiddenLocal ? "icon-btn--active" : ""}`}
             title={showHiddenLocal ? "Hide hidden files" : "Show hidden files"}
@@ -278,21 +238,14 @@ export function Sidebar() {
           >
             <IconFolderPlus />
           </button>
+          <span className="host-tools__spacer" />
+          <RelativeTime at={lastRefreshLocal} />
           <button
             className="icon-btn"
             title="Refresh local"
             onClick={() => refreshLocal()}
           >
             <IconRefresh />
-          </button>
-          <RelativeTime at={lastRefreshLocal} />
-          <button
-            className="icon-btn sidebar__section-action"
-            title="Open a local folder"
-            disabled={!localConnId}
-            onClick={openLocalFolder}
-          >
-            <IconPlus />
           </button>
         </div>
         {localConnId && pinnedFolders.length > 0 ? (
@@ -329,7 +282,7 @@ export function Sidebar() {
         <div className="sidebar__section-head sidebar__section-head--remote">
           <span className="sidebar__section-label">Remote</span>
           <button
-            className="icon-btn"
+            className="icon-btn sidebar__section-action"
             title="Edit ~/.ssh/config in the editor"
             onClick={() =>
               void (async () => {
@@ -348,11 +301,11 @@ export function Sidebar() {
           </button>
           {remotes.length > 0 && remotes.length < 3 && (
             <button
-              className={`icon-btn sidebar__section-action ${connectOpen ? "icon-btn--active" : ""}`}
-              title="Connect another server (up to 3)"
+              className={`icon-btn ${connectOpen ? "icon-btn--active" : ""}`}
+              title="Connect a new server (up to 3)"
               onClick={() => setConnectOpen((o) => !o)}
             >
-              <IconPlus />
+              <IconPlug size={13} />
             </button>
           )}
         </div>
@@ -413,18 +366,30 @@ export function Sidebar() {
                 </button>
               )}
               <button
+                className="icon-btn icon-btn--danger sidebar__section-action"
+                title={`Disconnect ${conn.name}`}
+                onClick={() => void disconnect(conn.connId)}
+              >
+                <IconLogout />
+              </button>
+            </div>
+            <div
+              className="host-tools"
+              style={{ "--host-color": remoteColor(hostColors, conn) } as React.CSSProperties}
+            >
+              <button
+                className="icon-btn"
+                title="Pin a folder"
+                onClick={() => openRemoteFolder(conn.connId, conn.name)}
+              >
+                <IconPlus />
+              </button>
+              <button
                 className={`icon-btn ${r.showHidden ? "icon-btn--active" : ""}`}
                 title={r.showHidden ? "Hide hidden files" : "Show hidden files"}
                 onClick={() => toggleHiddenRemote(conn.connId)}
               >
                 {r.showHidden ? <IconEye /> : <IconEyeOff />}
-              </button>
-              <button
-                className="icon-btn"
-                title="Open a folder"
-                onClick={() => openRemoteFolder(conn.connId, conn.name)}
-              >
-                <IconPlus />
               </button>
               <button
                 className="icon-btn"
@@ -446,20 +411,14 @@ export function Sidebar() {
               >
                 <IconFolderPlus />
               </button>
+              <span className="host-tools__spacer" />
+              <RelativeTime at={r.lastRefresh} />
               <button
                 className="icon-btn"
                 title={`Refresh ${conn.name}`}
                 onClick={() => refreshRemote(conn.connId)}
               >
                 <IconRefresh />
-              </button>
-              <RelativeTime at={r.lastRefresh} />
-              <button
-                className="icon-btn icon-btn--danger sidebar__section-action"
-                title={`Disconnect ${conn.name}`}
-                onClick={() => void disconnect(conn.connId)}
-              >
-                <IconLogout />
               </button>
             </div>
             {r.pins.length > 0 ? (
@@ -490,13 +449,6 @@ export function Sidebar() {
         )}
       </div>
     </div>
-    {transfer && (
-      <TransferPanel
-        a={transfer.a}
-        b={transfer.b}
-        onClose={() => setTransfer(null)}
-      />
-    )}
     {browse && (
       <FolderBrowser
         connId={browse.connId}

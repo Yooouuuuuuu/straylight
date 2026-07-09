@@ -8,7 +8,9 @@ import { computeGraph } from "../../lib/commitGraph";
 import { PALETTE } from "../../lib/connectionColor";
 import {
   vcsCommitFiles,
+  vcsIncoming,
   vcsLog,
+  type IncomingInfo,
   type VcsChange,
   type VcsCommit,
 } from "../../lib/ipc";
@@ -21,8 +23,93 @@ type FileState = VcsChange[] | "loading" | "error";
 
 // Rail geometry: must match `.commit-row` height in the CSS.
 const LANE_W = 12;
-const ROW_H = 42;
+const ROW_H = 46;
 const MAX_LANES = 10;
+
+/** Fetched-but-unmerged upstream commits (git), shown above the history in
+ *  BOTH the sidebar panel and the editor log tab. Dismiss hides it (session-
+ *  only) — the fetched refs stay put, and ⇣ Fetch brings the block back. */
+function IncomingBlock({
+  connId,
+  root,
+  backend,
+}: {
+  connId: string;
+  root: string;
+  backend: string;
+}) {
+  const repo = useVcsStore((s) =>
+    s.repos.find((r) => r.connId === connId && r.root === root),
+  );
+  const hidden = useVcsStore(
+    (s) => !!repo && s.incomingHidden[`${repo.connKey}::${repo.root}`],
+  );
+  const dismissIncoming = useVcsStore((s) => s.dismissIncoming);
+  const updateFromRemote = useVcsStore((s) => s.updateFromRemote);
+  const askConfirm = useVcsStore((s) => s.askConfirm);
+
+  const [incoming, setIncoming] = useState<IncomingInfo | null>(null);
+  const ref = repo?.status?.ref ?? null;
+  const lastUpdated = repo?.lastUpdated ?? null;
+
+  useEffect(() => {
+    setIncoming(null);
+    if (backend === "jj") return;
+    let live = true;
+    vcsIncoming(connId, root, backend)
+      .then((info) => live && setIncoming(info))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [connId, root, backend, ref, lastUpdated]);
+
+  if (!repo || backend === "jj" || hidden || !incoming) return null;
+  if (incoming.upstream === null || incoming.commits.length === 0) return null;
+
+  const merge = () => {
+    const n = incoming.commits.length;
+    askConfirm(
+      `Merge into ${ref ?? "the current branch"}?`,
+      `Merge ${n} fetched commit${n === 1 ? "" : "s"} from ${incoming.upstream} into your working tree?`,
+      () => void updateFromRemote(repo.connKey, repo.root),
+      "vcs-update",
+    );
+  };
+
+  return (
+    <div className="incoming">
+      <div className="incoming__head">
+        <span className="incoming__title">
+          Incoming from {incoming.upstream} · {incoming.commits.length}
+        </span>
+        <span className="incoming__actions">
+          <button className="btn btn--primary incoming__merge" onClick={merge}>
+            Merge into {ref ?? "branch"}
+          </button>
+          <button
+            className="btn btn--ghost incoming__merge"
+            title="Hide — nothing is merged; ⇣ Fetch shows it again"
+            onClick={() => dismissIncoming(repo.connKey, repo.root)}
+          >
+            Dismiss
+          </button>
+        </span>
+      </div>
+      {incoming.commits.map((c) => (
+        <div className="incoming__row" key={c.id} title={`${c.id} · ${c.author}`}>
+          <span className="incoming__id mono">{c.id}</span>
+          <span className="incoming__subject">{c.subject}</span>
+          {c.timestamp ? (
+            <span className="incoming__when">
+              <RelativeTime at={c.timestamp * 1000} />
+            </span>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
 const laneX = (i: number) => 7 + i * LANE_W;
 const laneColor = (i: number) => PALETTE[i % PALETTE.length];
 
@@ -40,6 +127,7 @@ export function VcsLogView({
   const [syncing, setSyncing] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [files, setFiles] = useState<Record<string, FileState>>({});
+  const [limit, setLimit] = useState(200);
   const isJj = backend === "jj";
 
   const graph = useMemo(() => (commits ? computeGraph(commits) : null), [commits]);
@@ -65,7 +153,7 @@ export function VcsLogView({
     let active = true;
     setError(null);
     setSyncing(true);
-    vcsLog(connId, root, backend, 200)
+    vcsLog(connId, root, backend, limit)
       .then((c) => {
         if (!active) return;
         setCommits(c);
@@ -79,8 +167,9 @@ export function VcsLogView({
     return () => {
       active = false;
     };
-  }, [repoKey, connId, root, backend, lastUpdated]);
+  }, [repoKey, connId, root, backend, lastUpdated, limit]);
 
+  // Details are opt-in per commit: the list is a plain tree until you click.
   const toggle = (id: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -100,6 +189,7 @@ export function VcsLogView({
 
   return (
     <div className="vcs-log">
+      <IncomingBlock connId={connId} root={root} backend={backend} />
       {error ? (
         <div className="vcs-log__msg">{error}</div>
       ) : commits === null ? (
@@ -236,6 +326,14 @@ export function VcsLogView({
               </div>
             );
           })}
+          {commits.length >= limit && (
+            <button
+              className="btn btn--ghost vcs-log__more"
+              onClick={() => setLimit((l) => l + 300)}
+            >
+              Load older commits…
+            </button>
+          )}
         </div>
       )}
     </div>

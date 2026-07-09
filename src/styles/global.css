@@ -259,6 +259,196 @@
   color: var(--host-color, var(--accent));
 }
 
+/* Transfers tool group: the two-pane copier, docked in the bottom panel. */
+.transfers-view {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.transfers-view__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) 0;
+}
+
+.transfers-side {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.transfers-side__host {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  min-width: 160px;
+}
+
+.transfers-side__empty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-secondary);
+  font-size: var(--font-size-sm);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-4);
+  text-align: center;
+}
+
+.termgroup__toolicon {
+  display: inline-flex;
+  opacity: 0.9;
+}
+
+/* Tool views sit clearly inset from the panel edges (they're guests here),
+ * and the green outline lives on THEIR border. 34px = the bar's right padding
+ * (6) + collapse button (24) + gap (4), so the last chip's wall runs flush
+ * into the box's right wall. */
+.tool-inset {
+  position: absolute;
+  inset: 6px 34px;
+  border: 1px solid #5ce626;
+}
+
+/* Roomier scrollbars inside the tool views — there's space to spend. */
+.tool-inset ::-webkit-scrollbar {
+  width: 16px;
+  height: 16px;
+}
+
+.tool-inset ::-webkit-scrollbar-thumb {
+  border-radius: 8px;
+}
+
+/* The picked chip fuses with that outline into a single block. */
+.terminal-panel--toolmode .termgroup__chip--tool.termgroup__chip--active {
+  position: relative;
+  z-index: 2;
+  border: 1px solid #5ce626;
+  border-bottom: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--fg-primary);
+}
+
+/* The chip's walls continue down across the bar's padding + border and the
+ * 6px gap above the box, and the fill blanks the box's top line beneath it —
+ * fusing the two outlines. Height = 4 (bar pad) + 1 (bar border) + 6 (gap)
+ * + 1 (overlap onto the box's border). */
+.terminal-panel--toolmode .termgroup__chip--tool.termgroup__chip--active::after {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 100%;
+  width: calc(100% + 2px);
+  height: calc(var(--space-2) + 8px);
+  background: var(--bg-tertiary);
+  border-left: 1px solid #5ce626;
+  border-right: 1px solid #5ce626;
+}
+
+/* Ctrl+Tab switcher: a centered overlay; hold the modifier and walk the list
+ * with Tab, release to land. */
+.switcher {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.switcher__box {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 520px;
+  max-width: 72vw;
+  max-height: 64vh;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.switcher__title {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+}
+
+.switcher__list {
+  overflow-y: auto;
+  padding: var(--space-2);
+}
+
+/* Rows run 1.5x the app's usual size — the overlay is the only thing the
+ * user is looking at while it's up. */
+.switcher__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  font-size: calc(var(--font-size-sm) * 1.5);
+  color: var(--fg-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.switcher__item--sel {
+  background: var(--bg-selected);
+}
+
+.switcher__dot {
+  flex: 0 0 10px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.switcher__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.switcher__detail {
+  margin-left: auto;
+  padding-left: var(--space-6);
+  color: var(--fg-secondary);
+  font-size: calc(var(--font-size-xs) * 1.5);
+}
+
+/* Line-ending switcher (bottom right): a small menu opening upward. */
+.statusbar__eol {
+  position: relative;
+}
+
+.statusbar__eol-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: 0;
+  z-index: 60;
+  min-width: 150px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+
 /* The three panel buttons: uniform width, icon + label, easy targets. */
 .statusbar__panel-btn {
   display: inline-flex;
@@ -266,6 +456,110 @@
   justify-content: center;
   gap: var(--space-2);
   min-width: 104px;
+}
+
+/* Incoming block at the top of the history panel (git). */
+.incoming {
+  flex: 0 0 auto;
+  max-height: 40%;
+  overflow-y: auto;
+  border-bottom: 2px solid var(--border);
+  background: color-mix(in srgb, var(--green) 6%, var(--bg-secondary));
+  padding: var(--space-2) var(--space-3);
+}
+
+/* Title on its own line; the buttons on the next, wrapping to one per line
+ * when the panel is narrow — they can never be pushed out of view. */
+.incoming__head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
+.incoming__title {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  color: var(--green);
+}
+
+.incoming__hint {
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+}
+
+.incoming__merge {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 1px var(--space-2);
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.incoming__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 2px 0;
+  font-size: var(--font-size-sm);
+  min-width: 0;
+}
+
+.incoming__id {
+  flex: 0 0 auto;
+  color: var(--fg-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.incoming__subject {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.incoming__when {
+  flex: 0 0 auto;
+  color: var(--fg-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.repo-card__backend--toggle {
+  cursor: pointer;
+  border: none;
+}
+
+.repo-card__backend--toggle:hover {
+  outline: 1px solid var(--border-focus);
+}
+
+.incoming__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-self: stretch;
+}
+
+.branch-menu__label {
+  padding: var(--space-1) var(--space-3);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-secondary);
+  border-top: 1px solid var(--border);
+}
+
+.branch-menu__item--remote {
+  color: var(--fg-secondary);
+}
+
+.vcs-log__more {
+  display: block;
+  width: 100%;
+  margin: var(--space-2) 0;
 }
 
 /* Ports / Forwarding groups in the terminal panel. */
@@ -2700,6 +2994,9 @@ select option {
   display: flex;
   align-items: center;
   gap: var(--space-1);
+  /* Same height whether or not a bar carries buttons (Local's moved to the
+   * host-tools line — the bar must not shrink). */
+  min-height: 32px;
   padding: var(--space-2) var(--space-4) var(--space-2) var(--space-5);
   font-size: var(--font-size-xs);
   text-transform: uppercase;
@@ -2783,6 +3080,36 @@ select option {
 .section-toggle--off {
   color: var(--fg-secondary);
   opacity: 0.6;
+}
+
+/* Per-host function line (pin folder, hidden files, new file/folder; stamp +
+ * refresh pinned to the right edge) — the same shape under Local's bar and
+ * every host bar, tinted with THAT host's color (inline --host-color). */
+.host-tools {
+  --host-color: var(--border);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px 2px 1px var(--space-4);
+  border-left: 3px solid var(--host-color);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--host-color) 20%, var(--bg-secondary)),
+    color-mix(in srgb, var(--host-color) 6%, var(--bg-secondary))
+  );
+}
+
+.host-tools__spacer {
+  flex: 1 1 auto;
+}
+
+.host-tools .icon-btn {
+  flex: 0 0 auto;
+  opacity: 0.85;
+}
+
+.host-tools .icon-btn:hover {
+  opacity: 1;
 }
 
 /* One connected host under the Remote bar: its identity color as a softer
@@ -3207,8 +3534,9 @@ select option {
   display: flex;
   gap: var(--space-2);
   padding: 0 var(--space-5) 0 var(--space-3);
-  /* Fixed height — the graph SVG rail is sized to it (ROW_H in VcsLogView). */
-  height: 42px;
+  /* Fixed height — the graph SVG rail is sized to it (ROW_H in VcsLogView).
+   * Must fit: body padding + subject line + meta line, or text clips. */
+  height: 46px;
   overflow: hidden;
 }
 
@@ -3225,8 +3553,16 @@ select option {
 .commit-row__body {
   flex: 1 1 auto;
   min-width: 0;
-  padding: var(--space-2) 0;
+  padding: 5px 0;
   border-bottom: 1px solid rgba(68, 71, 90, 0.4);
+}
+
+.commit-row__top {
+  line-height: 19px;
+}
+
+.commit-row__meta {
+  line-height: 15px;
 }
 
 .commit-row__top {
@@ -3328,8 +3664,10 @@ select option {
 }
 
 /* WSL/remote tabs carry their host's identity color as a bottom stripe. */
+/* Host identity rides the TOP edge; the bottom line means one thing only —
+ * "this tab is picked" (it's host-colored too, so the two were ambiguous). */
 .editor-tab--host {
-  box-shadow: inset 0 -2px 0 var(--tab-host-color);
+  box-shadow: inset 0 2px 0 var(--tab-host-color);
 }
 
 /* A dragged tab would be inserted before this one. */
@@ -3340,7 +3678,7 @@ select option {
 .editor-tab--host.editor-tab--drop {
   box-shadow:
     inset 2px 0 0 var(--accent),
-    inset 0 -2px 0 var(--tab-host-color);
+    inset 0 2px 0 var(--tab-host-color);
 }
 
 .editor-tab:hover {
@@ -3368,6 +3706,21 @@ select option {
 .editor-tab__icon {
   display: inline-flex;
   flex: 0 0 16px;
+  position: relative; /* anchors the pin badge */
+}
+
+/* Pinned tabs: a reticle badge on the file icon's corner (clicking the icon
+ * unpins; pinning stays in the context menu — no accidental toggles). */
+.editor-tab__pinbadge {
+  position: absolute;
+  right: -5px;
+  bottom: -3px;
+  pointer-events: none;
+}
+
+/* No close slot on pinned tabs — give the name room to breathe instead. */
+.editor-tab--pinned {
+  padding-right: var(--space-5);
 }
 
 .editor-tab__name {

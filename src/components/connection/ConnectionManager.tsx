@@ -18,10 +18,22 @@ function hostDetail(host: SshHostEntry): string {
 }
 
 export function ConnectionManager() {
-  const [hosts, setHosts] = useState<SshHostEntry[]>([]);
+  const [allHosts, setHosts] = useState<SshHostEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const openDialog = useAppStore((s) => s.openDialog);
+  const remotes = useAppStore((s) => s.remotes);
   const { connect } = useSSH();
+
+  // Already-connected hosts don't belong in the "connect to…" list.
+  const hosts = allHosts.filter(
+    (h) =>
+      !remotes.some(
+        (r) =>
+          r.conn.host === (h.hostName ?? h.name) &&
+          r.conn.port === (h.port ?? 22) &&
+          (!h.user || r.conn.user === h.user),
+      ),
+  );
 
   useEffect(() => {
     let active = true;
@@ -81,7 +93,7 @@ export function ConnectionManager() {
         className="btn btn--primary btn--block"
         onClick={() => openDialog()}
       >
-        <IconPlug /> Connect to a server
+        <IconPlug /> Connect to a new server
       </button>
 
       {loading ? (
@@ -92,7 +104,7 @@ export function ConnectionManager() {
         <div className="conn-empty">
           No hosts in ~/.ssh/config.
           <br />
-          Use “Connect to a server” or “Edit”.
+          Use “Connect to a new server” or “Edit”.
         </div>
       ) : (
         hosts.map((host) => (

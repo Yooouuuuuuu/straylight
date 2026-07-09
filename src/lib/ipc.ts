@@ -502,6 +502,8 @@ export function onFileFsChange(
 export interface VcsBranch {
   name: string;
   current: boolean;
+  /** Remote-tracking ("origin/x") — checkout creates the local branch. */
+  remote?: boolean;
 }
 
 export function vcsBranches(
@@ -510,6 +512,27 @@ export function vcsBranches(
   backend: string,
 ): Promise<VcsBranch[]> {
   return invoke("vcs_branches", { connId, root, backend });
+}
+
+export interface IncomingCommit {
+  id: string;
+  subject: string;
+  author: string;
+  timestamp: number | null;
+}
+
+export interface IncomingInfo {
+  upstream: string | null;
+  commits: IncomingCommit[];
+}
+
+/** Fetched-but-unmerged commits on the current branch's upstream (git). */
+export function vcsIncoming(
+  connId: string,
+  root: string,
+  backend: string,
+): Promise<IncomingInfo> {
+  return invoke("vcs_incoming", { connId, root, backend });
 }
 
 export function vcsSwitch(

@@ -485,8 +485,10 @@ interface AppState {
   closeTerminal: (id: string) => void;
   setActiveTerminal: (id: string) => void;
   /** What the terminal panel body shows: the terminals, or a tool group. */
-  terminalView: "terminals" | "containers" | "ports" | "forwarding";
-  setTerminalView: (v: "terminals" | "containers" | "ports" | "forwarding") => void;
+  terminalView: "terminals" | "containers" | "ports" | "forwarding" | "transfers";
+  setTerminalView: (
+    v: "terminals" | "containers" | "ports" | "forwarding" | "transfers",
+  ) => void;
   /** Panel group-bar order (conn ids; unknown/new conns append). Draggable. */
   termGroupOrder: string[];
   setTermGroupOrder: (order: string[]) => void;
@@ -503,6 +505,11 @@ interface AppState {
   setContainerCounts: (c: Record<string, number>) => void;
   forwardCount: number;
   setForwardCount: (n: number) => void;
+  /** Startup "connect to last …?" asks, shown one at a time. Skipping runs
+   *  `onSkip` (drops the host from the saved session — no re-ask next time). */
+  connectAsks: { kind: "wsl" | "remote"; label: string; run: () => void; onSkip?: () => void }[];
+  pushConnectAsk: (a: { kind: "wsl" | "remote"; label: string; run: () => void; onSkip?: () => void }) => void;
+  shiftConnectAsk: () => void;
   /** Reorder terminals in the list (drag). */
   moveTerminal: (fromId: string, toId: string) => void;
   cycleTerminal: (direction: 1 | -1) => void;
@@ -586,6 +593,8 @@ interface AppState {
    *  file watcher's reload guard recognizes our own save (else it would
    *  reload the file and wipe the undo history). */
   markTabSaved: (id: string, modified: number, content?: string) => void;
+  /** Reflect an in-editor line-ending conversion (LF ⇄ CRLF). */
+  setTabLineEnding: (id: string, eol: "LF" | "CRLF") => void;
   /** Replace a clean tab's content after an external reload (App Refresh). */
   reloadTabContent: (
     id: string,
@@ -1012,6 +1021,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setContainerCounts: (containerCounts) => set({ containerCounts }),
   forwardCount: 0,
   setForwardCount: (forwardCount) => set({ forwardCount }),
+  connectAsks: [],
+  pushConnectAsk: (a) => set((s) => ({ connectAsks: [...s.connectAsks, a] })),
+  shiftConnectAsk: () => set((s) => ({ connectAsks: s.connectAsks.slice(1) })),
   moveTerminal: (fromId, toId) =>
     set((s) => {
       const from = s.terminals.findIndex((t) => t.id === fromId);
@@ -1425,6 +1437,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
           ? { ...t, dirty, previewTab: dirty ? false : t.previewTab }
           : t,
       ),
+    })),
+
+  setTabLineEnding: (id, eol) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === id ? { ...t, lineEnding: eol } : t)),
     })),
 
   markTabSaved: (id, modified, content) =>

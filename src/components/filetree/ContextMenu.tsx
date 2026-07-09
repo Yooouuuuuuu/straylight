@@ -1,8 +1,9 @@
 /** Right-click menu for a file-tree node. Closes on outside click / Escape. */
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { copyPath, pasteInto } from "../../lib/fileOps";
 import { dirname } from "../../lib/format";
+import { fsTransferBatch } from "../../lib/ipc";
 import { useAppStore } from "../../store/appStore";
 
 export function ContextMenu() {
@@ -16,6 +17,21 @@ export function ContextMenu() {
   const setClipboard = useAppStore((s) => s.setClipboard);
   const clipboard = useAppStore((s) => s.clipboard);
   const ref = useRef<HTMLDivElement>(null);
+
+  // Clamp against the REAL menu size (it varies — remote items add entries),
+  // so a click near the bottom edge never pushes items off screen.
+  const [nudge, setNudge] = useState({ x: 0, y: 0 });
+  useLayoutEffect(() => {
+    setNudge({ x: 0, y: 0 });
+    if (!menu) return;
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setNudge({
+      x: Math.min(0, window.innerWidth - 8 - (menu.x + r.width)),
+      y: Math.min(0, window.innerHeight - 8 - (menu.y + r.height)),
+    });
+  }, [menu]);
 
   useEffect(() => {
     if (!menu) return;
@@ -47,8 +63,8 @@ export function ContextMenu() {
     name: menu.name,
     isDir: menu.isDir,
   };
-  const left = Math.min(menu.x, window.innerWidth - 196);
-  const top = Math.min(menu.y, window.innerHeight - 220);
+  const left = menu.x + nudge.x;
+  const top = menu.y + nudge.y;
 
   return (
     <div
@@ -116,6 +132,37 @@ export function ContextMenu() {
         <span className="context-menu__key">Del</span>
       </button>
       <div className="context-menu__sep" />
+      {menu.connId !== useAppStore.getState().localConnId && (
+        <button
+          className="context-menu__item"
+          title="Copy straight to your Downloads folder (use Transfer for a specific destination)"
+          onClick={() => {
+            closeContextMenu();
+            const sel = selection.filter((n) => n.connId === menu.connId);
+            const paths = sel.length ? sel.map((n) => n.path) : [menu.path];
+            void (async () => {
+              const store = useAppStore.getState();
+              try {
+                const { downloadDir } = await import("@tauri-apps/api/path");
+                const dest = await downloadDir();
+                await fsTransferBatch(
+                  `dl-${Date.now()}`,
+                  menu.connId,
+                  paths,
+                  store.localConnId!,
+                  dest,
+                  true,
+                );
+                store.pushNotice("info", `Downloaded ${paths.length} item(s) to Downloads.`);
+              } catch (e) {
+                store.pushNotice("error", `Download failed: ${String(e)}`);
+              }
+            })();
+          }}
+        >
+          Download{selection.length > 1 && ` (${selection.length})`}
+        </button>
+      )}
       <button
         className="context-menu__item"
         disabled={selection.length > 1}

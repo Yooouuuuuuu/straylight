@@ -271,12 +271,24 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
           e.dataTransfer.effectAllowed = "move";
         }}
       >
-        <span
-          className={`repo-card__backend repo-card__backend--${repo.backend}`}
-          title={repo.backend === "jj" ? "Jujutsu repository" : "git repository"}
-        >
-          {repo.backend}
-        </span>
+        {repo.backend === "jj" || repo.colocated ? (
+          <button
+            className={`repo-card__backend repo-card__backend--${repo.backend} repo-card__backend--toggle`}
+            title={`Colocated repo — click to drive it with ${repo.backend === "jj" ? "git" : "jj"} instead`}
+            onClick={() =>
+              useVcsStore.getState().toggleBackend(repo.connKey, repo.root)
+            }
+          >
+            {repo.backend}
+          </button>
+        ) : (
+          <span
+            className={`repo-card__backend repo-card__backend--${repo.backend}`}
+            title="git repository"
+          >
+            {repo.backend}
+          </span>
+        )}
         <span className="repo-card__name" title={repo.root}>
           {repo.label}
         </span>
@@ -365,8 +377,20 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                 ✎
               </button>
               <button
+                className="icon-btn"
+                title="Fetch & review incoming commits"
+                onClick={() => {
+                  const s = useVcsStore.getState();
+                  s.unhideIncoming(repo.connKey, repo.root);
+                  void remoteOp(repo.connKey, repo.root, "fetch");
+                  s.showHistory(repo.connKey, repo.root);
+                }}
+              >
+                ⇣
+              </button>
+              <button
                 className={`icon-btn ${actionsOpen ? "icon-btn--active" : ""}`}
-                title="More actions (fetch, push, stash…)"
+                title="More actions (push, stash…)"
                 onClick={() => {
                   setBranchOpen(false);
                   setActionsOpen((o) => !o);
@@ -387,31 +411,6 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
 
       {actionsOpen && !inactive && st && (
         <div className="action-menu">
-          <button
-            className="action-menu__item"
-            onClick={() => {
-              setActionsOpen(false);
-              void remoteOp(repo.connKey, repo.root, "fetch");
-            }}
-          >
-            Fetch <span className="action-menu__hint">safe — updates remote refs</span>
-          </button>
-          {isGit && !!st.behind && (
-            <button
-              className="action-menu__item"
-              onClick={() => {
-                setActionsOpen(false);
-                askConfirm(
-                  "Merge remote changes?",
-                  `Merge the fetched upstream into ${st.ref || "the current branch"}? This modifies your working tree.`,
-                  () => void updateFromRemote(repo.connKey, repo.root),
-                  "vcs-update",
-                );
-              }}
-            >
-              Update <span className="action-menu__hint">merge ↓{st.behind}</span>
-            </button>
-          )}
           {!isGit && !!st.ref && (
             <button
               className="action-menu__item"
@@ -770,20 +769,45 @@ function BranchMenu({
             No {isJj ? "bookmarks" : "branches"} yet.
           </div>
         ) : (
-          branches.map((b) => (
-            <button
-              key={b.name}
-              className={`branch-menu__item ${b.current ? "branch-menu__item--current" : ""}`}
-              disabled={b.current}
-              onClick={() => {
-                void switchBranch(repo.connKey, repo.root, b.name);
-                onClose();
-              }}
-            >
-              {b.current ? "● " : ""}
-              {b.name}
-            </button>
-          ))
+          <>
+            {branches
+              .filter((b) => !b.remote)
+              .map((b) => (
+                <button
+                  key={b.name}
+                  className={`branch-menu__item ${b.current ? "branch-menu__item--current" : ""}`}
+                  disabled={b.current}
+                  onClick={() => {
+                    void switchBranch(repo.connKey, repo.root, b.name);
+                    onClose();
+                  }}
+                >
+                  {b.current ? "● " : ""}
+                  {b.name}
+                </button>
+              ))}
+            {branches.some((b) => b.remote) && (
+              <div className="branch-menu__label">remote — click to check out</div>
+            )}
+            {branches
+              .filter((b) => b.remote)
+              .map((b) => (
+                <button
+                  key={b.name}
+                  className="branch-menu__item branch-menu__item--remote"
+                  title={`Create a local tracking branch from ${b.name}`}
+                  onClick={() => {
+                    // "origin/x" → checkout "x": git's DWIM creates the
+                    // tracking branch automatically.
+                    const short = b.name.split("/").slice(1).join("/") || b.name;
+                    void switchBranch(repo.connKey, repo.root, short);
+                    onClose();
+                  }}
+                >
+                  {b.name}
+                </button>
+              ))}
+          </>
         )}
       </div>
       <input

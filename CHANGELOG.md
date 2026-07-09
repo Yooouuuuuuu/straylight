@@ -27,6 +27,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 - Terminal tab reordering.
 
+## [0.8.15] - 2026-07-09
+
+### Added
+
+- **Git history redesign.** The History panel takes the full explorer column
+  (open-in-editor closes it); a **⇣ Fetch & review** button on the SCM panel
+  opens it with an **Incoming** block (per-branch, git) offering
+  **Merge / Dismiss** — shown at the top of the log tab too; remote branches
+  list in the branch menu (click checks out, DWIM); a colocated repo's
+  backend badge click-toggles git ⇄ jj; "Load older commits…"; commit detail
+  loads on click.
+- **Startup connect asks** — `autoConnect.wsl/remote`: ask / always / never.
+  On launch a dialog offers the last WSL distro, then the last remote; the
+  checkbox upgrades to "always" only on Connect; Skip also cleans the saved
+  host so it isn't asked again.
+- **Ctrl+Tab switcher**: a centered overlay (1.5x type) listing every editor
+  tab across all splits — or, when a terminal is focused, every panel
+  terminal grouped by host (group-bar order, then each host's tab order).
+  Hold Ctrl, tap Tab to walk, release to land; works inside terminals.
+- **Transfers docked** — the two-pane copier is now a tool group in the
+  terminal panel (left pane defaults to Local; each host picker hides the
+  other side's choice; picks last for the app session). The header ⇄ and the
+  popup are gone.
+- **Tool view frame**: Ports / Containers / Forwarding / Transfers sit inset
+  in a green-outlined box that fuses with the picked chip (one block); wider
+  scrollbars inside the box; tool chips carry icons.
+- **Explorer host-tools line** under every host bar (host-color wash): pin,
+  show-hidden, new file/folder on the left; updated-time + refresh flush
+  right. Edit-ssh-config sits beside the remote connect (plug) button;
+  connect menus hide already-connected hosts.
+- **Download** (WSL/remote context menu) — straight to the Windows Downloads
+  folder.
+- **Pin badge** — pinned tabs mark the file icon with a ⌖ reticle (click the
+  icon to unpin); new `pin` theme color.
+- **EOL switcher**: the status bar LF/CRLF is clickable — converts the open
+  file (undoable).
+- **Root collapse/expand persistence** per host + folder, all hosts.
+
+### Changed
+
+- **Ctrl+Shift+`** opens the new terminal on the *focused terminal's* host,
+  and only works while a terminal is focused (the palette command keeps the
+  remote → WSL → local fallback).
+- Editor tabs: the WSL/remote host stripe moved to the TOP edge — the bottom
+  line now only ever means "picked tab".
+- Context menus measure their real size and clamp to the screen.
+
 ## [0.8.14] - 2026-07-09
 
 ### Added

@@ -15,7 +15,15 @@ import { ForwardingView } from "../PortForwards";
 import { ContainersView } from "../terminal/ContainersView";
 import { PortsView } from "../terminal/PortsView";
 import { Terminal } from "../terminal/Terminal";
-import { IconClose, IconPlus } from "../icons";
+import { TransfersView } from "../transfer/TransfersView";
+import {
+  IconClose,
+  IconCube,
+  IconEthernet,
+  IconPlus,
+  IconTransfer,
+  IconTunnel,
+} from "../icons";
 
 const GROUP_MIME = "application/x-straylight-termgroup";
 const TERM_MIME = "application/x-straylight-termentry";
@@ -98,6 +106,11 @@ export function TerminalPanel() {
 
   const activeConn =
     terminals.find((t) => t.id === activeTerminalId)?.connId ?? null;
+  // Keep the group bar in step when the active terminal changes from outside
+  // (the Ctrl+Tab switcher, session restore) — not just via chip clicks.
+  useEffect(() => {
+    if (activeConn) setSelGroup(activeConn);
+  }, [activeConn]);
   const activeGroup =
     (selGroup && groups.some((g) => g.connId === selGroup) && selGroup) ||
     activeConn ||
@@ -147,7 +160,8 @@ export function TerminalPanel() {
   };
 
   const tool = (
-    view: "ports" | "containers" | "forwarding",
+    view: "ports" | "containers" | "forwarding" | "transfers",
+    icon: React.ReactNode,
     label: string,
     digits: string | null,
   ) => (
@@ -156,13 +170,16 @@ export function TerminalPanel() {
       className={`termgroup__chip termgroup__chip--tool${terminalView === view ? " termgroup__chip--active" : ""}`}
       onClick={() => setTerminalView(view)}
     >
+      <span className="termgroup__toolicon">{icon}</span>
       {label}
       {digits && <span className="termgroup__count">{digits}</span>}
     </button>
   );
 
   return (
-    <div className="terminal-panel terminal-panel--grouped">
+    <div
+      className={`terminal-panel terminal-panel--grouped${terminalView !== "terminals" ? " terminal-panel--toolmode" : ""}`}
+    >
       <div className="termgroup__bar">
         {groups.map((g) => (
           <button
@@ -193,11 +210,19 @@ export function TerminalPanel() {
           </button>
         ))}
         <span className="termgroup__spacer" />
-        {panelsConfig.ports && tool("ports", "Ports", digitsFor(portCounts, true))}
+        {panelsConfig.ports &&
+          tool("ports", <IconEthernet size={13} />, "Ports", digitsFor(portCounts, true))}
         {panelsConfig.containers &&
-          tool("containers", "Containers", digitsFor(containerCounts, false))}
+          tool("containers", <IconCube size={13} />, "Containers", digitsFor(containerCounts, false))}
         {panelsConfig.forwarding &&
-          tool("forwarding", "Forwarding", forwardCount > 0 ? String(forwardCount) : null)}
+          tool(
+            "forwarding",
+            <IconTunnel size={13} />,
+            "Forwarding",
+            forwardCount > 0 ? String(forwardCount) : null,
+          )}
+        {panelsConfig.transfers &&
+          tool("transfers", <IconTransfer size={13} />, "Transfers", null)}
         <button
           className="icon-btn termgroup__collapse"
           title="Hide terminal (Ctrl+`)"
@@ -209,9 +234,14 @@ export function TerminalPanel() {
 
       <div className="terminal-panel__split">
         <div className="terminal-panel__body">
-          {terminalView === "containers" && <ContainersView />}
-          {terminalView === "ports" && <PortsView />}
-          {terminalView === "forwarding" && <ForwardingView />}
+          {terminalView !== "terminals" && (
+            <div className="tool-inset">
+              {terminalView === "containers" && <ContainersView />}
+              {terminalView === "ports" && <PortsView />}
+              {terminalView === "forwarding" && <ForwardingView />}
+              {terminalView === "transfers" && <TransfersView />}
+            </div>
+          )}
           {terminalView === "terminals" && groupTerminals.length === 0 && (
             <div className="terminal-message">
               No terminals in this group — click + to start one.

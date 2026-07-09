@@ -147,6 +147,7 @@ pub fn run() {
             forward::port_forward_list,
             containers::container_list,
             ports::port_list,
+            vcs::vcs_incoming,
             prefs::settings_path,
             vcs::vcs_open,
             vcs::vcs_status,

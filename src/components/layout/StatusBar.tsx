@@ -2,6 +2,9 @@
  *  Ports · Containers · Forwarding). RIGHT: everything about the active file —
  *  branch, path, cursor, line ending, encoding, language. Connection state
  *  lives on the host bars in the explorer, not here. */
+import { useState } from "react";
+
+import { setTabEol } from "../../lib/editorModels";
 import { useAppStore } from "../../store/appStore";
 import { useVcsStore } from "../../store/vcsStore";
 import { IconBranch, IconFolder, IconTerminalGlyph } from "../icons";
@@ -21,8 +24,24 @@ export function StatusBar() {
   const toggleTerminal = useAppStore((s) => s.toggleTerminal);
   const vcsRepos = useVcsStore((s) => s.repos);
   const toggleScm = useVcsStore((s) => s.toggleScm);
+  const setTabLineEnding = useAppStore((s) => s.setTabLineEnding);
+  const [eolMenu, setEolMenu] = useState(false);
 
   const active = tabs.find((t) => t.id === activeTabId) ?? null;
+  const eolSwitchable =
+    active && (!active.kind || active.kind === "file") && !active.isBinary;
+
+  const pickEol = (eol: "LF" | "CRLF") => {
+    setEolMenu(false);
+    if (!active || active.lineEnding === eol) return;
+    if (setTabEol(active.id, eol)) {
+      setTabLineEnding(active.id, eol);
+    } else {
+      useAppStore
+        .getState()
+        .pushNotice("warn", "Open the file in the editor first to convert it.");
+    }
+  };
 
   // Contextual branch hint: the repo that owns the focused file (if tracked).
   const norm = (p: string) => p.replace(/\\/g, "/");
@@ -87,7 +106,32 @@ export function StatusBar() {
           <span className="statusbar__item">
             Ln {active.cursor.line}, Col {active.cursor.column}
           </span>
-          <span className="statusbar__item">{active.lineEnding}</span>
+          {eolSwitchable ? (
+            <span className="statusbar__eol">
+              <span
+                className="statusbar__item statusbar__item--button"
+                title="Change line endings (converts the file; save to keep it)"
+                onClick={() => setEolMenu((v) => !v)}
+              >
+                {active.lineEnding}
+              </span>
+              {eolMenu && (
+                <>
+                  <div className="menu-backdrop" onClick={() => setEolMenu(false)} />
+                  <div className="statusbar__eol-menu" role="menu">
+                    <button className="terminal-menu__item" onClick={() => pickEol("LF")}>
+                      LF <span className="terminal-menu__hint">\n · Unix</span>
+                    </button>
+                    <button className="terminal-menu__item" onClick={() => pickEol("CRLF")}>
+                      CRLF <span className="terminal-menu__hint">\r\n · Windows</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </span>
+          ) : (
+            <span className="statusbar__item">{active.lineEnding}</span>
+          )}
           <span className="statusbar__item">
             {active.encoding.toUpperCase()}
           </span>

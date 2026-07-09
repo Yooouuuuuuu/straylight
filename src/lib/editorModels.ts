@@ -39,6 +39,20 @@ export function acquireModel(tab: EditorTab): monaco.editor.ITextModel {
   return model;
 }
 
+/** Convert a tab's line endings in place (undoable edit; marks it dirty —
+ *  save to persist). Returns false if the model was never created. */
+export function setTabEol(tabId: string, eol: "LF" | "CRLF"): boolean {
+  const model = models.get(tabId);
+  if (!model) return false;
+  model.setEOL(
+    eol === "LF"
+      ? monaco.editor.EndOfLineSequence.LF
+      : monaco.editor.EndOfLineSequence.CRLF,
+  );
+  recomputeDirty(tabId);
+  return true;
+}
+
 /** Dispose models whose tabs are gone. */
 export function pruneModels(liveIds: Set<string>): void {
   for (const [id, model] of models) {

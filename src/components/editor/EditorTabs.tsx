@@ -1,6 +1,7 @@
 /** The editor tab bar. Click to switch, middle-click or × to close; a dirty tab
  *  shows a dot (which becomes × on hover). WSL/remote tabs carry a host-color
- *  underline so "whose file is this" reads at a glance (local stays plain).
+ *  top stripe so "whose file is this" reads at a glance (local stays plain;
+ *  the bottom line is reserved for the picked mark).
  *  Tabs are draggable: within a strip to reorder, onto another strip to move
  *  groups, or onto the editor's right edge to create a new split. */
 import { useEffect, useRef, useState } from "react";
@@ -71,6 +72,7 @@ export function EditorTabs({ groupId }: { groupId: number }) {
             "editor-tab",
             tab.id === activeTabId ? "editor-tab--active" : "",
             tab.dirty ? "editor-tab--dirty" : "",
+            tab.pinned ? "editor-tab--pinned" : "",
             hostColor ? "editor-tab--host" : "",
             tab.kind === "terminal" ? "editor-tab--term" : "",
             dropTarget === tab.id ? "editor-tab--drop" : "",
@@ -132,7 +134,37 @@ export function EditorTabs({ groupId }: { groupId: number }) {
                   : tab.path
           }
         >
-          <span className="editor-tab__icon">
+          <span
+            className="editor-tab__icon"
+            onClick={
+              tab.pinned
+                ? (e) => {
+                    e.stopPropagation();
+                    pinTab(tab.id, false);
+                  }
+                : undefined
+            }
+            title={tab.pinned ? "Pinned — click the icon to unpin" : undefined}
+          >
+            {tab.pinned && (
+              <svg
+                className="editor-tab__pinbadge"
+                width="11"
+                height="11"
+                viewBox="0 0 12 12"
+                aria-hidden
+              >
+                <circle cx="6" cy="6" r="5.5" fill="var(--bg-secondary)" />
+                <circle cx="6" cy="6" r="3" stroke="var(--pin, var(--pink))" strokeWidth="1.2" fill="none" />
+                <path
+                  d="M6 0.8v2.2M6 9v2.2M0.8 6h2.2M9 6h2.2"
+                  stroke="var(--pin, var(--pink))"
+                  strokeWidth="1.2"
+                  strokeLinecap="round"
+                />
+                <circle cx="6" cy="6" r="0.9" fill="var(--pin, var(--pink))" />
+              </svg>
+            )}
             {tab.kind === "diff" ? (
               <span className="editor-tab__diff">±</span>
             ) : tab.kind === "log" ? (
@@ -155,18 +187,7 @@ export function EditorTabs({ groupId }: { groupId: number }) {
             {tab.name}
             {tab.kind === "diff" ? " (changes)" : tab.kind === "merge" ? " (merge)" : ""}
           </span>
-          {tab.pinned ? (
-            <button
-              className="editor-tab__close editor-tab__pin"
-              title="Pinned — click to unpin"
-              onClick={(event) => {
-                event.stopPropagation();
-                pinTab(tab.id, false);
-              }}
-            >
-              ⌖
-            </button>
-          ) : (
+          {tab.pinned ? null : (
             <button
               className="editor-tab__close"
               title="Close"

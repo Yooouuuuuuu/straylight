@@ -18,5 +18,6 @@ export function Terminal({
   initialInput?: string | null;
 }) {
   const containerRef = useTerminal(connId, active, command, id, initialInput);
-  return <div className="terminal-host" ref={containerRef} />;
+  // data-conn-id lets keyboard handlers resolve the focused terminal's host.
+  return <div className="terminal-host" data-conn-id={connId} ref={containerRef} />;
 }

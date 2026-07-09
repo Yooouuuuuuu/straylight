@@ -10,6 +10,8 @@
  * not cached.
  */
 import { openFileByPath } from "./openFile";
+import { autoConnectConfig } from "./settings";
+import { connectWslDistro } from "./wslSession";
 import {
   remoteHostKey,
   useAppStore,
@@ -51,6 +53,8 @@ interface PersistedSession {
   sidebarVisible: boolean;
   terminalVisible: boolean;
   remotes: PersistedRemote[];
+  /** The connected WSL distro's name, for startup reconnect. */
+  wsl?: string | null;
   tabs: PersistedTab[];
   active: PersistedTab | null;
 }
@@ -106,6 +110,15 @@ let restoring = false;
 const desiredRemotes = new Map<string, PersistedRemote>(
   (savedAtStartup?.remotes ?? []).map((r) => [persistedKey(r), r]),
 );
+
+// The WSL distro to restore, kept like desiredRemotes (survives transient
+// disconnects; cleared only by an explicit disconnect).
+let desiredWsl: string | null = savedAtStartup?.wsl ?? null;
+
+/** Forget the saved WSL distro (on its explicit disconnect). */
+export function clearDesiredWsl(): void {
+  desiredWsl = null;
+}
 
 /** Remember a connected remote as one to restore next launch. */
 export function setDesiredRemote(remote: RemoteConnection): void {
@@ -193,11 +206,14 @@ function writeSnapshot(): void {
     }
   }
 
+  if (s.wsl) desiredWsl = s.wsl.name;
+
   const session: PersistedSession = {
     version: VERSION,
     sidebarVisible: s.sidebarVisible,
     terminalVisible: s.terminalVisible,
     remotes: [...desiredRemotes.values()],
+    wsl: desiredWsl,
     tabs: [...localTabs, ...remoteTabs],
     active,
   };
@@ -317,6 +333,29 @@ export async function restoreSession(
     }
     applyPersistedGroups();
 
+    // WSL first (matching the sidebar order), then the remotes. Policy per
+    // kind from settings: "always" connects silently, "ask" queues a startup
+    // dialog (its checkbox flips the setting to "always"), "never" skips.
+    const auto = autoConnectConfig;
+    if (s.wsl && auto.wsl !== "never") {
+      const distro = s.wsl;
+      const doConnect = () =>
+        connectWslDistro(distro).catch((e) =>
+          useAppStore
+            .getState()
+            .pushNotice("error", `WSL reconnect failed: ${String(e)}`),
+        );
+      if (auto.wsl === "always") await doConnect();
+      else
+        store.pushConnectAsk({
+          kind: "wsl",
+          label: distro,
+          run: () => void doConnect(),
+          // Declining forgets the distro — no ghost ask on the next launch.
+          onSkip: () => clearDesiredWsl(),
+        });
+    }
+
     let dialogShown = false;
     for (const r of s.remotes) {
       const key = persistedKey(r);
@@ -324,39 +363,61 @@ export async function restoreSession(
         (t) => t.scope === "remote" && t.host === key,
       );
       pendingRemoteRestore.set(key, remoteTabs);
+      if (auto.remote === "never") continue;
 
       if (r.authType === "auto") {
-        try {
-          // connect() establishes the remote and (via consumePendingRemoteTabs)
-          // reopens its tabs.
-          await connect(profileFromRemote(r));
-        } catch {
-          /* failure surfaced as a toast by connect(); the pending set is kept
-             so a later reconnect to the same host still restores tabs */
-        }
-      } else if (!dialogShown) {
-        // Password host: we never stored the password. Pre-fill the dialog so
-        // the user can reconnect; tabs reopen on a successful connect.
-        dialogShown = true;
-        store.openDialog({
-          name: r.name,
-          hostName: r.host,
-          user: r.user,
-          port: r.port,
-          identityFile: null,
-          proxyJump: r.proxyJump,
-        });
-        if (remoteTabs.length) {
-          store.pushNotice(
-            "info",
-            `Reconnect to ${r.name} to restore ${remoteTabs.length} tab(s).`,
-          );
-        }
+        const doConnect = () =>
+          connect(profileFromRemote(r)).catch(() => {
+            /* failure surfaced as a toast by connect(); the pending set is
+               kept so a later reconnect to the same host still restores tabs */
+          });
+        if (auto.remote === "always") await doConnect();
+        else
+          store.pushConnectAsk({
+            kind: "remote",
+            label: r.name,
+            run: () => void doConnect(),
+            onSkip: () => clearDesiredRemote(key),
+          });
       } else {
-        store.pushNotice(
-          "info",
-          `Reconnect to ${r.name} (password host) to restore it.`,
-        );
+        // Password host: we never stored the password. The best we can do is
+        // pre-fill the dialog; under "ask" that too goes through the queue.
+        const openPrefilled = () => {
+          useAppStore.getState().openDialog({
+            name: r.name,
+            hostName: r.host,
+            user: r.user,
+            port: r.port,
+            identityFile: null,
+            proxyJump: r.proxyJump,
+          });
+          if (remoteTabs.length) {
+            useAppStore
+              .getState()
+              .pushNotice(
+                "info",
+                `Reconnect to ${r.name} to restore ${remoteTabs.length} tab(s).`,
+              );
+          }
+        };
+        if (auto.remote === "always") {
+          if (!dialogShown) {
+            dialogShown = true;
+            openPrefilled();
+          } else {
+            store.pushNotice(
+              "info",
+              `Reconnect to ${r.name} (password host) to restore it.`,
+            );
+          }
+        } else {
+          store.pushConnectAsk({
+            kind: "remote",
+            label: r.name,
+            run: openPrefilled,
+            onSkip: () => clearDesiredRemote(key),
+          });
+        }
       }
     }
 

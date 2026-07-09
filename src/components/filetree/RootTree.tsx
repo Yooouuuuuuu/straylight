@@ -20,8 +20,45 @@ import {
   updateTreeRows,
   type TreeRow,
 } from "../../lib/treeNav";
-import { useAppStore } from "../../store/appStore";
+import { remoteHostKey, useAppStore } from "../../store/appStore";
 import { findRepoForPath, repoColorForPath, useVcsStore } from "../../store/vcsStore";
+
+// Root collapse/expand persists per host+path (stable across reconnects —
+// connIds change per session, so the key uses the host identity instead).
+const COLLAPSED_KEY = "straylight.rootCollapsed";
+
+function stableRootKey(connId: string, rootPath: string): string {
+  const s = useAppStore.getState();
+  const host =
+    connId === s.localConnId
+      ? "local"
+      : s.wsl?.connId === connId
+        ? `wsl:${s.wsl.name}`
+        : (() => {
+            const r = s.remotes.find((x) => x.conn.connId === connId);
+            return r ? remoteHostKey(r.conn) : connId;
+          })();
+  return `${host}::${rootPath}`;
+}
+
+function loadCollapsedMap(): Record<string, boolean> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "null");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveCollapsed(key: string, collapsed: boolean): void {
+  try {
+    const map = loadCollapsedMap();
+    map[key] = collapsed;
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
 import { FileNode } from "./FileNode";
 import { IconChevron, IconClose } from "../icons";
 
@@ -69,7 +106,19 @@ export function RootTree({
   const cancelRename = useAppStore((s) => s.cancelRename);
   const markRefreshed = useAppStore((s) => s.markRefreshed);
 
-  const [collapsed, setCollapsed] = useState(defaultCollapsed ?? false);
+  const [collapsed, setCollapsedRaw] = useState<boolean>(
+    () => loadCollapsedMap()[stableRootKey(connId, rootPath)] ?? defaultCollapsed ?? false,
+  );
+  const setCollapsed = useCallback(
+    (v: boolean | ((c: boolean) => boolean)) => {
+      setCollapsedRaw((prev) => {
+        const next = typeof v === "function" ? v(prev) : v;
+        saveCollapsed(stableRootKey(connId, rootPath), next);
+        return next;
+      });
+    },
+    [connId, rootPath],
+  );
   const [dirs, setDirs] = useState<Record<string, DirState>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 

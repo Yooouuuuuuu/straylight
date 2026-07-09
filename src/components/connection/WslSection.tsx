@@ -7,18 +7,10 @@ import { useCallback, useEffect, useState } from "react";
 
 import { PALETTE, paletteName } from "../../lib/connectionColor";
 import { basename, dirname } from "../../lib/format";
-import {
-  fsListDir,
-  sshDisconnect,
-  wslConnect,
-  wslListDistros,
-  type WslDistro,
-} from "../../lib/ipc";
-import {
-  HOST_COLOR_RAMP,
-  useAppStore,
-  type RemoteConnection,
-} from "../../store/appStore";
+import { sshDisconnect, wslListDistros, type WslDistro } from "../../lib/ipc";
+import { clearDesiredWsl } from "../../lib/session";
+import { connectWslDistro } from "../../lib/wslSession";
+import { HOST_COLOR_RAMP, useAppStore } from "../../store/appStore";
 import { FolderBrowser } from "../FolderBrowser";
 import { RelativeTime } from "../RelativeTime";
 import { RootTree } from "../filetree/RootTree";
@@ -28,6 +20,7 @@ import {
   IconFilePlus,
   IconFolderPlus,
   IconLogout,
+  IconPlug,
   IconPlus,
   IconRefresh,
 } from "../icons";
@@ -40,9 +33,7 @@ export function WslSection() {
   const wslPins = useAppStore((s) => s.wslPins);
   const addWslPin = useAppStore((s) => s.addWslPin);
   const removeWslPin = useAppStore((s) => s.removeWslPin);
-  const setWsl = useAppStore((s) => s.setWsl);
   const clearWsl = useAppStore((s) => s.clearWsl);
-  const openTerminal = useAppStore((s) => s.openTerminal);
   const pushNotice = useAppStore((s) => s.pushNotice);
   const showHiddenWsl = useAppStore((s) => s.showHiddenWsl);
   const toggleHiddenWsl = useAppStore((s) => s.toggleHiddenWsl);
@@ -92,31 +83,7 @@ export function WslSection() {
       setConnecting(distro);
       setInstallFor(null);
       try {
-        // One distro slot: switching drops the current connection first.
-        const prev = useAppStore.getState().wsl;
-        if (prev) {
-          try {
-            await sshDisconnect(prev.connId);
-          } catch {
-            /* ignore */
-          }
-          useAppStore.getState().clearWsl();
-        }
-        const { connId, user } = await wslConnect(distro, allowInstall);
-        const listing = await fsListDir(connId, "");
-        const conn: RemoteConnection = {
-          connId,
-          name: distro,
-          host: "127.0.0.1",
-          user,
-          port: 0,
-          color: WSL_COLOR,
-          authType: "auto",
-          identityFile: null,
-          proxyJump: null,
-        };
-        setWsl(conn, listing.path);
-        openTerminal(connId, distro);
+        await connectWslDistro(distro, allowInstall);
       } catch (e) {
         const msg = String(e);
         if (msg.includes("WSL_NEEDS_INSTALL:")) {
@@ -128,7 +95,7 @@ export function WslSection() {
         setConnecting(null);
       }
     },
-    [setWsl, openTerminal, pushNotice],
+    [pushNotice],
   );
 
   async function disconnect() {
@@ -139,6 +106,8 @@ export function WslSection() {
         /* ignore */
       }
     }
+    // Explicit disconnect: don't offer this distro at next launch.
+    clearDesiredWsl();
     clearWsl();
   }
 
@@ -165,7 +134,7 @@ export function WslSection() {
             title="Connect a different distro (replaces the current one)"
             onClick={() => setListOpen((o) => !o)}
           >
-            <IconPlus />
+            <IconPlug size={13} />
           </button>
         ) : (
           <button
@@ -209,9 +178,12 @@ export function WslSection() {
             </div>
           ) : error ? (
             <div className="conn-empty">Couldn’t list WSL distros.</div>
+          ) : distros.every((d) => d.name === wsl?.name) ? (
+            <div className="conn-empty">No other distros installed.</div>
           ) : (
             <div className="conn-list">
-              {distros.map((d) => (
+              {/* The connected distro doesn't belong in the switch list. */}
+              {distros.filter((d) => d.name !== wsl?.name).map((d) => (
                 <div
                   key={d.name}
                   className="conn-item"
@@ -280,18 +252,30 @@ export function WslSection() {
               {wsl.user ? `${wsl.user}@${wsl.name}` : wsl.name}
             </span>
             <button
+              className="icon-btn icon-btn--danger sidebar__section-action"
+              title="Disconnect"
+              onClick={() => void disconnect()}
+            >
+              <IconLogout />
+            </button>
+          </div>
+          <div
+            className="host-tools"
+            style={{ "--host-color": hostColor } as React.CSSProperties}
+          >
+            <button
+              className="icon-btn"
+              title="Pin a folder"
+              onClick={() => setBrowsing(true)}
+            >
+              <IconPlus />
+            </button>
+            <button
               className={`icon-btn ${showHiddenWsl ? "icon-btn--active" : ""}`}
               title={showHiddenWsl ? "Hide hidden files" : "Show hidden files"}
               onClick={() => toggleHiddenWsl()}
             >
               {showHiddenWsl ? <IconEye /> : <IconEyeOff />}
-            </button>
-            <button
-              className="icon-btn"
-              title="Open a folder"
-              onClick={() => setBrowsing(true)}
-            >
-              <IconPlus />
             </button>
             <button
               className="icon-btn"
@@ -307,20 +291,14 @@ export function WslSection() {
             >
               <IconFolderPlus />
             </button>
+            <span className="host-tools__spacer" />
+            <RelativeTime at={lastRefreshWsl} />
             <button
               className="icon-btn"
               title="Refresh WSL"
               onClick={() => refreshWsl()}
             >
               <IconRefresh />
-            </button>
-            <RelativeTime at={lastRefreshWsl} />
-            <button
-              className="icon-btn icon-btn--danger sidebar__section-action"
-              title="Disconnect"
-              onClick={() => void disconnect()}
-            >
-              <IconLogout />
             </button>
           </div>
           {wslPins.length > 0 ? (

@@ -64,7 +64,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "explorer.rename", action: "renameSelected", key: "F2", description: "Rename the selected item", label: "F2" },
   { id: "explorer.delete", action: "deleteSelected", key: "Delete", description: "Delete the selected item", label: "Del" },
   { id: "terminal.toggle", action: "toggleTerminal", key: "`", ctrl: true, description: "Toggle the terminal panel", label: "Ctrl+`" },
-  { id: "terminal.new", action: "newTerminal", key: "`", ctrl: true, shift: true, description: "Open a new terminal", label: "Ctrl+Shift+`" },
+  { id: "terminal.new", action: "newTerminal", key: "`", ctrl: true, shift: true, description: "New terminal on the focused terminal's host", label: "Ctrl+Shift+`" },
   { id: "terminal.next", action: "nextTerminal", key: "PageDown", ctrl: true, description: "Next terminal", label: "Ctrl+PageDown" },
   { id: "terminal.previous", action: "prevTerminal", key: "PageUp", ctrl: true, description: "Previous terminal", label: "Ctrl+PageUp" },
   { id: "view.toggleSidebar", action: "toggleSidebar", key: "b", ctrl: true, description: "Toggle the sidebar", label: "Ctrl+B" },
