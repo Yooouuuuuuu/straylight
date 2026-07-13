@@ -49,14 +49,16 @@ pub struct AppState {
     pub forwards: Mutex<HashMap<String, forward::ForwardEntry>>,
     /// Filesystem watchers on local repos, keyed by `connId::root`.
     pub repo_watchers: Mutex<HashMap<String, watch::RepoWatcher>>,
-    /// Filesystem watchers on open local files (tab auto-reload), keyed by
-    /// `connId::path`.
-    pub file_watchers: Mutex<HashMap<String, watch::RepoWatcher>>,
+    /// Filesystem watchers on open local files (tab auto-reload + settings
+    /// live-reload), keyed by `connId::path` and refcounted per owner.
+    pub file_watchers: Mutex<HashMap<String, watch::FileWatcher>>,
     /// Probed absolute path of `jj` per SSH connection (None = not installed).
     /// SSH exec shells are non-login, so jj in `~/.cargo/bin` is off the PATH.
     pub jj_paths: Mutex<HashMap<String, Option<String>>>,
-    /// Cancel handles for in-flight remote VCS ops, keyed by `connId::root`.
-    pub vcs_ops: Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
+    /// Cancel handle for the repo's single in-flight remote VCS op, keyed by
+    /// `connId::root`. The string is a per-op token so an op only ever clears
+    /// its own slot (see `vcs::run_cancellable`).
+    pub vcs_ops: Mutex<HashMap<String, (String, tokio::sync::oneshot::Sender<()>)>>,
 }
 
 impl AppState {

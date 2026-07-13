@@ -21,6 +21,11 @@ anything below are breaking changes.
   - `confirms` — ask-dialog flags (`{ "exit": false }` silences one). Every
     "don't ask again" checkbox writes here; set a key back to `true` to get
     the dialog back.
+  - `autoConnect` — `{ "wsl": "ask" | "always" | "never", "remote": … }` —
+    the startup reconnect-to-last-host behavior.
+  - `panels` — bottom-panel tool groups: per-tool visibility
+    (`"ports": false` hides the chip), the two poll intervals (seconds,
+    3–3600), the system-port filter, and ignored hosts.
   Live theme sections at the bottom (a quick-theme pick copies a library
   entry over them — pure data):
   - `colors` / `editor` — the full UI and Monaco color token sections. Key

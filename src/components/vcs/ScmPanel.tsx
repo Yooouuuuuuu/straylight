@@ -15,6 +15,7 @@ import { vcsBranches, type VcsBranch } from "../../lib/ipc";
 import { vcsClass, vcsLetter } from "../../lib/vcsDecorations";
 import { FolderBrowser } from "../FolderBrowser";
 import { RelativeTime } from "../RelativeTime";
+import { Tip } from "../Tooltip";
 import { IconClose, IconPanelCollapse, IconPlus, IconRefresh } from "../icons";
 
 interface ConnChoice {
@@ -51,21 +52,29 @@ export function ScmPanel() {
     <div className="scm">
       <div className="scm__head">
         <span className="scm__title">Source Control</span>
-        <button
-          className="icon-btn"
-          title="Open a repository"
-          disabled={conns.length === 0}
-          onClick={startOpen}
-        >
-          <IconPlus />
-        </button>
-        <button
-          className="icon-btn"
-          title="Minimize Source Control (status bar to bring it back)"
-          onClick={() => setScmVisible(false)}
-        >
-          <IconPanelCollapse size={14} dir="right" />
-        </button>
+        <Tip label="Open a repository">
+          <button
+            className="icon-btn"
+            disabled={conns.length === 0}
+            onClick={startOpen}
+          >
+            <IconPlus />
+          </button>
+        </Tip>
+        <Tip label="Refresh all repositories">
+          <button
+            className="icon-btn"
+            disabled={repos.length === 0}
+            onClick={() => useVcsStore.getState().refreshAll(0)}
+          >
+            <IconRefresh />
+          </button>
+        </Tip>
+        <Tip label="Minimize Source Control (status bar to bring it back)">
+          <button className="icon-btn" onClick={() => setScmVisible(false)}>
+            <IconPanelCollapse size={14} dir="right" />
+          </button>
+        </Tip>
       </div>
 
       {picking && (
@@ -121,7 +130,8 @@ function summarize(repo: TrackedRepo): string {
 }
 
 function RepoCard({ repo }: { repo: TrackedRepo }) {
-  const refreshRepo = useVcsStore((s) => s.refreshRepo);
+  const localConnId = useAppStore((s) => s.localConnId);
+  const isLocal = repo.connId !== null && repo.connId === localConnId;
   const cancelRefresh = useVcsStore((s) => s.cancelRefresh);
   const toggleEager = useVcsStore((s) => s.toggleEager);
   const removeRepo = useVcsStore((s) => s.removeRepo);
@@ -292,55 +302,62 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
         <span className="repo-card__name" title={repo.root}>
           {repo.label}
         </span>
-        <button
-          className={`icon-btn ${historyShown ? "icon-btn--active" : ""}`}
-          title={historyShown ? "Hide history" : "Commit history (live)"}
-          disabled={inactive}
-          onClick={() =>
-            historyShown ? closeHistory() : showHistory(repo.connKey, repo.root)
-          }
-        >
-          ⎇
-        </button>
-        <button
-          className={`icon-btn ${repo.eager ? "icon-btn--active" : ""}`}
-          title={repo.eager ? "Live updates on — click to pause" : "Live updates off"}
-          onClick={() => toggleEager(repo.connKey, repo.root)}
-        >
-          {repo.eager ? "◉" : "○"}
-        </button>
-        {loading ? (
+        <Tip label={historyShown ? "Hide history" : "Commit history (live)"}>
           <button
-            className="icon-btn"
-            title="Refreshing — click to stop waiting"
-            onClick={() => cancelRefresh(repo.connKey, repo.root)}
-          >
-            <span className="spinner spinner--sm" />
-          </button>
-        ) : (
-          <button
-            className="icon-btn"
-            title={inactive ? "Connection not active" : "Refresh"}
+            className={`icon-btn ${historyShown ? "icon-btn--active" : ""}`}
             disabled={inactive}
-            onClick={() => void refreshRepo(repo.connKey, repo.root)}
+            onClick={() =>
+              historyShown ? closeHistory() : showHistory(repo.connKey, repo.root)
+            }
           >
-            <IconRefresh />
+            ⎇
           </button>
+        </Tip>
+        {isLocal ? (
+          <Tip label="Live — this repo is file-watched; changes appear by themselves">
+            <span className="icon-btn icon-btn--active icon-btn--static">◉</span>
+          </Tip>
+        ) : (
+          <Tip
+            label={
+              repo.eager
+                ? "Live updates on (refresh after in-app saves) — click to pause"
+                : "Live updates off — click to refresh after in-app saves"
+            }
+          >
+            <button
+              className={`icon-btn ${repo.eager ? "icon-btn--active" : ""}`}
+              onClick={() => toggleEager(repo.connKey, repo.root)}
+            >
+              {repo.eager ? "◉" : "○"}
+            </button>
+          </Tip>
         )}
-        <button
-          className="icon-btn icon-btn--danger"
-          title="Remove from Source Control"
-          onClick={() =>
-            askConfirm(
-              "Remove repository?",
-              `Remove "${repo.label}" from Source Control? Nothing on disk is touched — you can re-add it any time.`,
-              () => removeRepo(repo.connKey, repo.root),
-              "remove-repo",
-            )
-          }
-        >
-          <IconClose />
-        </button>
+        {loading && (
+          <Tip label="Refreshing — click to stop waiting">
+            <button
+              className="icon-btn"
+              onClick={() => cancelRefresh(repo.connKey, repo.root)}
+            >
+              <span className="spinner spinner--sm" />
+            </button>
+          </Tip>
+        )}
+        <Tip label="Remove from Source Control">
+          <button
+            className="icon-btn icon-btn--danger"
+            onClick={() =>
+              askConfirm(
+                "Remove repository?",
+                `Remove "${repo.label}" from Source Control? Nothing on disk is touched — you can re-add it any time.`,
+                () => removeRepo(repo.connKey, repo.root),
+                "remove-repo",
+              )
+            }
+          >
+            <IconClose />
+          </button>
+        </Tip>
       </div>
 
       <div className="repo-card__meta">
@@ -366,38 +383,81 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
             )}
             <span className="repo-card__count">{summarize(repo)}</span>
             <span className="repo-card__meta-btns">
-              <button
-                className={`icon-btn ${commitBoxOpen ? "icon-btn--active" : ""}`}
-                title="Commit / amend"
-                onClick={() => {
-                  if (commitBoxOpen) exitModes();
-                  toggleCommitOpen(repo.connKey, repo.root);
-                }}
+              <Tip label="Commit / amend">
+                <button
+                  className={`icon-btn ${commitBoxOpen ? "icon-btn--active" : ""}`}
+                  onClick={() => {
+                    if (commitBoxOpen) exitModes();
+                    toggleCommitOpen(repo.connKey, repo.root);
+                  }}
+                >
+                  ✎
+                </button>
+              </Tip>
+              <Tip
+                label={
+                  isGit
+                    ? st.ahead
+                      ? `Push ${st.ahead} commit${st.ahead === 1 ? "" : "s"}`
+                      : "Push"
+                    : "Push bookmarks (jj git push)"
+                }
               >
-                ✎
-              </button>
-              <button
-                className="icon-btn"
-                title="Fetch & review incoming commits"
-                onClick={() => {
-                  const s = useVcsStore.getState();
-                  s.unhideIncoming(repo.connKey, repo.root);
-                  void remoteOp(repo.connKey, repo.root, "fetch");
-                  s.showHistory(repo.connKey, repo.root);
-                }}
-              >
-                ⇣
-              </button>
-              <button
-                className={`icon-btn ${actionsOpen ? "icon-btn--active" : ""}`}
-                title="More actions (push, stash…)"
-                onClick={() => {
-                  setBranchOpen(false);
-                  setActionsOpen((o) => !o);
-                }}
-              >
-                {repo.remoteBusy ? <span className="spinner spinner--sm" /> : "⋯"}
-              </button>
+                <button
+                  className="icon-btn"
+                  disabled={st.ahead === 0}
+                  onClick={() =>
+                    askConfirm(
+                      "Push to the remote?",
+                      isGit
+                        ? `Push ${st.ahead ? `${st.ahead} commit${st.ahead === 1 ? "" : "s"}` : "your commits"} upstream?`
+                        : "Push bookmarks to the remote (jj git push)?",
+                      () => void remoteOp(repo.connKey, repo.root, "push"),
+                      "vcs-push",
+                    )
+                  }
+                >
+                  {repo.remoteBusy === "push" ? (
+                    <span className="spinner spinner--sm" />
+                  ) : st.ahead ? (
+                    `↑${st.ahead}`
+                  ) : (
+                    "↑"
+                  )}
+                </button>
+              </Tip>
+              <Tip label="Fetch & review incoming commits">
+                <button
+                  className="icon-btn"
+                  onClick={() => {
+                    const s = useVcsStore.getState();
+                    s.unhideIncoming(repo.connKey, repo.root);
+                    void remoteOp(repo.connKey, repo.root, "fetch");
+                    s.showHistory(repo.connKey, repo.root);
+                  }}
+                >
+                  {repo.remoteBusy === "fetch" || repo.remoteBusy === "pull" ? (
+                    <span className="spinner spinner--sm" />
+                  ) : (
+                    "⇣"
+                  )}
+                </button>
+              </Tip>
+              <Tip label={isGit ? "Stash & pop" : "Rebase & squash"}>
+                <button
+                  className={`icon-btn ${actionsOpen ? "icon-btn--active" : ""}`}
+                  onClick={() => {
+                    setBranchOpen(false);
+                    setActionsOpen((o) => !o);
+                  }}
+                >
+                  {repo.remoteBusy === "update" ? (
+                    <span className="spinner spinner--sm" />
+                  ) : (
+                    "⋯"
+                  )}
+                </button>
+              </Tip>
             </span>
           </>
         ) : (
@@ -427,22 +487,6 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
               Rebase <span className="action-menu__hint">onto {st.ref}@origin</span>
             </button>
           )}
-          <button
-            className="action-menu__item"
-            onClick={() => {
-              setActionsOpen(false);
-              askConfirm(
-                "Push to the remote?",
-                isGit
-                  ? `Push ${st.ahead ? `${st.ahead} commit${st.ahead === 1 ? "" : "s"}` : "your commits"} upstream?`
-                  : "Push bookmarks to the remote (jj git push)?",
-                () => void remoteOp(repo.connKey, repo.root, "push"),
-                "vcs-push",
-              );
-            }}
-          >
-            Push{isGit && st.ahead ? ` ↑${st.ahead}` : ""}
-          </button>
           {isGit && (
             <button
               className="action-menu__item"
@@ -724,10 +768,14 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
         )
       )}
 
-      {repo.lastUpdated && !loading && (
-        <div className="repo-card__stamp">
-          updated <RelativeTime at={repo.lastUpdated} />
-        </div>
+      {loading ? (
+        <div className="repo-card__stamp">updating…</div>
+      ) : (
+        repo.lastUpdated && (
+          <div className="repo-card__stamp">
+            updated <RelativeTime at={repo.lastUpdated} />
+          </div>
+        )
       )}
     </div>
   );
@@ -745,6 +793,12 @@ function BranchMenu({
   const [branches, setBranches] = useState<VcsBranch[] | null>(null);
   const [name, setName] = useState("");
   const isJj = repo.backend === "jj";
+
+  const create = () => {
+    if (!name.trim()) return;
+    void createBranch(repo.connKey, repo.root, name.trim());
+    onClose();
+  };
 
   useEffect(() => {
     if (!repo.connId) return;
@@ -810,20 +864,26 @@ function BranchMenu({
           </>
         )}
       </div>
-      <input
-        className="input input--mono branch-menu__new"
-        placeholder={isJj ? "New bookmark…" : "New branch…"}
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && name.trim()) {
-            void createBranch(repo.connKey, repo.root, name.trim());
-            onClose();
-          } else if (e.key === "Escape") {
-            onClose();
-          }
-        }}
-      />
+      <div className="branch-menu__create">
+        <input
+          className="input input--mono branch-menu__new"
+          placeholder={isJj ? "New bookmark…" : "New branch…"}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") create();
+            else if (e.key === "Escape") onClose();
+          }}
+        />
+        <button
+          className="icon-btn branch-menu__add"
+          title={isJj ? "Create bookmark" : "Create branch"}
+          disabled={!name.trim()}
+          onClick={create}
+        >
+          ＋
+        </button>
+      </div>
     </div>
   );
 }

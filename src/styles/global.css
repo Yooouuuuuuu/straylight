@@ -1103,10 +1103,22 @@
   font-size: var(--font-size-xs);
 }
 
-.branch-menu__new {
+.branch-menu__create {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   margin-top: var(--space-2);
+}
+
+.branch-menu__new {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: var(--font-size-xs);
   padding: 2px var(--space-3);
+}
+
+.branch-menu__add {
+  flex: 0 0 auto;
 }
 
 /* The two expander boxes on the branch line: ✎ commit/amend and ⋯ actions */
@@ -4455,6 +4467,41 @@ select option {
 }
 
 /* ------------------------------------------------------------------ Toasts */
+
+/* Themed tooltip (Tip component) — anchored above its element so a large OS
+   cursor can never cover it (native title tooltips draw at the pointer). */
+.tip {
+  position: fixed;
+  z-index: 1200;
+  transform: translate(-50%, calc(-100% - 6px));
+  background: var(--bg-tertiary);
+  color: var(--fg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-3);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow-md);
+}
+
+.tip--below {
+  transform: translate(-50%, 6px);
+}
+
+/* An icon-btn-shaped indicator that is not clickable (e.g. the locked-on
+   live dot on local repo cards). */
+.icon-btn--static {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+
+.icon-btn--static:hover {
+  background: transparent;
+  color: var(--cyan); /* stay in the active color — a locked indicator never reacts */
+}
 
 .toast-stack {
   position: fixed;

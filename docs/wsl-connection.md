@@ -146,10 +146,10 @@ connects it as a root.
 
 ---
 
-## Transfers (future — drag-and-drop)
+## Transfers (shipped — see [drag-drop.md](drag-drop.md))
 
 Because WSL is its own transport, transfers involving it are **transport-to-
-transport**, which the (future) transfer engine must support:
+transport**, which the transfer engine supports:
 
 - **WSL → remote** (or remote → WSL): no direct path — relayed through the app as
   a transparent 2-step (read from one SSH endpoint, write to the other). This is
@@ -238,7 +238,9 @@ Backend lives in `src-tauri/src/wsl.rs`; the sidebar section is
 - WSL connections aren't surfaced in the reconnect UI (`App.tsx` watches only the
   `remote` slot).
 - `sshd` is restarted on every explicit connect (idempotent; cheap).
-- WSL is intentionally **not** persisted across launches.
+- WSL sessions aren't silently restored across launches — since 0.8.15 a
+  **startup dialog offers the last distro** (`autoConnect.wsl`:
+  ask / always / never; "always" reconnects silently).
 
 ### Future work
 

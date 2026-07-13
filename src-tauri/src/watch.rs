@@ -21,6 +21,16 @@ pub struct RepoWatcher {
     _watcher: notify::RecommendedWatcher,
 }
 
+/// A live single-file watcher plus its owner count. Two features can need the
+/// same file — the settings live-reload watches settings.json/theme.json for
+/// the app's lifetime, while an open editor tab on the same file watches it
+/// too (tab auto-reload) and unwatches on close. The watcher is only dropped
+/// when the last owner unwatches.
+pub struct FileWatcher {
+    _watcher: notify::RecommendedWatcher,
+    owners: usize,
+}
+
 fn key_for(conn_id: &str, root: &str) -> String {
     format!("{conn_id}::{root}")
 }
@@ -107,7 +117,8 @@ pub async fn file_watch(
 ) -> Result<(), String> {
     let key = key_for(&conn_id, &path);
     let mut watchers = state.file_watchers.lock().await;
-    if watchers.contains_key(&key) {
+    if let Some(w) = watchers.get_mut(&key) {
+        w.owners += 1;
         return Ok(());
     }
 
@@ -159,21 +170,25 @@ pub async fn file_watch(
         }
     });
 
-    watchers.insert(key, RepoWatcher { _watcher: watcher });
+    watchers.insert(key, FileWatcher { _watcher: watcher, owners: 1 });
     Ok(())
 }
 
-/// Stop watching a file (no-op if it wasn't watched).
+/// Release one owner of a file watch; the watcher itself is only removed when
+/// the last owner lets go (no-op if the file wasn't watched).
 #[tauri::command]
 pub async fn file_unwatch(
     state: State<'_, AppState>,
     conn_id: String,
     path: String,
 ) -> Result<(), String> {
-    state
-        .file_watchers
-        .lock()
-        .await
-        .remove(&key_for(&conn_id, &path));
+    let key = key_for(&conn_id, &path);
+    let mut watchers = state.file_watchers.lock().await;
+    if let Some(w) = watchers.get_mut(&key) {
+        w.owners -= 1;
+        if w.owners == 0 {
+            watchers.remove(&key);
+        }
+    }
     Ok(())
 }

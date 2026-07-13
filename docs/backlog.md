@@ -1,91 +1,34 @@
 # Backlog
 
 A running checklist of deferred work — known gaps, edge cases, and "later" items
-gathered across the build so far. **Unchecked = not done.** Most of this is
-*non-priority* (revisit when it matters); the few prioritized items are called out
-under "Active roadmap."
+gathered across the build so far. **Every unchecked item below is verified
+not-done** (deep cross-check against CHANGELOG, the test plan, and the code on
+2026-07-13); done items are removed and tagged *(ex-backlog)* in the manual
+test plan instead. Prioritized work lives in the release plan.
 
 ## Active roadmap
 
-- **0.7.1 — Explorer / transfer directory UX (git prep). _Done._** WSL/remote now
-  target *working directories* via the in-app folder browser instead of dumping
-  you in the home/root: every connection (local included) pins folders, shown
-  collapsed. The transfer tab reuses those pins (collapsed, hidden files off, with
-  a one-off "+" dir), and remote/WSL pins persist per connection
-  (`user@host:port` / distro name) across reconnect and relaunch. (The transfer
-  tab is intentionally independent of the explorer's expansion state, rather than
-  shared, per the final UX.)
-- **0.7.2 — Streaming transfers ⚠️. _Done._** Cross-connection transfers stream a
-  256 KB buffer (the 512 MB cap is gone) with a global live progress bar (shown in
-  the status bar too) + Cancel; partial files are cleaned up on failure/cancel.
-  Shipped alongside a **Properties** right-click dialog. Design:
-  [streaming-transfers.md](streaming-transfers.md).
-- **0.8.5 — Post-Phase-3 rework, batches 1–2. _Done._** Live VC refresh (local
-  `.git`/`.jj` filesystem watcher + focus refresh for remote/WSL + startup
-  populate; **F5/Ctrl+R = app-wide refresh** instead of a WebView reload),
-  redesigned repo cards (✎ commit box with a `Commit | Amend` mode switch —
-  jj: `Commit | Describe | Fix last msg` — a ⋯ actions dropdown, colored
-  connection frames, confirm tiers, **Update replaces Pull**), marker-based
-  **conflict resolution** (Accept Current/Incoming/Both + drop-stash flow),
-  jj squash, a live **history panel above the explorer**, copyable toasts, and
-  the dark-theme fix for native form controls. Batches 3–4 (finder/search
-  scoping + streaming, ports polish, context-menu suppression) are next.
-- **0.8.x — Version control (Phase 3 core). _Done (git + jj)._** Status + tree
-  decorations + branch/bookmark hint, Monaco diff (base vs working), stage/unstage
-  + commit (jj: describe+commit), and a commit-history view (the ⎇ panel appended
-  in the VC region, plus a pop-out editor tab). Repos are opened explicitly,
-  eager-toggle + per-connection persistence, per-repo mutation lock. Runs the VCS
-  binary on the host (no local clone). Design + spikes:
-  [version-control.md](version-control.md).
+The current roadmap lives in [release-plan.md](release-plan.md) (0.9.0
+self-package → 1.0.0 public). Shipped milestones are recorded in CHANGELOG.md;
+completed backlog items get an *(ex-backlog)* tag in the manual test plan
+(`docs/dev/phase3-test-plan.md`) when they're removed here (cross-checked
+2026-07-13).
 
 ## Non-priority backlog
 
 ### Version control (Phase 3, later)
-- Fetch/pull/push UI, refresh-on-focus + a local `.git`/`.jj` watcher, and a
-  marker-based conflict flow are **done or in the current rework** (see the
-  post-Phase-3 rework plan in `docs/dev/`) — the items below are what remains.
-- [x] **Multi-lane commit graph** — *done*: SVG lanes computed in
-      `lib/commitGraph.ts` from parent edges; git logs `--branches HEAD
-      --topo-order` so all local branches render; lanes cycle the palette,
-      capped at 10 columns.
-- [x] **3-way merge editor** — *done*: ⚔ on a conflict row opens a merge tab —
-      read-only Current | Incoming panes (each side fully resolved), an editable
-      Result seeded with the markers (per-conflict Accept lenses + highlights),
-      accept-all buttons, and **Complete merge** = save + stage (git; jj just
-      saves) + close. Git-marker conflicts only (jj's own format stays
-      hand-edit).
-- [x] **Ignored-file dimming** — *done for git* (`status --ignored` → `!`
-      records; explorer dims the entry and everything inside an ignored dir,
-      no badge, filtered out of the panel). jj repos don't dim yet (no cheap
-      "list ignored" without touching git in a colocated repo).
 - [ ] **Blame**, **per-hunk staging**.
-- [x] **jj on a remote** — *done*: `jj` is probed once per SSH connection
-      (default PATH → `~/.cargo/bin` / `~/.local/bin` / `/usr/local/bin` →
-      login shell) and the absolute path is cached and substituted; a repo
-      opened as git before the fix needs remove + re-add to re-detect as jj.
-- [x] **Remote-op cancel** — *done*: fetch/push/update run cancellably; a
-      "running — Cancel" banner on the card kills the SSH channel / local
-      process (freeing the repo lock), so a no-TTY auth hang has an escape.
-      True askpass-style prompting stays future work.
-
-### Theming
-- [x] **Per-connection color override** — *done*: right-click a repo card →
-      swatch row; the picked color persists per connection identity and wins
-      over the hash (`connectionColor.ts` overrides, localStorage).
-- [ ] **Global color surface unification** — feed the *same* override into every
-      surface that identifies a connection (title bar tint, tree roots, terminal
-      list) — today only the VC cards consume it; the others still hash.
-
-### Editor
-- [x] **Auto-reload open files on external change** — *done*: clean (non-dirty)
-      open tabs reload automatically — local files via a per-file `notify`
-      watcher (instant log tailing), remote/WSL via a 3 s mtime poll; the view
-      follows the tail if it was scrolled to the bottom. Dirty tabs are never
-      touched (save-conflict flow covers them).
+- [ ] True askpass-style prompting for remote-op auth (today: no-TTY hang with
+      a Cancel escape; use the terminal for interactive auth).
+- [ ] Global ~2 concurrency cap on VCS status calls (designed, never built —
+      revisit if many live repos storm one host).
+- [ ] jj ignored-file dimming (git repos dim; jj has no cheap "list ignored"
+      without touching git in a colocated repo).
 
 ### Explorer & transfer
-- [ ] Fold the transfer panel into the sidebar — drag directly between the trees;
-      retire the three header buttons + the separate modal.
+- [ ] Drag files directly **between the sidebar trees** (the old header
+      buttons + popup are gone — 0.8.15 docked the two-pane Transfers tool —
+      but cross-host drag still lives only in that tool, not the explorer).
 - [ ] Unify the two tree implementations (`RootTree` + `TransferPane`) into one
       reusable component.
 - [ ] Replace the per-`RootTree` expand/load state + the `treeNav` registry
@@ -97,31 +40,32 @@ under "Active roadmap."
 - [ ] Creating a file in the transfer panel also opens it in the editor — decide
       if it should.
 - [ ] A transfer pane's selection can go stale right after a delete.
-- [ ] Re-evaluate the explorer/sidebar UX once git lands (git bar placement; the
-      "Explorer" title row may move).
 
 ### WSL
 - [ ] Auto-recover a dropped WSL session (re-provision `sshd` in the supervisor)
       — today, if `sshd` dies mid-session you reconnect by hand.
-- [ ] Surface WSL in the reconnect UI (`App.tsx` watches only the `remote` slot).
+- [ ] Surface WSL in the reconnect UI — the `ssh-status` handler in `App.tsx`
+      matches only `remotes`, so a WSL drop/recovery updates no state dot and
+      triggers no tree-refresh/terminal-restart (verified 2026-07-13).
 - [ ] Multiple WSL distros connected at once (currently one slot per window).
 - [ ] Auto-install `openssh-server` on non-`apt` distros (Alpine/Arch/openSUSE).
 - [ ] Remember a *declined* install so we don't re-prompt every click.
 
 ### Terminals
-- [ ] Keyboard-in-terminal routing (which shortcuts xterm keeps vs. the app).
 - [ ] Detect the real Windows build for `windowsPty` (Win11 native reflow instead
-      of the hardcoded heuristic build number).
-- [ ] Terminal tab reordering.
-- [ ] Runtime-test terminals on Win11 and Linux (real PTY there, not ConPTY).
-- [ ] Edge cases: WebGL context exhaustion at 16+ terminals; prune the ptys map on
-      shell exit; non-US-keyboard backtick for Ctrl+Shift+`.
+      of the hardcoded `buildNumber: 19045` in `useTerminal.ts`).
+- [ ] Runtime-test terminals on **Linux** (real PTY there, not ConPTY). Win11 is
+      covered by daily dev use on a Win11 machine since 2026-07-10.
+- [ ] Non-US-keyboard backtick for Ctrl+Shift+`.
 
 ### Connections / auth
 - [ ] Passphrase-protected keys (prompt for the passphrase; today: unencrypted or
       password only).
 - [ ] `known_hosts` verification (currently trust-on-first-use).
-- [ ] Chained `ProxyJump` (only the first hop is used).
+- [ ] Chained `ProxyJump` (only the first hop is used); IPv6 bastion specs
+      (`[::1]:22`) mis-parse in `parse_jump`.
+- [ ] Port forwards aren't torn down on disconnect — the listener task keeps
+      the `Connection` alive (and the local port bound) until stopped by hand.
 - [ ] Decide where password entry lives — centered modal vs. an inline field on
       the "Connect to a server" button.
 
@@ -132,8 +76,39 @@ under "Active roadmap."
 - [ ] Reconnect edges (v0.4.0): input typed during an outage is lost; unclean
       disconnect on window close; `reset_sftp` can block ~45 s on a hung op; host
       key not re-validated on restore.
-- [ ] Session restore: a password host's active tab isn't restored; no toast for
-      files that fail to reopen.
+- [ ] Session restore: no toast for files that fail to reopen. (A password
+      host's active tab IS restored — verified 2026-07-09; an earlier version
+      of this line said otherwise.)
+- [ ] Save-conflict detection is mtime-second-granular — an external write in
+      the same wall-clock second as the tab's last read/save is silently
+      overwritten (the write path has no content check).
+
+### Multi-remote (2+ attached remotes)
+- [ ] The transfer panes only pair with the **primary** remote (host pickers +
+      refresh token track `s.remote` = `remotes[0]`).
+- [ ] The SCM panel's "open a repository" host picker only offers the primary
+      remote.
+- [ ] The global `connState` / status indicator briefly mirrors a *secondary*
+      remote's connect progress onto the primary.
+
+### Minor code defects (2026-07-09 audit — low severity)
+- [ ] `vcs_file_at` / `vcs_file_base` load whole `git show` output into memory
+      (no size cap, unlike `fs_read_file`) — a diff on a huge committed file
+      spikes RAM.
+- [ ] `parse_jj_summary` byte-slices at index 1 — a non-ASCII-leading stdout
+      line would panic (unreachable with normal jj output; latent).
+- [ ] `initSettings` registers a `file-fs-change` listener it never unlistens —
+      a re-init (dev hot-reload / not-ready self-heal) stacks duplicates.
+- [ ] Local PTY child isn't reaped when the shell exits on its own (zombie on
+      Unix until close), and the `ptys`-map entry lingers until `pty_close` —
+      handles accumulate if the UI relies on shell exit alone.
+
+### UI polish
+- [ ] Roll the themed `Tip` tooltip (`components/Tooltip.tsx`, adopted in the
+      Source Control panel 2026-07-13) out to the rest of the app's `title=`
+      attributes — host bars, tab strips, terminal panel chips, status bar.
+      Note: disabled buttons fire no mouse events, so they show no tip —
+      decide per case whether that matters.
 
 ### Misc
 - [ ] Trim the Monaco bundle to a language subset (it currently ships every
@@ -159,20 +134,17 @@ under "Active roadmap."
       containers and opens exec shells.
 
 ### Docs
-- README rewritten through **0.8.4** (transfers, version control, finder, search,
-  port forwarding, the eager-repos guidance).
-- Working docs (session handoff, the Phase-3 manual test script, the post-Phase-3
-  rework plan) live in **`docs/dev/`, which is gitignored** — they're session
-  material, not design docs, so they stay out of the repo.
-- [`version-control.md`](version-control.md) still describes the *original* design —
-  two of its runner "must-haves" (binary PATH resolution, the ~2 concurrency cap)
-  were **deferred, not built**.
+- [ ] Update `handoff.md` (docs/dev — still describes v0.8.4). The README was
+      rewritten for 0.9.0 on 2026-07-13.
+- Working docs (session handoff, the manual test plan) live in **`docs/dev/`,
+  which is gitignored** — session material, not design docs. Design docs were
+  all verified/rewritten as-built 2026-07-13.
 
-### Cleanup (deferred — one full sweep after Phase 3)
-Rather than trimming piecemeal mid-feature, batch a single unused-code / dependency
-audit once Phase 3 lands.
-- `fuse.js` is now **used** (the Ctrl+P fuzzy finder) — no longer a candidate to drop.
-- [ ] Sweep for unused npm deps, Tauri commands, capability permissions, and dead
-      modules.
-- Already removed in 0.7.1 (were verified dead, so kept out): the unused
-  `tauri-plugin-dialog` + `tauri-plugin-fs` plugins and their capability grants.
+### Cleanup
+The full unused-code sweep ran twice — 0.8.7 (all commands invoked, dead
+exports removed) and the 2026-07-09 audit (npm deps: all used; Tauri commands:
+61/61 wired; no dead modules). One candidate remains:
+- [ ] Drop the 3 likely-unused window capability permissions
+      (`core:window:allow-maximize` / `allow-unmaximize` / `allow-is-maximized`
+      in `src-tauri/capabilities/default.json` — only `toggle-maximize` has a
+      caller); smoke-test the maximize button + drag-region double-click after.

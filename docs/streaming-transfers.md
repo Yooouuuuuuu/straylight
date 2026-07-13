@@ -80,9 +80,14 @@ cooperative cancellation, no forced task abort.
 
 ### Partial-file safety
 
-If a file fails or is cancelled mid-stream, the destination handle is dropped and
-the partial file is **best-effort deleted** (`dest.remove`), so we never leave a
-silently truncated copy.
+Each file streams to a temporary sibling (`<dest>.straypart`) and is **renamed
+over the destination only once fully written** (plain SFTP rename won't replace
+an existing target on most servers, so the commit falls back to remove + retry).
+On cancel or a mid-stream error the temp file is best-effort deleted — a
+pre-existing destination being overwritten is never touched, and no silently
+truncated copy is ever left. A failed final flush counts as an error, not a
+completed copy. (A hard crash can leave `.straypart` debris; a re-run of the
+same transfer overwrites it.)
 
 ## What we deliberately don't do (yet)
 

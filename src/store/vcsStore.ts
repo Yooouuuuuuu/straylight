@@ -472,6 +472,13 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
     const repo = get().repos.find((r) => r.connKey === connKey && r.root === root);
     const connId = repo?.connId;
     if (!repo || !connId) return;
+    // One remote op per repo — a second one would spuriously cancel the first.
+    if (repo.remoteBusy) {
+      useAppStore
+        .getState()
+        .pushNotice("info", `A ${repo.remoteBusy} is already running — cancel it first.`);
+      return;
+    }
     set((s) => ({
       repos: mapRepo(s.repos, connKey, root, (r) => ({ ...r, remoteBusy: op })),
     }));
@@ -570,6 +577,13 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
     const repo = get().repos.find((r) => r.connKey === connKey && r.root === root);
     const connId = repo?.connId;
     if (!repo || !connId) return;
+    // One remote op per repo — a second one would spuriously cancel the first.
+    if (repo.remoteBusy) {
+      useAppStore
+        .getState()
+        .pushNotice("info", `A ${repo.remoteBusy} is already running — cancel it first.`);
+      return;
+    }
     set((s) => ({
       repos: mapRepo(s.repos, connKey, root, (r) => ({ ...r, remoteBusy: "update" })),
     }));

@@ -345,7 +345,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       "icon-folder": "#ff4d6d", "icon-folder-open": "#ff8fb0", pin: "#ff00ff",
       border: "#4d1622", "border-focus": "#f30100",
       scrollbar: "#4d1622", "scrollbar-hover": "#6b1e2e",
-      success: "#5ce626", warning: "#ffb454", error: "#f30100", info: "#ff8fb0",
+      success: "#5ce626", warning: "#ffb454", error: "#f30100", info: "#5ce626",
       accent: "#af011c",
     },
     editor: {
@@ -378,7 +378,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       "icon-folder": "#f30100", "icon-folder-open": "#ff00ff", pin: "#ff00ff",
       border: "#2b0f14", "border-focus": "#f30100",
       scrollbar: "#331016", "scrollbar-hover": "#4d1620",
-      success: "#5ce626", warning: "#f30100", error: "#f30100", info: "#ff00ff",
+      success: "#5ce626", warning: "#f30100", error: "#f30100", info: "#5ce626",
       accent: "#af011c",
     },
     editor: {

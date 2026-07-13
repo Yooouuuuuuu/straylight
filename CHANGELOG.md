@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Planned
 
+- **Tip tooltip rollout** — convert all ~139 native `title=` tooltips to the
+  themed Tip component (texts reviewed surface by surface), then walk test
+  plan Part H.
 - **Revisit where password entry lives** — the current centered connect modal vs.
   an inline field (e.g. on the "Connect to a server" button).
 - **Auto-refresh** (optional): a filesystem watch for the local tree; SSH would
@@ -17,15 +20,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Auto-update** — deferred until installers are distributed (needs signing keys
   + hosted releases; the app currently runs from source).
 - **Containers, later:** file browsing inside containers, logs, start/stop.
-- **Transfer polish (later):** drag directly between the sidebar trees (folding
-  the three panel buttons into one), OS drag-in/out, and multi cut/copy/paste in
-  the explorer.
+- **Transfer polish (later):** drag directly between the sidebar trees, OS
+  drag-in/out, and multi cut/copy/paste in the explorer.
 - **Local draft backup of unsaved edits** — survive a connection drop / crash /
   accidental close by caching dirty buffers locally and restoring them on reopen
   (VS Code "hot exit"); doubles as a WSL/remote edit safeguard.
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
-- Terminal tab reordering.
+
+## [0.9.0] - 2026-07-13
+
+The 0.9 series is the pre-release test pass, run from source (see
+docs/release-plan.md): 0.9.0 = the 0.8.15 app + the 2026-07 audit fixes +
+the doc/README refresh + the first test-pass UX changes; further findings
+land as 0.9.x. Installers arrive at 0.10.
+
+### Added
+
+- **Branch menu: explicit ＋ create button** beside the new-branch/bookmark
+  box (Enter still works; disabled while empty).
+- **↑ Push on the branch line.** The branch line's buttons are now
+  **✎ ↑ ⇣ ⋯**: Push is one click (still confirms), shows the ahead count
+  ("↑2"), disables when there's nothing to push, and spins while pushing
+  (⇣ spins during a fetch, ⋯ during a rebase). The ⋯ menu now holds only
+  Stash & pop (git) / Rebase & squash (jj) and is named accordingly.
+- **Refresh all in the Source Control header** (⟳ beside +) — refreshes every
+  tracked repo on every host. The per-card refresh button is gone (a running
+  refresh still shows its spinner — click to stop waiting — and the card
+  stamp reads "updating…" instead of disappearing).
+- **Themed tooltips** (first adopted across the Source Control panel):
+  drawn above the button instead of at the OS pointer, so a large cursor
+  can't cover them, and they follow the app theme.
+
+### Changed
+
+- **Local repo cards show ◉ locked on** — local repos are file-watched, so
+  the live-updates toggle is now an always-on indicator there ("changes
+  appear by themselves"); it stays a real toggle on WSL/remote cards.
+
+- **Straylight themes: info toasts are green** (`#5ce626`, matching the
+  `success` slot) instead of pink-red — success messages no longer read as
+  errors. Dracula / Nord / Solarized keep their native cyan/blue info colors.
+
+### Fixed
+
+- **Cancelling a transfer that overwrites no longer deletes the destination.**
+  Files now stream to a temporary `.straypart` sibling and are renamed into
+  place only when fully written; cancel/error removes only the temp file. A
+  failed final flush now reports as an error instead of a completed copy.
+- **Concurrent remote VCS ops no longer cancel each other.** Fetch / push /
+  update on a repo while another is running is refused (UI toast + backend
+  guard) instead of spuriously cancelling the first op and breaking its
+  Cancel button.
+- **Settings live-reload survives closing a settings.json tab.** File watchers
+  are now refcounted per owner, so the open-tab watcher letting go no longer
+  tears down the watcher that applies hand-edits to settings.json/theme.json.
 
 ## [0.8.15] - 2026-07-09
 

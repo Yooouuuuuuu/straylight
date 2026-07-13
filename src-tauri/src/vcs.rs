@@ -603,13 +603,27 @@ async fn run_cancellable(
     argv: &[&str],
 ) -> Result<CmdOutput, String> {
     let key = format!("{conn_id}::{root}");
+    let token = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-    state.vcs_ops.lock().await.insert(key.clone(), tx);
+    {
+        // One remote op per repo: inserting over an existing slot would drop
+        // the first op's sender, which its select! reads as a cancellation.
+        let mut ops = state.vcs_ops.lock().await;
+        if ops.contains_key(&key) {
+            return Err("another remote operation is already running on this repository".into());
+        }
+        ops.insert(key.clone(), (token.clone(), tx));
+    }
     let result = tokio::select! {
         r = run_command(state, conn_id, root, argv) => r,
         _ = rx => Err("cancelled".to_string()),
     };
-    state.vcs_ops.lock().await.remove(&key);
+    // Clear only our own slot — a cancel may have freed it and a new op may
+    // have claimed the key while our select! was resolving.
+    let mut ops = state.vcs_ops.lock().await;
+    if ops.get(&key).is_some_and(|(t, _)| t == &token) {
+        ops.remove(&key);
+    }
     result
 }
 
@@ -620,7 +634,7 @@ pub async fn vcs_remote_cancel(
     conn_id: String,
     root: String,
 ) -> Result<(), String> {
-    if let Some(tx) = state
+    if let Some((_, tx)) = state
         .vcs_ops
         .lock()
         .await

@@ -660,9 +660,11 @@ fn transfer_entry<'a>(
     })
 }
 
-/// Stream one file from `src` to `dest`, updating `prog`. On cancellation or an
-/// error mid-stream, the partial destination file is best-effort deleted so we
-/// never leave a silently truncated copy.
+/// Stream one file from `src` to `dest`, updating `prog`. The bytes go to a
+/// temporary `.straypart` sibling first and are renamed over `dest_path` only
+/// once fully written — so a cancel or mid-stream error never destroys a
+/// pre-existing destination being overwritten, and never leaves a silently
+/// truncated copy (the temp file is best-effort deleted instead).
 async fn stream_file(
     src: &dyn FileTransport,
     src_path: &str,
@@ -671,8 +673,9 @@ async fn stream_file(
     name: &str,
     prog: &Progress,
 ) -> Result<(), String> {
+    let part_path = format!("{dest_path}.straypart");
     let mut reader = src.open_read(src_path).await?;
-    let mut writer = dest.open_write(dest_path).await?;
+    let mut writer = dest.open_write(&part_path).await?;
     let mut buf = vec![0u8; TRANSFER_CHUNK];
 
     let mut error: Option<String> = None;
@@ -699,14 +702,33 @@ async fn stream_file(
         prog.add_bytes(n as u64, name);
     }
 
+    // A failed final flush means bytes never landed — that's an error, not a
+    // completed copy.
     if completed {
-        writer.flush().await.ok();
+        if let Err(e) = writer.flush().await {
+            error = Some(format!("could not write {dest_path}: {e}"));
+            completed = false;
+        }
+    }
+
+    if completed {
         writer.shutdown().await.ok();
+        drop(writer);
+        // Commit: rename the temp file over the destination. Plain SFTP rename
+        // refuses to replace an existing target on most servers, so on failure
+        // remove the destination and retry once.
+        if dest.rename(&part_path, name).await.is_err() {
+            let _ = dest.remove(dest_path).await;
+            if let Err(e) = dest.rename(&part_path, name).await {
+                let _ = dest.remove(&part_path).await;
+                return Err(format!("could not finish {dest_path}: {e}"));
+            }
+        }
         prog.file_done(name);
         Ok(())
     } else {
         drop(writer);
-        let _ = dest.remove(dest_path).await;
+        let _ = dest.remove(&part_path).await;
         match error {
             Some(e) => Err(e),
             None => Ok(()), // cancelled — not an error

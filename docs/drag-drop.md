@@ -3,7 +3,12 @@
 Copy files and folders **between connections** — local ↔ remote, local ↔ WSL,
 WSL ↔ remote — through a simple two-pane panel.
 
-**Status:** Design agreed (2026-06-18). Building.
+**Status:** Shipped, then evolved. The original overlay (below) was built
+2026-06, streaming replaced the in-memory engine in 0.7.2
+([streaming-transfers.md](streaming-transfers.md)), and 0.8.15 **docked the
+two-pane copier as a "Transfers" tool group in the terminal panel** (the three
+explorer-header buttons and the popup are gone; each pane has a host picker
+that hides the other side's choice, left pane defaults to Local).
 **Depends on:** the `FileTransport` trait (local + SFTP) and the WSL connection
 (a WSL distro is just an SSH connection, so it's a transfer endpoint like any
 other).
@@ -17,16 +22,12 @@ already exists (`fs_copy` / `fs_move`); this adds the **cross-connection** case,
 which has no direct path and must be **relayed through the app** (read from the
 source transport, write to the destination transport).
 
-## UX (intentionally simple first cut)
+## UX (original first cut — since docked, see Status)
 
-A deliberately plain **two-pane transfer panel** — an in-app overlay, not a
-separate OS window (so it shares the store and can mirror the explorer). Three
-buttons in the **Explorer header** open it for a connection pair, each shown only
-when both sides are connected:
-
-- **Local ⇄ Remote**
-- **Local ⇄ WSL**
-- **WSL ⇄ Remote**
+A deliberately plain **two-pane transfer panel**. Originally an in-app overlay
+opened by three explorer-header buttons (Local ⇄ Remote / Local ⇄ WSL /
+WSL ⇄ Remote); now a **Transfers tool group in the terminal panel** with a
+host picker per pane.
 
 Left pane = one connection's tree, right pane = the other. **Copy only** — drag a
 file/folder from one pane onto a folder in the other, *or* select + copy/paste
@@ -42,35 +43,22 @@ UI. A nicer integrated affordance (and OS drag-in/out) comes later.
 
 ---
 
-## The transfer engine (backend)
+## The transfer engine (backend) — as shipped
 
-A new transport method pair carries raw bytes (the existing `read_file` /
-`write_file` are text-oriented and binary-sniffing, so they can't move arbitrary
-files):
+The engine is **streamed**, transport-to-transport: `fs_transfer_batch` relays
+each file through a 256 KB buffer from the source transport's `open_read` to
+the destination's `open_write` — no size cap, one shared progress total,
+cancellable, with each file committed via a temp-file rename so a cancel never
+destroys an overwritten destination. Full design:
+[streaming-transfers.md](streaming-transfers.md).
 
-- `read_bytes(path) -> Vec<u8>` and `write_bytes(path, &[u8])` on `FileTransport`
-  (SFTP via `open`/`create`; local via `tokio::fs`).
+Collision handling is unchanged from the original design: the frontend
+pre-checks the top-level name and prompts — **Keep both** → uniquify
+(`name copy`), **Overwrite** → write in place / merge into an existing dir,
+**Cancel** → never calls. Nested collisions overwrite/merge.
 
-A transport-agnostic command relays between two connections:
-
-```
-fs_transfer(srcConnId, srcPath, destConnId, destDir, renameOnConflict) -> newPath
-```
-
-- Resolves `destPath = destDir / basename(srcPath)`.
-- **File:** `dest.write_bytes(destPath, src.read_bytes(srcPath))`.
-- **Folder:** create `destPath`, list the source dir, recurse each child.
-- `renameOnConflict`: the frontend pre-checks the top-level name (via `fs_stat`)
-  and prompts; **Keep both** → uniquify (`name copy`), **Overwrite** → write in
-  place / merge into an existing dir, **Cancel** → never calls. Nested collisions
-  overwrite.
-
-### MVP limitation — whole-file in memory
-
-The first cut reads each file fully into memory before writing it, with a size cap
-(rejects very large files with a clear error). **Streaming** (chunked relay, no
-cap) is the first follow-up — it needs an `AsyncRead`/`AsyncWrite` abstraction
-across transports, which is fiddly with SFTP file lifetimes, so it's deferred.
+*(Historical: the first cut buffered whole files in memory behind a 512 MB
+cap via `read_bytes`/`write_bytes`; 0.7.2 deleted that.)*
 
 ---
 
@@ -90,9 +78,11 @@ across transports, which is fiddly with SFTP file lifetimes, so it's deferred.
 
 ## Future work
 
-- **Integrate into the sidebar** — drag directly between sidebar trees, collapsing
-  the three buttons into one affordance.
+- **Integrate into the sidebar** — drag directly between sidebar trees,
+  retiring the separate two-pane tool.
 - **OS integration** — drop Explorer files onto a tree (upload); drag a remote file
-  out to the desktop (download).
-- **Multi-select** transfers (today the app has single selection).
+  out to the desktop (download). (A one-off **Download** to the Windows
+  Downloads folder shipped in 0.8.15 via the context menu.)
+- Panes beyond the **primary** remote — with 2–3 remotes attached, the
+  transfer pane pair only offers the primary (known limitation).
 - A **WSL ↔ Windows** fast path via `wsl.exe` (same machine, skip the SSH relay).
