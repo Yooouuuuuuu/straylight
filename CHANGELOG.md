@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 
+## [0.9.2] - 2026-07-13
+
+### Changed
+
+- **New app icon set** — regenerated in every format (window/taskbar `.ico`,
+  macOS `.icns`, the MSIX Square/Store logos, and the in-app logo), now with
+  the vector source (`straylight-icon.svg`) committed alongside. The unused
+  `64x64.png` and the old raster `icon-source.png` were dropped.
+
 ## [0.9.1] - 2026-07-13
 
 The first 0.9.x batch out of the test pass (plan Parts A–B: git + jj).

@@ -1,0 +1,26 @@
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <clipPath id="tile"><rect x="0" y="0" width="1024" height="1024" rx="232"/></clipPath>
+    <clipPath id="frame"><rect x="36" y="36" width="952" height="952" rx="200"/></clipPath>
+    <filter id="neon" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="16"/></filter>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="#0C0D10"/>
+  <g clip-path="url(#tile)">
+    <g clip-path="url(#frame)">
+      <g filter="url(#neon)" opacity="0.65">
+        <polygon points="-10,243 668,532 -10,312" fill="#5CE626"/>
+        <polygon points="-10,513 668,532 -10,595" fill="#F30100"/>
+        <polygon points="-10,783 668,532 -10,878" fill="#FF00FF"/>
+        <polygon points="668,532 1097,56 1147,106" fill="#FFD91F"/>
+      </g>
+      <polygon points="-10,243 668,532 -10,312" fill="#5CE626"/>
+      <polygon points="-10,513 668,532 -10,595" fill="#F30100"/>
+      <polygon points="-10,783 668,532 -10,878" fill="#FF00FF"/>
+      <polygon points="668,532 1097,56 1147,106" fill="#FFD91F"/>
+    </g>
+    <!-- inner frame: yellow light-catch -->
+    <rect x="36" y="36" width="952" height="952" rx="200" fill="none" stroke="#FFD91F" stroke-width="3" opacity="0.35"/>
+    <!-- outer rim: crimson bezel -->
+    <rect x="5" y="5" width="1014" height="1014" rx="227" fill="none" stroke="#AF011C" stroke-width="7" opacity="0.75"/>
+  </g>
+</svg>
