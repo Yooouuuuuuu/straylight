@@ -4,6 +4,7 @@
  *  log as an editor tab AND closes this panel. */
 import { useAppStore } from "../../store/appStore";
 import { useVcsStore } from "../../store/vcsStore";
+import { hostColorForConnKey } from "../../lib/hostColors";
 import { IconClose, IconPanelToEditor } from "../icons";
 import { VcsLogView } from "./VcsLogView";
 
@@ -12,6 +13,7 @@ export function HistoryPanel() {
   const closeHistory = useVcsStore((s) => s.closeHistory);
   const repos = useVcsStore((s) => s.repos);
   const openLogTab = useAppStore((s) => s.openLogTab);
+  const hostColors = useAppStore((s) => s.hostColors);
 
   const repo =
     historyRepo != null
@@ -38,9 +40,10 @@ export function HistoryPanel() {
 
   return (
     <div className="history-panel">
+      {/* Row 1: which lens (live — follows the colocated badge toggle). */}
       <div className="history-panel__head">
-        <span className="history-panel__title" title={repo.root}>
-          {repo.label} — History
+        <span className="history-panel__title">
+          {repo.backend === "jj" ? "jj history" : "git history"}
         </span>
         <button
           className="icon-btn"
@@ -60,6 +63,14 @@ export function HistoryPanel() {
         <button className="icon-btn" title="Close" onClick={() => closeHistory()}>
           <IconClose />
         </button>
+      </div>
+      {/* Row 2: which repo, on which machine (host identity color). */}
+      <div
+        className="history-panel__repo"
+        title={repo.root}
+        style={{ borderLeftColor: hostColorForConnKey(hostColors, repo.connKey) }}
+      >
+        {repo.label}
       </div>
       <div className="history-panel__body">
         <VcsLogView connId={repo.connId} root={repo.root} backend={repo.backend} />

@@ -25,7 +25,7 @@ import { MonacoWrapper } from "../editor/MonacoWrapper";
 import { MonacoDiffWrapper } from "../editor/MonacoDiffWrapper";
 import { MergeEditor } from "../editor/MergeEditor";
 import { MarkdownPreview } from "../editor/MarkdownPreview";
-import { VcsLogView } from "../vcs/VcsLogView";
+import { VcsLogTabHead, VcsLogView } from "../vcs/VcsLogView";
 
 function EmptyState() {
   const busyPath = useAppStore((s) => s.busyPath);
@@ -231,11 +231,20 @@ function GroupPane({ gid, splitDrop }: { gid: number; splitDrop: boolean }) {
           ) : active?.kind === "preview" ? (
             <MarkdownPreview key={active.id} tab={active} />
           ) : active?.kind === "log" ? (
-            <VcsLogView
-              connId={active.connId}
-              root={active.path}
-              backend={active.vcsBackend ?? "git"}
-            />
+            <div className="vcs-logtab">
+              <VcsLogTabHead
+                connId={active.connId}
+                root={active.path}
+                backend={active.vcsBackend ?? "git"}
+              />
+              <div className="vcs-logtab__body">
+                <VcsLogView
+                  connId={active.connId}
+                  root={active.path}
+                  backend={active.vcsBackend ?? "git"}
+                />
+              </div>
+            </div>
           ) : active?.kind === "terminal" && active.terminalId ? (
             <TerminalTabHost terminalId={active.terminalId} />
           ) : active?.kind === "settings" ? (

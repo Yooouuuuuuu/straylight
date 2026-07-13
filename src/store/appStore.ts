@@ -1361,7 +1361,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
         id,
         connId: d.connId,
         path: d.root,
-        name: `${d.label} — History`,
+        // Just the repo name — the ⎇ glyph marks it as history, and the
+        // view's own head line says which lens (git/jj).
+        name: d.label,
         content: "",
         language: "plaintext",
         isBinary: false,

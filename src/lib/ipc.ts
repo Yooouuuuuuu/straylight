@@ -578,21 +578,6 @@ export function vcsUpdate(
   return invoke("vcs_update", { connId, root, backend, target });
 }
 
-/** jj: set a change's description. rev "@" = current WIP, "@-" = last commit. */
-export function vcsDescribe(
-  connId: string,
-  root: string,
-  rev: string,
-  message: string,
-): Promise<void> {
-  return invoke("vcs_describe", { connId, root, rev, message });
-}
-
-/** jj: fold working-copy changes into the last commit (keeps its message). */
-export function vcsSquash(connId: string, root: string): Promise<void> {
-  return invoke("vcs_squash", { connId, root });
-}
-
 /** Cancel the repo's in-flight remote op (fetch / push / update), if any. */
 export function vcsRemoteCancel(connId: string, root: string): Promise<void> {
   return invoke("vcs_remote_cancel", { connId, root });

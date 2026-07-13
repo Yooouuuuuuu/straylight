@@ -1754,6 +1754,54 @@
   color: var(--fg-secondary);
 }
 
+/* Row 2 of the history header: which repo, host-identity colored. */
+.history-panel__repo {
+  flex: 0 0 auto;
+  margin: var(--space-2) var(--space-3) var(--space-2);
+  padding: 2px var(--space-3);
+  border-left: 3px solid var(--border);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The pop-out editor log tab: a one-line head above the (absolute) log. */
+.vcs-logtab {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.vcs-logtab__head {
+  flex: 0 0 auto;
+  margin: var(--space-3) var(--space-4) var(--space-2);
+  padding: 2px var(--space-3);
+  border-left: 3px solid var(--border);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vcs-logtab__kind {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+}
+
+.vcs-logtab__body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .history-panel__body {
   position: relative;
   flex: 1 1 auto;

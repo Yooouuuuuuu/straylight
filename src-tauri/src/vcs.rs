@@ -645,9 +645,10 @@ pub async fn vcs_remote_cancel(
     Ok(())
 }
 
-/// Bring the local line up to date with the remote (run after a fetch): git
-/// merges `@{u}`; jj rebases the working-copy branch onto `<bookmark>@origin`.
-/// Mutates the working tree — the UI confirms first.
+/// Bring the local line up to date with the fetched upstream: git merges
+/// `@{u}` (the Incoming block's Merge action). Mutates the working tree — the
+/// UI confirms first. jj is view-first by design — its syncs are
+/// terminal-driven, so the jj arm refuses.
 #[tauri::command]
 pub async fn vcs_update(
     state: State<'_, AppState>,
@@ -659,8 +660,9 @@ pub async fn vcs_update(
     let lock = repo_guard(&state, &conn_id, &root).await;
     let _held = lock.lock().await;
     let out = if backend == "jj" {
-        let dest = format!("{target}@origin");
-        run_cancellable(&state, &conn_id, &root, &["jj", "rebase", "-d", &dest]).await?
+        return Err(format!(
+            "jj syncs are terminal-driven — run: jj rebase -d {target}@origin"
+        ));
     } else {
         run_cancellable(&state, &conn_id, &root, &["git", "merge", "--no-edit", "@{u}"]).await?
     };
@@ -671,43 +673,6 @@ pub async fn vcs_update(
         return Err(if msg.is_empty() { "update failed".into() } else { msg });
     }
     Ok(if msg.is_empty() { "Up to date.".into() } else { msg })
-}
-
-/// jj: set a change's description without finishing it. rev `@` names the
-/// current WIP change; `@-` rewrites the last commit's message.
-#[tauri::command]
-pub async fn vcs_describe(
-    state: State<'_, AppState>,
-    conn_id: String,
-    root: String,
-    rev: String,
-    message: String,
-) -> Result<(), String> {
-    let lock = repo_guard(&state, &conn_id, &root).await;
-    let _held = lock.lock().await;
-    let out = run_command(
-        &state,
-        &conn_id,
-        &root,
-        &["jj", "describe", "-r", &rev, "-m", &message],
-    )
-    .await?;
-    ok_or_stderr(out, "describe")
-}
-
-/// jj: fold the working copy's changes into the last commit — the equivalent of
-/// git stage-everything + `--amend --no-edit`. `-u` keeps the destination's
-/// message, so no editor can ever open on the no-TTY channel.
-#[tauri::command]
-pub async fn vcs_squash(
-    state: State<'_, AppState>,
-    conn_id: String,
-    root: String,
-) -> Result<(), String> {
-    let lock = repo_guard(&state, &conn_id, &root).await;
-    let _held = lock.lock().await;
-    let out = run_command(&state, &conn_id, &root, &["jj", "squash", "-u"]).await?;
-    ok_or_stderr(out, "squash")
 }
 
 /// Fetch / pull / push (jj: `jj git fetch` / `jj git push`; jj "pull" maps to

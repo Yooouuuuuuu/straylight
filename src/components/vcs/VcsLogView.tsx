@@ -16,8 +16,40 @@ import {
 } from "../../lib/ipc";
 import { openCommitDiff } from "../../lib/openDiff";
 import { vcsClass, vcsLetter } from "../../lib/vcsDecorations";
+import { basename } from "../../lib/format";
+import { hostColorForConnKey } from "../../lib/hostColors";
+import { useAppStore } from "../../store/appStore";
 import { useVcsStore } from "../../store/vcsStore";
 import { RelativeTime } from "../RelativeTime";
+
+/** One-line header for the pop-out editor tab (the sidebar panel has its own
+ *  two-row header): "GIT HISTORY · repo", host-colored. `backend` comes from
+ *  the tab (frozen at open) so the head always matches the tab's content. */
+export function VcsLogTabHead({
+  connId,
+  root,
+  backend,
+}: {
+  connId: string;
+  root: string;
+  backend: string;
+}) {
+  const repos = useVcsStore((s) => s.repos);
+  const hostColors = useAppStore((s) => s.hostColors);
+  const repo = repos.find((r) => r.connId === connId && r.root === root);
+  const color = repo
+    ? hostColorForConnKey(hostColors, repo.connKey)
+    : "var(--border)";
+  return (
+    <div className="vcs-logtab__head" title={root} style={{ borderLeftColor: color }}>
+      <span className="vcs-logtab__kind">
+        {backend === "jj" ? "jj history" : "git history"}
+      </span>
+      {" · "}
+      {repo?.label ?? basename(root)}
+    </div>
+  );
+}
 
 type FileState = VcsChange[] | "loading" | "error";
 

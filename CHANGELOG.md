@@ -28,6 +28,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 
+## [0.9.1] - 2026-07-13
+
+The first 0.9.x batch out of the test pass (plan Parts A–B: git + jj).
+
+### Added
+
+- **The history panel says which lens it is.** Two-row header: **GIT
+  HISTORY / JJ HISTORY** (live — follows the colocated badge toggle) over a
+  host-colored repo row (tooltip = full root). The ⧉ pop-out's tab title is
+  just "⎇ repo"; the lens shows in a one-line host-colored head inside the
+  view ("JJ HISTORY · repo").
+
+### Changed
+
+- **jj is now view-first** (decision from the 0.9 test pass): Straylight
+  visualizes jj — status, diffs, decorations, conflicts, live multi-lane
+  history — and jj *mutations* are terminal-driven (the watcher updates the
+  card/history as you type jj commands). The jj commit box (Commit /
+  Describe / Fix last msg), Squash, Rebase, and ↑ push are gone from jj
+  cards; what remains: **bookmark switch/create, ↩ discard, ⇣ fetch**. For
+  buttons, drive a colocated repo as **git** via the badge toggle. Backend:
+  `vcs_describe` / `vcs_squash` removed; `vcs_update`'s jj arm refuses with
+  a terminal hint.
+
+### Fixed
+
+- **jj bookmarks were unclickable when they sat on `@` or `@-`.** "Current"
+  detection marks the *nearest* bookmark, and the branch menu disabled
+  current items — a git-ism (`git switch <current>` is a no-op) that could
+  lock **every** bookmark (test plan B-I.5). jj items are never disabled now:
+  `jj new <bookmark>` is always a valid move; the ● marking stays.
+
 ## [0.9.0] - 2026-07-13
 
 The 0.9 series is the pre-release test pass, run from source (see

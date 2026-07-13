@@ -148,15 +148,11 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   const requestDiscard = useVcsStore((s) => s.requestDiscard);
   const amend = useVcsStore((s) => s.amend);
   const stash = useVcsStore((s) => s.stash);
-  const updateFromRemote = useVcsStore((s) => s.updateFromRemote);
-  const describe = useVcsStore((s) => s.describe);
-  const squash = useVcsStore((s) => s.squash);
   const toggleCommitOpen = useVcsStore((s) => s.toggleCommitOpen);
   const askConfirm = useVcsStore((s) => s.askConfirm);
   const [message, setMessage] = useState("");
   const [committing, setCommitting] = useState(false);
   const [amendMode, setAmendMode] = useState(false);
-  const [describeMode, setDescribeMode] = useState<"@" | "@-" | null>(null);
   const [branchOpen, setBranchOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   // Frame color = whose machine this repo lives on (host identity, not per-repo).
@@ -174,32 +170,25 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   const unstaged = changes.filter((c) => !c.staged && c.kind !== "conflicted");
   const jjChanges = changes.filter((c) => c.kind !== "conflicted");
 
-  const commitBoxOpen = !inactive && !!st && !!repo.uiCommitOpen;
+  // The commit box is git-only: jj mutations are terminal-driven by design
+  // (jj is visualized, not wrapped — drive a colocated repo as git for
+  // buttons). See docs/version-control.md.
+  const commitBoxOpen = !inactive && !!st && isGit && !!repo.uiCommitOpen;
   const canCommit =
     !inactive &&
-    (isGit
-      ? amendMode
-        ? message.trim().length > 0 || staged.length > 0
-        : message.trim().length > 0 && staged.length > 0
-      : describeMode !== null
-        ? message.trim().length > 0
-        : message.trim().length > 0 && jjChanges.length > 0);
+    (amendMode
+      ? message.trim().length > 0 || staged.length > 0
+      : message.trim().length > 0 && staged.length > 0);
 
   const exitModes = () => {
     setAmendMode(false);
-    setDescribeMode(null);
   };
 
   const runCommit = async () => {
     setCommitting(true);
-    let ok: boolean;
-    if (isGit && amendMode) {
-      ok = await amend(repo.connKey, repo.root, message.trim());
-    } else if (!isGit && describeMode !== null) {
-      ok = await describe(repo.connKey, repo.root, describeMode, message.trim());
-    } else {
-      ok = await commit(repo.connKey, repo.root, message.trim());
-    }
+    const ok = amendMode
+      ? await amend(repo.connKey, repo.root, message.trim())
+      : await commit(repo.connKey, repo.root, message.trim());
     setCommitting(false);
     if (ok) {
       setMessage("");
@@ -209,7 +198,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
 
   const doCommit = () => {
     // Amending a commit that's already upstream rewrites published history.
-    if (isGit && amendMode && st?.ahead === 0) {
+    if (amendMode && st?.ahead === 0) {
       askConfirm(
         "Amend a pushed commit?",
         "The last commit is already on the remote — amending rewrites published history.",
@@ -383,49 +372,49 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
             )}
             <span className="repo-card__count">{summarize(repo)}</span>
             <span className="repo-card__meta-btns">
-              <Tip label="Commit / amend">
-                <button
-                  className={`icon-btn ${commitBoxOpen ? "icon-btn--active" : ""}`}
-                  onClick={() => {
-                    if (commitBoxOpen) exitModes();
-                    toggleCommitOpen(repo.connKey, repo.root);
-                  }}
-                >
-                  ✎
-                </button>
-              </Tip>
-              <Tip
-                label={
-                  isGit
-                    ? st.ahead
+              {isGit && (
+                <Tip label="Commit / amend">
+                  <button
+                    className={`icon-btn ${commitBoxOpen ? "icon-btn--active" : ""}`}
+                    onClick={() => {
+                      if (commitBoxOpen) exitModes();
+                      toggleCommitOpen(repo.connKey, repo.root);
+                    }}
+                  >
+                    ✎
+                  </button>
+                </Tip>
+              )}
+              {isGit && (
+                <Tip
+                  label={
+                    st.ahead
                       ? `Push ${st.ahead} commit${st.ahead === 1 ? "" : "s"}`
                       : "Push"
-                    : "Push bookmarks (jj git push)"
-                }
-              >
-                <button
-                  className="icon-btn"
-                  disabled={st.ahead === 0}
-                  onClick={() =>
-                    askConfirm(
-                      "Push to the remote?",
-                      isGit
-                        ? `Push ${st.ahead ? `${st.ahead} commit${st.ahead === 1 ? "" : "s"}` : "your commits"} upstream?`
-                        : "Push bookmarks to the remote (jj git push)?",
-                      () => void remoteOp(repo.connKey, repo.root, "push"),
-                      "vcs-push",
-                    )
                   }
                 >
-                  {repo.remoteBusy === "push" ? (
-                    <span className="spinner spinner--sm" />
-                  ) : st.ahead ? (
-                    `↑${st.ahead}`
-                  ) : (
-                    "↑"
-                  )}
-                </button>
-              </Tip>
+                  <button
+                    className="icon-btn"
+                    disabled={st.ahead === 0}
+                    onClick={() =>
+                      askConfirm(
+                        "Push to the remote?",
+                        `Push ${st.ahead ? `${st.ahead} commit${st.ahead === 1 ? "" : "s"}` : "your commits"} upstream?`,
+                        () => void remoteOp(repo.connKey, repo.root, "push"),
+                        "vcs-push",
+                      )
+                    }
+                  >
+                    {repo.remoteBusy === "push" ? (
+                      <span className="spinner spinner--sm" />
+                    ) : st.ahead ? (
+                      `↑${st.ahead}`
+                    ) : (
+                      "↑"
+                    )}
+                  </button>
+                </Tip>
+              )}
               <Tip label="Fetch & review incoming commits">
                 <button
                   className="icon-btn"
@@ -443,21 +432,23 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                   )}
                 </button>
               </Tip>
-              <Tip label={isGit ? "Stash & pop" : "Rebase & squash"}>
-                <button
-                  className={`icon-btn ${actionsOpen ? "icon-btn--active" : ""}`}
-                  onClick={() => {
-                    setBranchOpen(false);
-                    setActionsOpen((o) => !o);
-                  }}
-                >
-                  {repo.remoteBusy === "update" ? (
-                    <span className="spinner spinner--sm" />
-                  ) : (
-                    "⋯"
-                  )}
-                </button>
-              </Tip>
+              {isGit && (
+                <Tip label="Stash & pop">
+                  <button
+                    className={`icon-btn ${actionsOpen ? "icon-btn--active" : ""}`}
+                    onClick={() => {
+                      setBranchOpen(false);
+                      setActionsOpen((o) => !o);
+                    }}
+                  >
+                    {repo.remoteBusy === "update" ? (
+                      <span className="spinner spinner--sm" />
+                    ) : (
+                      "⋯"
+                    )}
+                  </button>
+                </Tip>
+              )}
             </span>
           </>
         ) : (
@@ -469,69 +460,32 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
         <BranchMenu repo={repo} onClose={() => setBranchOpen(false)} />
       )}
 
-      {actionsOpen && !inactive && st && (
+      {actionsOpen && !inactive && st && isGit && (
         <div className="action-menu">
-          {!isGit && !!st.ref && (
-            <button
-              className="action-menu__item"
-              onClick={() => {
-                setActionsOpen(false);
-                askConfirm(
-                  "Rebase onto the remote?",
-                  `Rebase your work onto ${st.ref}@origin? This rewrites the local commits' parents.`,
-                  () => void updateFromRemote(repo.connKey, repo.root),
-                  "vcs-update",
-                );
-              }}
-            >
-              Rebase <span className="action-menu__hint">onto {st.ref}@origin</span>
-            </button>
-          )}
-          {isGit && (
-            <button
-              className="action-menu__item"
-              disabled={changes.length === 0}
-              onClick={() => {
-                setActionsOpen(false);
-                void stash(repo.connKey, repo.root, "push", "");
-              }}
-            >
-              Stash <span className="action-menu__hint">set changes aside</span>
-            </button>
-          )}
-          {isGit && (
-            <button
-              className="action-menu__item"
-              onClick={() => {
-                setActionsOpen(false);
-                askConfirm(
-                  "Pop the latest stash?",
-                  "Apply the most recent stash to your working tree? Conflicts are possible.",
-                  () => void stash(repo.connKey, repo.root, "pop", ""),
-                  "vcs-stash-pop",
-                );
-              }}
-            >
-              Pop stash
-            </button>
-          )}
-          {!isGit && (
-            <button
-              className="action-menu__item"
-              disabled={jjChanges.length === 0}
-              onClick={() => {
-                setActionsOpen(false);
-                askConfirm(
-                  "Squash into the last commit?",
-                  "Fold all working-copy changes into the last commit? Its message is kept.",
-                  () => void squash(repo.connKey, repo.root),
-                  "vcs-squash",
-                );
-              }}
-            >
-              Squash <span className="action-menu__hint">fold changes into last</span>
-            </button>
-          )}
+          <button
+            className="action-menu__item"
+            disabled={changes.length === 0}
+            onClick={() => {
+              setActionsOpen(false);
+              void stash(repo.connKey, repo.root, "push", "");
+            }}
+          >
+            Stash <span className="action-menu__hint">set changes aside</span>
+          </button>
+          <button
+            className="action-menu__item"
+            onClick={() => {
+              setActionsOpen(false);
+              askConfirm(
+                "Pop the latest stash?",
+                "Apply the most recent stash to your working tree? Conflicts are possible.",
+                () => void stash(repo.connKey, repo.root, "pop", ""),
+                "vcs-stash-pop",
+              );
+            }}
+          >
+            Pop stash
+          </button>
         </div>
       )}
 
@@ -555,60 +509,27 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
       {commitBoxOpen && (
         <div className="repo-card__commit">
           <div className="repo-card__mode-switch">
-            {isGit ? (
-              <>
-                <button
-                  className={`repo-card__mode-btn ${!amendMode ? "repo-card__mode-btn--active" : ""}`}
-                  onClick={() => setAmendMode(false)}
-                >
-                  Commit
-                </button>
-                <button
-                  className={`repo-card__mode-btn ${amendMode ? "repo-card__mode-btn--active" : ""}`}
-                  title="Amend the last commit (message and/or staged changes)"
-                  onClick={() => setAmendMode(true)}
-                >
-                  Amend
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  className={`repo-card__mode-btn ${describeMode === null ? "repo-card__mode-btn--active" : ""}`}
-                  onClick={() => setDescribeMode(null)}
-                >
-                  Commit
-                </button>
-                <button
-                  className={`repo-card__mode-btn ${describeMode === "@" ? "repo-card__mode-btn--active" : ""}`}
-                  title="Set the current change's message without committing"
-                  onClick={() => setDescribeMode("@")}
-                >
-                  Describe
-                </button>
-                <button
-                  className={`repo-card__mode-btn ${describeMode === "@-" ? "repo-card__mode-btn--active" : ""}`}
-                  title="Rewrite the last commit's message"
-                  onClick={() => setDescribeMode("@-")}
-                >
-                  Fix last msg
-                </button>
-              </>
-            )}
+            <button
+              className={`repo-card__mode-btn ${!amendMode ? "repo-card__mode-btn--active" : ""}`}
+              onClick={() => setAmendMode(false)}
+            >
+              Commit
+            </button>
+            <button
+              className={`repo-card__mode-btn ${amendMode ? "repo-card__mode-btn--active" : ""}`}
+              title="Amend the last commit (message and/or staged changes)"
+              onClick={() => setAmendMode(true)}
+            >
+              Amend
+            </button>
           </div>
           <textarea
             className="repo-card__msg input--mono"
             rows={2}
             placeholder={
-              isGit
-                ? amendMode
-                  ? "New message (leave empty to keep the current one)"
-                  : "Commit message (staged changes)"
-                : describeMode === "@-"
-                  ? "New message for the last commit"
-                  : describeMode === "@"
-                    ? "Message for the current change (no commit)"
-                    : "Describe & commit this change"
+              amendMode
+                ? "New message (leave empty to keep the current one)"
+                : "Commit message (staged changes)"
             }
             value={message}
             onChange={(e) => setMessage(e.target.value)}
@@ -618,22 +539,10 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
             disabled={!canCommit || committing}
             onClick={doCommit}
             title={
-              isGit && !amendMode && staged.length === 0
-                ? "Stage changes first"
-                : "Commit"
+              !amendMode && staged.length === 0 ? "Stage changes first" : "Commit"
             }
           >
-            {committing
-              ? "Working…"
-              : isGit
-                ? amendMode
-                  ? "Amend"
-                  : "Commit"
-                : describeMode === "@-"
-                  ? "Update message"
-                  : describeMode === "@"
-                    ? "Describe"
-                    : "Commit"}
+            {committing ? "Working…" : amendMode ? "Amend" : "Commit"}
           </button>
         </div>
       )}
@@ -830,7 +739,10 @@ function BranchMenu({
                 <button
                   key={b.name}
                   className={`branch-menu__item ${b.current ? "branch-menu__item--current" : ""}`}
-                  disabled={b.current}
+                  // git: switching to the current branch is a no-op — disable.
+                  // jj: "current" is the NEAREST bookmark (@ or @-), and
+                  // `jj new <bookmark>` is always a valid move — never disable.
+                  disabled={!isJj && b.current}
                   onClick={() => {
                     void switchBranch(repo.connKey, repo.root, b.name);
                     onClose();

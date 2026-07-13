@@ -13,12 +13,10 @@ import {
   vcsAmend,
   vcsCommit,
   vcsCreateBranch,
-  vcsDescribe,
   vcsDiscard,
   vcsOpen,
   vcsRemote,
   vcsRemoteCancel,
-  vcsSquash,
   vcsStage,
   vcsStash,
   vcsStatus,
@@ -112,12 +110,8 @@ interface VcsState {
   createBranch: (connKey: string, root: string, name: string) => Promise<void>;
   amend: (connKey: string, root: string, message: string) => Promise<boolean>;
   stash: (connKey: string, root: string, op: "push" | "pop" | "drop", message: string) => Promise<void>;
-  /** Merge (git) / rebase (jj) onto the fetched remote. Confirmed by the UI. */
+  /** Merge onto the fetched upstream (git; the Incoming block's action). */
   updateFromRemote: (connKey: string, root: string) => Promise<void>;
-  /** jj: describe a change. rev "@" = current WIP, "@-" = last commit message. */
-  describe: (connKey: string, root: string, rev: string, message: string) => Promise<boolean>;
-  /** jj: fold working-copy changes into the last commit. */
-  squash: (connKey: string, root: string) => Promise<void>;
   toggleCommitOpen: (connKey: string, root: string) => void;
   /** Reorder cards: move the repo with id `fromId` to `toId`'s position. Ids
    *  are `${connKey}::${root}` (the card drag payload). */
@@ -602,36 +596,6 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       set((s) => ({
         repos: mapRepo(s.repos, connKey, root, (r) => ({ ...r, remoteBusy: null })),
       }));
-    }
-    await get().refreshRepo(connKey, root);
-  },
-
-  describe: async (connKey, root, rev, message) => {
-    const repo = get().repos.find((r) => r.connKey === connKey && r.root === root);
-    const connId = repo?.connId;
-    if (!repo || !connId) return false;
-    try {
-      await vcsDescribe(connId, root, rev, message);
-    } catch (e) {
-      useAppStore.getState().pushNotice("error", `Describe failed: ${String(e)}`);
-      return false;
-    }
-    useAppStore
-      .getState()
-      .pushNotice("info", rev === "@-" ? "Last commit message updated." : "Description saved.");
-    await get().refreshRepo(connKey, root);
-    return true;
-  },
-
-  squash: async (connKey, root) => {
-    const repo = get().repos.find((r) => r.connKey === connKey && r.root === root);
-    const connId = repo?.connId;
-    if (!repo || !connId) return;
-    try {
-      await vcsSquash(connId, root);
-      useAppStore.getState().pushNotice("info", "Squashed into the last commit.");
-    } catch (e) {
-      useAppStore.getState().pushNotice("error", `Squash failed: ${String(e)}`);
     }
     await get().refreshRepo(connKey, root);
   },

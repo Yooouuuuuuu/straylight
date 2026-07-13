@@ -17,7 +17,14 @@ completed backlog items get an *(ex-backlog)* tag in the manual test plan
 ## Non-priority backlog
 
 ### Version control (Phase 3, later)
-- [ ] **Blame**, **per-hunk staging**.
+- [ ] **git worktree / jj workspace support** (future work — space reserved):
+      multiple working directories per repo. Design notes 2026-07-13: each jj
+      workspace has its own `@`, so per-workspace cards already work by
+      pinning the folder; the future work is sibling-awareness (shared
+      history/bookmarks, one card + workspace switcher). The card's ⋯ menu is
+      the reserved overflow for workspace ops (git: joins Stash/Pop; jj: the
+      menu returns when these land); don't bake "one root = one repo" deeper.
+- [ ] **Blame**, **per-hunk staging** (git).
 - [ ] True askpass-style prompting for remote-op auth (today: no-TTY hang with
       a Cancel escape; use the terminal for interactive auth).
 - [ ] Global ~2 concurrency cap on VCS status calls (designed, never built —

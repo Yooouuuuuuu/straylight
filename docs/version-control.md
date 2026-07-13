@@ -112,12 +112,10 @@ there is no staging and no "untracked".
   `jj --color never bookmark list -T 'name ++ "|" ++ normal_target.change_id().short() ++ "\n"'`
 - Diff old side: `jj --color never file show -r '@-' <path>`; an added file
   errors `No such path` → empty old side; renames show the old path.
-- Commit model (no staging): commit box modes map to `jj commit -m` (Commit),
-  `jj describe -m` (Describe — message on the WIP change), `jj describe -r @-
-  -m` (Fix last message), `jj squash -u` (fold working copy into the last
-  commit — the stage+amend equivalent). Conflicts: `jj resolve --list`.
-- Remote: `jj git fetch` / `jj rebase -d <bookmark>@origin` (Update) /
-  `jj git push`.
+- Commit model (no staging): **mutations are terminal-driven by design** (see
+  "jj is view-first" below) — the app itself only runs read commands plus
+  `jj new <bookmark>` (switch), `jj bookmark create`, `jj restore` (discard),
+  and `jj git fetch`. Conflicts: `jj resolve --list`.
 - **Side effect:** `jj status`/`diff` snapshot the working copy — by design. A
   jj-driven colocated repo gets **only jj commands**, never git mutations
   (avoids `jj git import` desync).
@@ -138,20 +136,35 @@ there is no staging and no "untracked".
 - History re-fetches whenever its repo's status refreshes — one refresh
   policy for everything.
 
+## jj is view-first (decision 2026-07-13)
+
+Wrapping jj's verbs in buttons just re-invents git's UI on top of a tool
+whose whole point is a different model — and anyone choosing jj knows its
+commands. So **Straylight visualizes jj and stays out of its way**: full
+status / diffs / decorations / conflicts / multi-lane history, live-updated
+by the watcher while you drive jj from the integrated terminal. The only
+write controls on a jj card are **bookmark switch/create**, **↩ discard**,
+and **⇣ fetch** (it feeds the history view). No commit box, no push, no ⋯
+menu for jj — for buttons, flip a colocated repo to **git** with the badge
+toggle. (`vcs_describe` / `vcs_squash` were removed with this decision; the
+jj arm of `vcs_update` refuses with a hint.)
+
 ## UI (as shipped)
 
 - **Tree decorations**: colored letter badges (M/A/D/R/U), folder roll-up,
   ignored files/dirs dimmed (git; jj repos don't dim — no cheap ignored-list
   without touching git in a colocated repo).
 - **Repo cards** (right-side Source Control column): header `⎇ history ·
-  ◉ live-update · ⟳ refresh · × unpin (confirms)`; the branch line carries
-  **✎** (commit box under it — modes `Commit | Amend`, jj `Commit | Describe |
-  Fix last msg`; Amend enables on message OR staged changes) and **⋯**
-  (dropdown: git `Push · Stash · Pop`; jj `Rebase · Push · Squash`). Cards
-  drag-reorder and carry the **owning host's color** as a frame.
-- **Confirmation tiers**: Fetch never confirms; Update/Rebase/Pop confirm
-  (they mutate the tree); Push confirms; Amend/Squash confirm only when the
-  last commit is already pushed. Every confirm is silenceable (`confirms` in
+  ◉ live-update (locked on for local — file-watched) · × unpin (confirms)`;
+  a header ⟳ in the panel refreshes all repos. The git branch line carries
+  **✎ ↑ ⇣ ⋯** — ✎ commit box (modes `Commit | Amend`; Amend enables on
+  message OR staged changes), **↑ push** (shows the ahead count, confirms),
+  **⇣ fetch & review**, **⋯** `Stash · Pop`. A jj branch line carries **⇣**
+  only (view-first). Cards drag-reorder and carry the **owning host's
+  color** as a frame.
+- **Confirmation tiers**: Fetch never confirms; Update (merge) / Pop confirm
+  (they mutate the tree); Push confirms; Amend confirms only when the last
+  commit is already pushed. Every confirm is silenceable (`confirms` in
   settings.json).
 - **History**: ⎇ opens a full-column panel over the explorer (× restores);
   multi-lane SVG graph (all local branches, lanes capped at 10), click a
@@ -161,12 +174,11 @@ there is no staging and no "untracked".
   with an **Incoming block** (per-branch fetched commits, git) offering
   **Merge / Dismiss**; the branch menu lists `origin/*` — click checks out
   (DWIM tracking branch). Push/fetch run cancellably (see runner).
-- **Conflicts**: a red ⚠ group; open the file → marker highlights with Accept
-  Current/Incoming/Both lenses; ⚔ opens the **3-way merge editor** (read-only
-  Current | Incoming, editable Result seeded with markers, accept-alls,
-  **Complete merge** = save + stage + close). Git-marker conflicts only; jj's
-  own format stays hand-edit. After a conflicted stash-pop: **Drop stash**
-  offered.
+- **Conflicts**: a red ⚠ group (both backends); git-marker files get Accept
+  Current/Incoming/Both lenses and the **⚔ 3-way merge editor** (read-only
+  Current | Incoming, editable Result, accept-alls, **Complete merge** =
+  save + stage + close); jj's own marker format is hand-edit — it auto-clears
+  on the next snapshot. After a conflicted stash-pop: **Drop stash** offered.
 - **Status bar**: a contextual `⑂ branch` hint for the focused file's repo.
 
 ## Still deferred

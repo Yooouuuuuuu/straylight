@@ -168,8 +168,6 @@ pub fn run() {
             vcs::vcs_amend,
             vcs::vcs_stash,
             vcs::vcs_update,
-            vcs::vcs_describe,
-            vcs::vcs_squash,
             vcs::vcs_remote_cancel,
             watch::vcs_watch,
             watch::vcs_unwatch,
