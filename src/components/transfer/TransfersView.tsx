@@ -24,8 +24,7 @@ let remembered: { left: string | null; right: string | null } = {
 export function TransfersView() {
   const localConnId = useAppStore((s) => s.localConnId);
   const pinnedFolders = useAppStore((s) => s.pinnedFolders);
-  const wsl = useAppStore((s) => s.wsl);
-  const wslPins = useAppStore((s) => s.wslPins);
+  const wsls = useAppStore((s) => s.wsls);
   const remotes = useAppStore((s) => s.remotes);
   const hostColors = useAppStore((s) => s.hostColors);
   const pushNotice = useAppStore((s) => s.pushNotice);
@@ -35,12 +34,12 @@ export function TransfersView() {
   const conns: TransferConn[] = [];
   if (localConnId)
     conns.push({ connId: localConnId, roots: pinnedFolders, label: "Local", color: SECTION_LOCAL });
-  if (wsl)
+  for (const w of wsls)
     conns.push({
-      connId: wsl.connId,
-      roots: wslPins,
-      label: wsl.name,
-      color: hostColors[`wsl:${wsl.name}`] ?? SECTION_WSL,
+      connId: w.conn.connId,
+      roots: w.pins,
+      label: w.conn.name,
+      color: hostColors[`wsl:${w.conn.name}`] ?? SECTION_WSL,
     });
   for (const r of remotes)
     conns.push({

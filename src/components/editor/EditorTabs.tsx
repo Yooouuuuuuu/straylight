@@ -24,7 +24,7 @@ export function EditorTabs({ groupId }: { groupId: number }) {
   // Subscribed so tab markers re-render when hosts/colors change.
   useAppStore((s) => s.hostColors);
   useAppStore((s) => s.remotes);
-  useAppStore((s) => s.wsl?.connId);
+  useAppStore((s) => s.wsls);
   /** Tab currently hovered by a tab drag (insertion indicator). */
   const [dropTarget, setDropTarget] = useState<string | null>(null);
 

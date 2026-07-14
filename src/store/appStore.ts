@@ -57,6 +57,9 @@ export interface EditorTab {
   size: number;
   modified: number;
   truncated: boolean;
+  /** The file wasn't valid UTF-8 and was decoded with replacement characters —
+   *  saving is blocked (it would write the damage back over the original). */
+  lossy?: boolean;
   lineEnding: "LF" | "CRLF";
   dirty: boolean;
   cursor: CursorPosition;
@@ -278,6 +281,26 @@ function remoteMirror(remotes: RemoteWorkspace[]) {
   };
 }
 
+// ---- multi-WSL (1 local + 3 WSL + 3 remotes) --------------------------------
+
+export const MAX_WSLS = 3;
+
+/** Legacy single-WSL fields, mirrored from the first distro (same pattern as
+ *  the remote mirror) so primary-only surfaces keep working unchanged. */
+function wslMirror(wsls: RemoteWorkspace[]) {
+  const p = wsls[0] ?? null;
+  return {
+    wsls,
+    wsl: p?.conn ?? null,
+    wslState: p?.state ?? ("disconnected" as ConnectionState),
+    wslRootPath: p?.rootPath ?? null,
+    wslPins: p?.pins ?? [],
+    showHiddenWsl: p?.showHidden ?? false,
+    refreshTokenWsl: p?.refreshToken ?? 0,
+    lastRefreshWsl: p?.lastRefresh ?? null,
+  };
+}
+
 // Host identity colors, keyed by `user@host:port` (remote hosts only — Local
 // and WSL use their section colors). Persisted so prod stays "its" color.
 const HOST_COLORS_KEY = "straylight.hostColors";
@@ -345,10 +368,16 @@ interface AppState {
   /** Working dirs shown for the remote (seeded with home on connect). Session-
    *  only — reset on disconnect, since the connection itself isn't persisted. */
   remotePins: string[];
-  /** WSL distro connection — its own slot (an SSH connection to localhost). */
+  /** All attached WSL distros (≤ MAX_WSLS), each an SSH link to localhost
+   *  with its own host bar; `wsl` etc. mirror the first. */
+  wsls: RemoteWorkspace[];
+  addWsl: (conn: RemoteConnection, rootPath: string) => void;
+  removeWsl: (connId: string) => void;
+  setWslConnState: (connId: string, state: ConnectionState) => void;
+  /** Primary (first) distro — mirror of wsls[0] for primary-only surfaces. */
   wsl: RemoteConnection | null;
+  wslState: ConnectionState;
   wslRootPath: string | null;
-  /** Working dirs shown for the WSL distro (seeded with home on connect). */
   wslPins: string[];
   connState: ConnectionState;
   connMessage: string | null;
@@ -441,10 +470,8 @@ interface AppState {
   setRemoteState: (connId: string, state: ConnectionState, message?: string | null) => void;
   addRemotePin: (connId: string, path: string) => void;
   removeRemotePin: (connId: string, path: string) => void;
-  setWsl: (wsl: RemoteConnection, rootPath: string) => void;
-  clearWsl: () => void;
-  addWslPin: (path: string) => void;
-  removeWslPin: (path: string) => void;
+  addWslPin: (connId: string, path: string) => void;
+  removeWslPin: (connId: string, path: string) => void;
   setConnState: (state: ConnectionState, message?: string | null) => void;
 
   setDialogOpen: (open: boolean) => void;
@@ -463,14 +490,15 @@ interface AppState {
   setNewTerminalTarget: (target: TerminalTargetPref) => void;
   toggleHiddenLocal: () => void;
   toggleHiddenRemote: (connId: string) => void;
-  toggleHiddenWsl: () => void;
+  toggleHiddenWsl: (connId: string) => void;
   /** Set (or null = reset to the auto ramp) a remote host's identity color. */
   setHostColor: (hostKey: string, color: string | null) => void;
   toggleSection: (which: keyof SectionVisibility) => void;
   refreshLocal: () => void;
   /** Refresh one remote's trees, or all remotes when no id is given. */
   refreshRemote: (connId?: string) => void;
-  refreshWsl: () => void;
+  /** Refresh one distro's trees, or all distros when no id is given. */
+  refreshWsl: (connId?: string) => void;
   /** Refresh whichever section owns this connection (used after file ops). */
   refreshConn: (connId: string) => void;
   /** Stamp a section's "last refreshed" time once its tree has actually loaded. */
@@ -606,6 +634,7 @@ interface AppState {
       modified: number;
       encoding: string;
       truncated: boolean;
+      lossy: boolean;
     },
   ) => void;
   setTabCursor: (id: string, cursor: CursorPosition) => void;
@@ -664,7 +693,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
   remote: null,
   remoteRootPath: null,
   remotePins: [],
+  wsls: [],
   wsl: null,
+  wslState: "disconnected",
   wslRootPath: null,
   wslPins: [],
   connState: "disconnected",
@@ -816,45 +847,71 @@ export const useAppStore = create<AppState>()((set, get) => ({
       );
     }),
 
-  setWsl: (wsl, rootPath) =>
-    set({
-      wsl,
-      wslRootPath: rootPath,
-      wslPins: loadConnPins(WSL_PINS_KEY, wsl.name) ?? [rootPath],
-    }),
-  clearWsl: () =>
+  addWsl: (conn, rootPath) =>
     set((s) => {
-      const id = s.wsl?.connId;
-      const tabs = id ? s.tabs.filter((t) => t.connId !== id) : s.tabs;
-      const activeTabId = tabs.some((t) => t.id === s.activeTabId)
-        ? s.activeTabId
-        : (tabs[tabs.length - 1]?.id ?? null);
-      const terminals = id ? s.terminals.filter((t) => t.connId !== id) : s.terminals;
+      const fresh: RemoteWorkspace = {
+        conn,
+        rootPath,
+        pins: loadConnPins(WSL_PINS_KEY, conn.name) ?? [rootPath],
+        showHidden: false,
+        refreshToken: 0,
+        lastRefresh: null,
+        state: "connected",
+      };
+      const idx = s.wsls.findIndex((w) => w.conn.name === conn.name);
+      const wsls =
+        idx >= 0
+          ? // Reconnect of a known distro: keep its pins/toggles, swap the conn.
+            s.wsls.map((w, i) =>
+              i === idx ? { ...fresh, pins: w.pins, showHidden: w.showHidden } : w,
+            )
+          : [...s.wsls, fresh];
+      return wslMirror(wsls);
+    }),
+
+  removeWsl: (connId) =>
+    set((s) => {
+      const wsls = s.wsls.filter((w) => w.conn.connId !== connId);
+      if (wsls.length === s.wsls.length) return {};
+      const tabs = s.tabs.filter((t) => t.connId !== connId);
+      const terminals = s.terminals.filter((t) => t.connId !== connId);
       const activeTerminalId = terminals.some((t) => t.id === s.activeTerminalId)
         ? s.activeTerminalId
         : (terminals[terminals.length - 1]?.id ?? null);
       return {
-        wsl: null,
-        wslRootPath: null,
-        wslPins: [],
-        tabs,
-        activeTabId,
+        ...wslMirror(wsls),
+        ...(tabs.length !== s.tabs.length ? groupsPatch(s, tabs) : {}),
         terminals,
         activeTerminalId,
       };
     }),
-  addWslPin: (path) =>
+
+  setWslConnState: (connId, state) =>
+    set((s) =>
+      wslMirror(
+        s.wsls.map((w) => (w.conn.connId === connId ? { ...w, state } : w)),
+      ),
+    ),
+
+  addWslPin: (connId, path) =>
     set((s) => {
-      if (s.wslPins.includes(path)) return {};
-      const wslPins = [...s.wslPins, path];
-      if (s.wsl) saveConnPins(WSL_PINS_KEY, s.wsl.name, wslPins);
-      return { wslPins };
+      const entry = s.wsls.find((w) => w.conn.connId === connId);
+      if (!entry || entry.pins.includes(path)) return {};
+      const pins = [...entry.pins, path];
+      saveConnPins(WSL_PINS_KEY, entry.conn.name, pins);
+      return wslMirror(
+        s.wsls.map((w) => (w.conn.connId === connId ? { ...w, pins } : w)),
+      );
     }),
-  removeWslPin: (path) =>
+  removeWslPin: (connId, path) =>
     set((s) => {
-      const wslPins = s.wslPins.filter((p) => p !== path);
-      if (s.wsl) saveConnPins(WSL_PINS_KEY, s.wsl.name, wslPins);
-      return { wslPins };
+      const entry = s.wsls.find((w) => w.conn.connId === connId);
+      if (!entry) return {};
+      const pins = entry.pins.filter((p) => p !== path);
+      saveConnPins(WSL_PINS_KEY, entry.conn.name, pins);
+      return wslMirror(
+        s.wsls.map((w) => (w.conn.connId === connId ? { ...w, pins } : w)),
+      );
     }),
   setConnState: (state, message = null) => set({ connState: state, connMessage: message }),
 
@@ -894,7 +951,14 @@ export const useAppStore = create<AppState>()((set, get) => ({
         ),
       ),
     ),
-  toggleHiddenWsl: () => set((s) => ({ showHiddenWsl: !s.showHiddenWsl })),
+  toggleHiddenWsl: (connId) =>
+    set((s) =>
+      wslMirror(
+        s.wsls.map((w) =>
+          w.conn.connId === connId ? { ...w, showHidden: !w.showHidden } : w,
+        ),
+      ),
+    ),
   setHostColor: (hostKey, color) =>
     set((s) => {
       const hostColors = { ...s.hostColors };
@@ -929,13 +993,28 @@ export const useAppStore = create<AppState>()((set, get) => ({
         ),
       ),
     ),
-  refreshWsl: () => set((s) => ({ refreshTokenWsl: s.refreshTokenWsl + 1 })),
+  refreshWsl: (connId) =>
+    set((s) =>
+      wslMirror(
+        s.wsls.map((w) =>
+          connId === undefined || w.conn.connId === connId
+            ? { ...w, refreshToken: w.refreshToken + 1 }
+            : w,
+        ),
+      ),
+    ),
   refreshConn: (connId) =>
     set((s) =>
       connId === s.localConnId
         ? { refreshTokenLocal: s.refreshTokenLocal + 1 }
-        : connId === s.wsl?.connId
-          ? { refreshTokenWsl: s.refreshTokenWsl + 1 }
+        : s.wsls.some((w) => w.conn.connId === connId)
+          ? wslMirror(
+              s.wsls.map((w) =>
+                w.conn.connId === connId
+                  ? { ...w, refreshToken: w.refreshToken + 1 }
+                  : w,
+              ),
+            )
           : remoteMirror(
               s.remotes.map((r) =>
                 r.conn.connId === connId
@@ -948,8 +1027,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set((s) =>
       connId === s.localConnId
         ? { lastRefreshLocal: Date.now() }
-        : connId === s.wsl?.connId
-          ? { lastRefreshWsl: Date.now() }
+        : s.wsls.some((w) => w.conn.connId === connId)
+          ? wslMirror(
+              s.wsls.map((w) =>
+                w.conn.connId === connId ? { ...w, lastRefresh: Date.now() } : w,
+              ),
+            )
           : remoteMirror(
               s.remotes.map((r) =>
                 r.conn.connId === connId ? { ...r, lastRefresh: Date.now() } : r,
@@ -1476,6 +1559,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
               modified: file.modified,
               encoding: file.encoding,
               truncated: file.truncated,
+              lossy: file.lossy,
               lineEnding: file.content.includes("\r\n") ? ("CRLF" as const) : ("LF" as const),
               dirty: false,
             }
@@ -1564,11 +1648,16 @@ export const useAppStore = create<AppState>()((set, get) => ({
           `Transfer cancelled — ${outcome.files} file${outcome.files === 1 ? "" : "s"} copied`,
         );
       } else {
+        // Symlinked directories are skipped (a link cycle would loop forever);
+        // say so rather than reporting a silent partial copy.
+        const skipped = outcome.skippedLinks
+          ? ` (${outcome.skippedLinks} linked folder${outcome.skippedLinks === 1 ? "" : "s"} skipped)`
+          : "";
         get().pushNotice(
           "info",
-          outcome.files === 1
+          (outcome.files === 1
             ? `Copied ${firstName}`
-            : `Copied ${outcome.files} items`,
+            : `Copied ${outcome.files} items`) + skipped,
         );
       }
     } catch (e) {

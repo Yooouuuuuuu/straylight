@@ -4,7 +4,7 @@ A lightweight, open-source desktop application engineered to replace VS Code for
 
 The project achieves a massive resource reduction, operating at **~30–50 MB of memory** (compared to VS Code's ~500 MB) packed inside a **~10 MB installer**.
 
-**Status (v0.9.0):** Production-ready for source-build testing. A single unified window supports side-by-side management of local folders, a WSL distribution, and up to three concurrent SSH remotes. Installers and binaries will debut with the v0.10.0 release (see `docs/release-plan.md`).
+**Status (v0.9.0):** Production-ready for source-build testing. A single unified window supports side-by-side management of local folders, up to three WSL distributions, and up to three concurrent SSH remotes. Installers and binaries will debut with the v0.10.0 release (see `docs/release-plan.md`).
 
 > 💡 **[Insert a high-resolution screenshot or a looping 15-second WebP/GIF here showing Local, WSL, and a Remote server side-by-side, featuring a split Monaco editor and an open terminal.]**
 

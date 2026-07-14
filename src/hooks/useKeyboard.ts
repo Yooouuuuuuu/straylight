@@ -178,10 +178,11 @@ export function useKeyboard() {
             const label =
               connId === store.localConnId
                 ? "pwsh"
-                : store.wsl?.connId === connId
-                  ? store.wsl.name
-                  : (store.remotes.find((r) => r.conn.connId === connId)?.conn
-                      .name ?? "shell");
+                : (store.wsls.find((w) => w.conn.connId === connId)?.conn
+                    .name ??
+                  store.remotes.find((r) => r.conn.connId === connId)?.conn
+                    .name ??
+                  "shell");
             store.openTerminal(connId, label);
             store.setTerminalVisible(true);
             event.preventDefault();

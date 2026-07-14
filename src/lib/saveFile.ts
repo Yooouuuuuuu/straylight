@@ -18,6 +18,19 @@ export async function saveTab(tabId: string): Promise<SaveOutcome> {
   if (!tab || (tab.kind && tab.kind !== "file") || tab.isBinary || !tab.dirty)
     return "noop";
 
+  // Never write back a buffer that is not the whole, faithful file: a truncated
+  // tab holds only the first 50 MB, and a lossy tab holds �-replacements where
+  // the original (non-UTF-8) bytes were — saving either would corrupt the file.
+  if (tab.truncated || tab.lossy) {
+    store.pushNotice(
+      "error",
+      tab.truncated
+        ? `${tab.name} was opened truncated (>50 MB) — saving would cut the file. Edit it in the terminal instead.`
+        : `${tab.name} isn't valid UTF-8 — saving would replace the original bytes with �. Edit it in the terminal instead.`,
+    );
+    return "error";
+  }
+
   // Capture the version we're about to save, so edits made during the write
   // still count as dirty afterwards.
   const versionId = getTabVersionId(tabId);

@@ -49,8 +49,8 @@ function buildTerminals(): { list: Cand[]; currentId: string | null } {
   const s = useAppStore.getState();
   const hostOf = (connId: string): { label: string; key: string } => {
     if (connId === s.localConnId) return { label: "Local", key: "local" };
-    if (s.wsl?.connId === connId)
-      return { label: s.wsl.name, key: `wsl:${s.wsl.name}` };
+    const w = s.wsls.find((x) => x.conn.connId === connId);
+    if (w) return { label: w.conn.name, key: `wsl:${w.conn.name}` };
     const r = s.remotes.find((r) => r.conn.connId === connId);
     return r
       ? { label: r.conn.name, key: remoteHostKey(r.conn) }
@@ -60,7 +60,7 @@ function buildTerminals(): { list: Cand[]; currentId: string | null } {
   // — hosts in the group bar's dragged order, terminals in THEIR dragged order.
   const hosts: string[] = [];
   if (s.localConnId) hosts.push(s.localConnId);
-  if (s.wsl) hosts.push(s.wsl.connId);
+  for (const w of s.wsls) hosts.push(w.conn.connId);
   for (const r of s.remotes) hosts.push(r.conn.connId);
   const rank = (connId: string) => {
     const i = s.termGroupOrder.indexOf(connId);

@@ -29,11 +29,12 @@ const COLLAPSED_KEY = "straylight.rootCollapsed";
 
 function stableRootKey(connId: string, rootPath: string): string {
   const s = useAppStore.getState();
+  const wsl = s.wsls.find((w) => w.conn.connId === connId);
   const host =
     connId === s.localConnId
       ? "local"
-      : s.wsl?.connId === connId
-        ? `wsl:${s.wsl.name}`
+      : wsl
+        ? `wsl:${wsl.conn.name}`
         : (() => {
             const r = s.remotes.find((x) => x.conn.connId === connId);
             return r ? remoteHostKey(r.conn) : connId;

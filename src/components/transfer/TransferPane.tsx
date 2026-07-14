@@ -64,14 +64,13 @@ export function TransferPane({
   const openProperties = useAppStore((s) => s.openProperties);
   const startRename = useAppStore((s) => s.startRename);
   const cancelRename = useAppStore((s) => s.cancelRename);
-  const refreshToken = useAppStore((s) =>
-    connId === s.localConnId
-      ? s.refreshTokenLocal
-      : connId === s.wsl?.connId
-        ? s.refreshTokenWsl
-        : connId === s.remote?.connId
-          ? s.refreshTokenRemote
-          : 0,
+  const refreshToken = useAppStore(
+    (s) =>
+      connId === s.localConnId
+        ? s.refreshTokenLocal
+        : (s.wsls.find((w) => w.conn.connId === connId)?.refreshToken ??
+          s.remotes.find((r) => r.conn.connId === connId)?.refreshToken ??
+          0), // (remotes covered per-conn too — not just the primary)
   );
 
   // Dirs added via the "+" button — one-off, not pinned in the explorer or kept.

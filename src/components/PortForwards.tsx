@@ -18,7 +18,7 @@ interface Conn {
 
 export function ForwardingView() {
   const remotes = useAppStore((s) => s.remotes);
-  const wsl = useAppStore((s) => s.wsl);
+  const wsls = useAppStore((s) => s.wsls);
   const pushNotice = useAppStore((s) => s.pushNotice);
   const prefill = useAppStore((s) => s.forwardPrefill);
   const setForwardPrefill = useAppStore((s) => s.setForwardPrefill);
@@ -28,9 +28,9 @@ export function ForwardingView() {
       connId: r.conn.connId,
       label: r.conn.name,
     }));
-    if (wsl) c.push({ connId: wsl.connId, label: wsl.name });
+    for (const w of wsls) c.push({ connId: w.conn.connId, label: w.conn.name });
     return c;
-  }, [remotes, wsl]);
+  }, [remotes, wsls]);
 
   const [forwards, setForwards] = useState<ForwardInfo[]>([]);
   const setForwardCount = useAppStore((s) => s.setForwardCount);

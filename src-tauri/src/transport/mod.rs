@@ -57,6 +57,10 @@ pub struct FileContent {
     pub size: u64,
     pub modified: i64,
     pub truncated: bool,
+    /// The bytes weren't valid UTF-8 and were decoded with U+FFFD replacements
+    /// — `content` is NOT a faithful copy, so the frontend blocks saving it
+    /// (a write-back would destroy the original bytes).
+    pub lossy: bool,
 }
 
 /// A directory listing together with the absolute path it resolved to.
@@ -219,6 +223,17 @@ pub fn looks_binary(prefix: &[u8]) -> bool {
     prefix[..prefix.len().min(BINARY_SNIFF)].contains(&0)
 }
 
+/// Decode file bytes as UTF-8 text. Invalid UTF-8 falls back to a lossy
+/// conversion and is flagged (`true`) so callers can mark the content as not
+/// faithful — e.g. a GBK/Big5/Latin-1 file whose bytes must never be
+/// overwritten with the U+FFFD replacements shown in the editor.
+pub fn decode_text(bytes: Vec<u8>) -> (String, bool) {
+    match String::from_utf8(bytes) {
+        Ok(text) => (text, false),
+        Err(e) => (String::from_utf8_lossy(e.as_bytes()).into_owned(), true),
+    }
+}
+
 /// Sort entries directories-first, then case-insensitively by name.
 pub fn sort_entries(entries: &mut [FileEntry]) {
     entries.sort_by(|a, b| {
@@ -356,6 +371,9 @@ pub struct TransferOutcome {
     files: usize,
     bytes: u64,
     cancelled: bool,
+    /// Symlinked directories skipped during the walk (never descended — a
+    /// link cycle would recurse forever); surfaced in the completion toast.
+    skipped_links: usize,
 }
 
 /// Shared progress + cancellation state threaded (by `&`) through the copy
@@ -369,12 +387,18 @@ struct Progress {
     total_files: usize,
     done_bytes: AtomicU64,
     done_files: AtomicUsize,
+    /// Symlinked directories skipped by the walk (reported in the outcome).
+    skipped_links: AtomicUsize,
     last_emit: std::sync::Mutex<Instant>,
 }
 
 impl Progress {
     fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::Relaxed)
+    }
+
+    fn skip_link(&self) {
+        self.skipped_links.fetch_add(1, Ordering::Relaxed);
     }
 
     fn add_bytes(&self, n: u64, current: &str) {
@@ -413,6 +437,9 @@ impl Progress {
 }
 
 /// Recursively total the bytes and file count under `path`, for the progress bar.
+/// Mirrors `transfer_entry`'s walk exactly — symlinked directories are never
+/// descended (a link cycle like `ln -s . self` would recurse forever), so the
+/// totals match what actually gets copied.
 fn measure<'a>(
     src: &'a dyn FileTransport,
     path: &'a str,
@@ -425,9 +452,17 @@ fn measure<'a>(
         let mut bytes = 0u64;
         let mut files = 0usize;
         for entry in src.list_dir(path).await?.entries {
-            let (b, f) = measure(src, &entry.path).await?;
-            bytes += b;
-            files += f;
+            if entry.is_symlink && entry.is_dir {
+                continue; // skipped by the copy walk too
+            }
+            if entry.is_dir {
+                let (b, f) = measure(src, &entry.path).await?;
+                bytes += b;
+                files += f;
+            } else {
+                bytes += entry.size;
+                files += 1;
+            }
         }
         Ok((bytes, files))
     })
@@ -514,6 +549,7 @@ async fn run_transfer(
         total_files,
         done_bytes: AtomicU64::new(0),
         done_files: AtomicUsize::new(0),
+        skipped_links: AtomicUsize::new(0),
         last_emit: std::sync::Mutex::new(Instant::now()),
     };
     prog.emit("", true); // 0% up front so the bar appears immediately
@@ -531,6 +567,7 @@ async fn run_transfer(
         files: prog.done_files.load(Ordering::Relaxed),
         bytes: prog.done_bytes.load(Ordering::Relaxed),
         cancelled,
+        skipped_links: prog.skipped_links.load(Ordering::Relaxed),
     })
 }
 
@@ -651,6 +688,13 @@ fn transfer_entry<'a>(
                 if prog.cancelled() {
                     break;
                 }
+                // Never descend a symlinked directory — a link cycle
+                // (`ln -s . self`) would recurse forever. Symlinks to files
+                // still copy as regular files, like same-connection copies.
+                if entry.is_symlink && entry.is_dir {
+                    prog.skip_link();
+                    continue;
+                }
                 transfer_entry(src, &entry.path, dest, &dest_path, false, false, prog).await?;
             }
         } else {
@@ -720,8 +764,12 @@ async fn stream_file(
         if dest.rename(&part_path, name).await.is_err() {
             let _ = dest.remove(dest_path).await;
             if let Err(e) = dest.rename(&part_path, name).await {
-                let _ = dest.remove(&part_path).await;
-                return Err(format!("could not finish {dest_path}: {e}"));
+                // The destination is already gone, so the part file is now the
+                // ONLY copy of the data — keep it for manual recovery rather
+                // than deleting both.
+                return Err(format!(
+                    "could not finish {dest_path}: {e} — the copied data was kept as {part_path}; rename it by hand"
+                ));
             }
         }
         prog.file_done(name);
@@ -1070,6 +1118,19 @@ mod tests {
     fn binary_sniffing() {
         assert!(looks_binary(b"abc\0def"));
         assert!(!looks_binary(b"plain text"));
+    }
+
+    #[test]
+    fn text_decoding() {
+        // Valid UTF-8 (including multibyte) passes through unflagged.
+        let (s, lossy) = decode_text("hello 你好".as_bytes().to_vec());
+        assert_eq!(s, "hello 你好");
+        assert!(!lossy);
+        // GBK-encoded "你好" is not valid UTF-8 — decoded lossily and flagged
+        // so the frontend blocks writing the damage back.
+        let (s, lossy) = decode_text(vec![0xC4, 0xE3, 0xBA, 0xC3]);
+        assert!(lossy);
+        assert!(s.contains('\u{FFFD}'));
     }
 
     #[test]

@@ -9,17 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Planned
 
-- **1 + 3 + 3 connections** — up to three WSL distros alongside the three
-  remotes (the WSL slot becomes a list, like remotes did in 0.8.12).
-- **WSL pre-connect lights** — green/yellow/gray per distro in the WSL
-  section (running + sshd ready / running / stopped), via a cheap TCP probe
-  of the distro's deterministic ssh port.
-- **WSL connection state surfaced** — the status-bar dot goes red/orange on
-  a dropped WSL link (today the ssh-status events for WSL are ignored);
-  auto-recovery (re-provision sshd) stays a separate later conversation.
 - **Tip tooltip rollout** — convert all ~139 native `title=` tooltips to the
   themed Tip component (texts reviewed surface by surface), then walk test
   plan Part H.
+- **Color/contrast sweep** — all themed controls in one pass (incl. the
+  multi-WSL connection surfaces flagged 2026-07-14); reuse existing theme
+  slots first.
 - **Revisit where password entry lives** — the current centered connect modal vs.
   an inline field (e.g. on the "Connect to a server" button).
 - **Auto-refresh** (optional): a filesystem watch for the local tree; SSH would
@@ -35,6 +30,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (VS Code "hot exit"); doubles as a WSL/remote edit safeguard.
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
+
+## [0.9.4] - 2026-07-14
+
+Multi-WSL, honest WSL state, and a parallel batch of data-safety fixes.
+
+### Added
+
+- **WSL pre-connect lights** — every distro in the WSL list carries a
+  readiness dot: **green** = running with sshd already up (connects
+  instantly; a ~400 ms TCP probe of its deterministic port), **yellow** =
+  running (ssh starts on connect), **gray** = stopped (boots on connect).
+  The detail text and tooltip spell it out.
+- **WSL connection state is live** — the WSL link's ssh-status events were
+  silently dropped; now the status-bar dot goes orange while reconnecting
+  and red when the link is dead (e.g. sshd died in the distro), and a
+  successful reconnect refreshes the tree and restarts the terminal like a
+  remote. Auto re-provisioning on failure stays future work — a reconnect
+  only succeeds if sshd still lives.
+
+### Changed
+
+- **Status-bar dots are sectioned** — a divider after TERMINAL, then a
+  `WSL` section (dot + user; distro + state on hover) and a `REMOTE`
+  section (dot + user@host; alias + state on hover). A section only exists
+  while something is connected; WSL always comes first.
+
+- **1 + 3 + 3 connections: up to three WSL distros at once**, alongside the
+  three remotes. Each connected distro gets its own host bar (color, pins,
+  hidden-files toggle, refresh, state dot, disconnect), terminal group,
+  status-bar dot, and search/transfer/SCM/Ports/Containers/Forwarding
+  presence; the WSL bar's + attaches more (hidden at 3) and sessions
+  restore every distro (the startup ask runs per distro). Incidentally
+  fixed for remotes too: the transfer pane's refresh now tracks EVERY
+  remote (not just the primary), and the SCM "open a repository" picker
+  offers all remotes and distros.
+- **The under-10 s age bucket reads "<10s ago"** (was "in 10s") — stamp,
+  its "checked" tooltip, history rows, host-bar stamps.
+- **Failing background monitor checks stay calm and back off.** A ◉ check
+  that errors keeps the cached status and a quiet card (no red row, no
+  flicker); the stamp tooltip notes "last check failed", and consecutive
+  failures stretch the poll 4 s → 8 s → 16 s → … capped at 60 s (one
+  success resets everything). Explicit ⟳ / F5 failures still paint the
+  card red — an asked-for refresh must not hide problems.
+
+### Fixed
+
+- **Saving a truncated (>50 MB) file is blocked** — Ctrl+S (and save-on-
+  close) on a truncated tab shows an error toast instead of silently
+  cutting the file to exactly 50 MB on disk; the banner says saving is
+  disabled, and a failed save never closes the tab.
+- **Non-UTF-8 files can no longer be corrupted by a save.** The backend
+  flags lossy decodes (`lossy: true`, encoding "non-utf-8"); opening one
+  shows the � replacements with a banner + warn toast, and Ctrl+S is
+  refused — previously a save rewrote the file with literal U+FFFD bytes.
+  Clean UTF-8 and binary detection are unaffected, and a clean-tab
+  auto-reload clears the flag if the file becomes valid UTF-8.
+- **Transfers no longer hang forever on symlinked directory cycles** — the
+  measuring pass and the copy walk never descend a symlinked directory
+  (`ln -s . self` used to loop the measure step with no progress bar).
+  Symlinks to files still copy as regular files; skipped link-dirs are
+  counted and reported in the completion toast ("… (2 linked folders
+  skipped)"). Applies to the Transfers tool and context-menu Download.
+- **A transfer's temp file survives a double rename failure.** If
+  committing `.straypart` over the destination fails even after removing
+  the target (e.g. an immutable file), the temp file is KEPT and the error
+  names it ("…the copied data was kept as …straypart; rename it by hand")
+  instead of deleting the only surviving copy.
 
 ## [0.9.3] - 2026-07-14
 

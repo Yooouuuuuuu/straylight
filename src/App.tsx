@@ -65,7 +65,9 @@ export default function App() {
   const remoteConnIds = useAppStore((s) =>
     s.remotes.map((r) => r.conn.connId).join(","),
   );
-  const wslConnId = useAppStore((s) => s.wsl?.connId ?? null);
+  const wslConnIds = useAppStore((s) =>
+    s.wsls.map((w) => w.conn.connId).join(","),
+  );
   const scmVisible = useVcsStore((s) => s.scmVisible);
   const setScmVisible = useVcsStore((s) => s.setScmVisible);
   const historyOpen = useVcsStore((s) => s.historyRepo != null);
@@ -135,13 +137,29 @@ export default function App() {
     const unlistenPromise = onSshStatus((status) => {
       const store = useAppStore.getState();
       const entry = store.remotes.find((r) => r.conn.connId === status.connId);
-      if (!entry) return;
-      const wasReconnecting = entry.state === "reconnecting";
-      store.setRemoteState(status.connId, status.state, status.message);
-      if (status.state === "connected" && wasReconnecting) {
-        store.refreshRemote(status.connId);
-        store.restartConnTerminals(status.connId);
-        store.pushNotice("info", `Reconnected to ${entry.conn.name}.`);
+      if (entry) {
+        const wasReconnecting = entry.state === "reconnecting";
+        store.setRemoteState(status.connId, status.state, status.message);
+        if (status.state === "connected" && wasReconnecting) {
+          store.refreshRemote(status.connId);
+          store.restartConnTerminals(status.connId);
+          store.pushNotice("info", `Reconnected to ${entry.conn.name}.`);
+        }
+        return;
+      }
+      // WSL links are normal SSH connections — track their state too, so
+      // the status-bar dots go red/orange when sshd dies in a distro.
+      // (Auto re-provisioning is a separate, later feature — a reconnect
+      // only succeeds here if sshd is still alive.)
+      const w = store.wsls.find((x) => x.conn.connId === status.connId);
+      if (w) {
+        const wasReconnecting = w.state === "reconnecting";
+        store.setWslConnState(status.connId, status.state);
+        if (status.state === "connected" && wasReconnecting) {
+          store.refreshConn(status.connId);
+          store.restartConnTerminals(status.connId);
+          store.pushNotice("info", `Reconnected to ${w.conn.name}.`);
+        }
       }
     });
     return () => {
@@ -165,7 +183,7 @@ export default function App() {
   // repos get their fs watcher, and newly-online repos populate once.
   useEffect(() => {
     useVcsStore.getState().resolveConns();
-  }, [localConnId, remoteConnIds, wslConnId]);
+  }, [localConnId, remoteConnIds, wslConnIds]);
 
   // A watched local repo changed on disk (terminal git ops, external edits).
   useEffect(() => {

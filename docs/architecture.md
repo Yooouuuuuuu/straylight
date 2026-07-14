@@ -15,8 +15,8 @@ README; per-release detail in CHANGELOG.md; promises in
 ## Shape of the app
 
 One process, one window (multi-window was considered and dropped — instead one
-window shows **local folders + one WSL distro + up to three SSH remotes at
-once**):
+window shows **local folders + up to three WSL distros + up to three SSH
+remotes at once**):
 
 ```
 ┌───────────────────────────────────────────────────────────────┐

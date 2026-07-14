@@ -11,8 +11,9 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::ssh::connection::Connection;
 use crate::transport::{
-    copy_variant, join_path, looks_binary, mode_to_rwx, posix_basename, sort_entries, DirListing,
-    FileContent, FileEntry, FileStat, FileTransport, WriteResult, BINARY_SNIFF, MAX_READ_BYTES,
+    copy_variant, decode_text, join_path, looks_binary, mode_to_rwx, posix_basename, sort_entries,
+    DirListing, FileContent, FileEntry, FileStat, FileTransport, WriteResult, BINARY_SNIFF,
+    MAX_READ_BYTES,
 };
 
 /// A [`FileTransport`] backed by an SSH connection's SFTP subsystem.
@@ -130,6 +131,7 @@ impl FileTransport for SftpTransport {
                 size,
                 modified,
                 truncated,
+                lossy: false,
             });
         }
 
@@ -138,14 +140,16 @@ impl FileTransport for SftpTransport {
             .await
             .map_err(|e| format!("could not read {path}: {e}"))?;
 
+        let (content, lossy) = decode_text(buffer);
         Ok(FileContent {
             path: path.to_string(),
-            content: String::from_utf8_lossy(&buffer).into_owned(),
+            content,
             is_binary: false,
-            encoding: "utf-8".to_string(),
+            encoding: if lossy { "non-utf-8" } else { "utf-8" }.to_string(),
             size,
             modified,
             truncated,
+            lossy,
         })
     }
 

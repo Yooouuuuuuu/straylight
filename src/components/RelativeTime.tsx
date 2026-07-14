@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 /** Shared "N ago" formatter. Under 10 s it's a static bucket — a per-second
  *  count-up right after every action reads as nervous ticking. */
 export function formatAgo(seconds: number): string {
-  if (seconds < 10) return "in 10s";
+  if (seconds < 10) return "<10s ago";
   if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;

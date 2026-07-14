@@ -46,6 +46,7 @@ export async function openRemoteFile(
       size: file.size,
       modified: file.modified,
       truncated: file.truncated,
+      lossy: file.lossy,
       lineEnding,
     };
     store.openTab(tab, opts);
@@ -53,6 +54,11 @@ export async function openRemoteFile(
     if (!file.isBinary) {
       if (file.truncated) {
         store.pushNotice("warn", `${entry.name} exceeds 50 MB and was opened truncated.`);
+      } else if (file.lossy) {
+        store.pushNotice(
+          "warn",
+          `${entry.name} isn't valid UTF-8 — shown with � replacements; saving is disabled.`,
+        );
       } else if (file.size >= LIGHTWEIGHT_BYTES) {
         store.pushNotice("warn", `${entry.name} is very large — opened in lightweight mode.`);
       } else if (file.size >= LARGE_FILE_BYTES) {

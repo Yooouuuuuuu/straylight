@@ -1843,6 +1843,22 @@
   background: var(--fg-secondary);
 }
 
+/* WSL pre-connect lights: yellow = running but sshd not up yet; gray =
+   distro stopped (connect will boot it). Green reuses dot--connected. */
+.dot--warm {
+  background: var(--warning);
+}
+
+.dot--off {
+  background: var(--fg-secondary);
+  opacity: 0.45;
+}
+
+.wsl-light {
+  margin-right: var(--space-2);
+  flex: 0 0 auto;
+}
+
 @keyframes pulse {
   0%,
   100% {
@@ -4582,13 +4598,29 @@ select option {
   margin-left: 1px;
 }
 
-/* Per-connection dots in the status bar: dot + user@host, state on hover. */
+/* Per-connection dots in the status bar, sectioned (| WSL … | REMOTE …). */
 .statusbar__host {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
   font-size: var(--font-size-xs);
   color: var(--fg-secondary);
+}
+
+.statusbar__sep {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 14px;
+  margin: 0 var(--space-2);
+  background: var(--border);
+}
+
+.statusbar__seclabel {
+  flex: 0 0 auto;
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.08em;
+  color: var(--fg-secondary);
+  opacity: 0.65;
 }
 
 /* Colocated repos: the explicit lens swap on its own line ("swap to git

@@ -22,7 +22,7 @@ const isSystemPort = (p: number) => p < 1024 || SYSTEM_PORTS.has(p);
 
 export function PortsView() {
   const localConnId = useAppStore((s) => s.localConnId);
-  const wsl = useAppStore((s) => s.wsl);
+  const wsls = useAppStore((s) => s.wsls);
   const remotes = useAppStore((s) => s.remotes);
   const hostColors = useAppStore((s) => s.hostColors);
   const setTerminalView = useAppStore((s) => s.setTerminalView);
@@ -37,12 +37,12 @@ export function PortsView() {
   const hosts: { connId: string; key: string; host: string; color: string }[] = [];
   if (localConnId)
     hosts.push({ connId: localConnId, key: "local", host: "Local", color: SECTION_LOCAL });
-  if (wsl)
+  for (const w of wsls)
     hosts.push({
-      connId: wsl.connId,
-      key: `wsl:${wsl.name}`,
-      host: wsl.name,
-      color: hostColors[`wsl:${wsl.name}`] ?? SECTION_WSL,
+      connId: w.conn.connId,
+      key: `wsl:${w.conn.name}`,
+      host: w.conn.name,
+      color: hostColors[`wsl:${w.conn.name}`] ?? SECTION_WSL,
     });
   for (const r of remotes)
     hosts.push({
@@ -90,7 +90,7 @@ export function PortsView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     localConnId,
-    wsl?.connId,
+    wsls,
     remotes,
     hideSystem,
     interval,

@@ -3,22 +3,25 @@
  *  `WSL_NEEDS_INSTALL:`-prefixed errors up to the caller (the sidebar turns
  *  those into its install prompt). */
 import { fsListDir, sshDisconnect, wslConnect } from "./ipc";
-import { useAppStore, type RemoteConnection } from "../store/appStore";
+import { MAX_WSLS, useAppStore, type RemoteConnection } from "../store/appStore";
 
 export async function connectWslDistro(
   distro: string,
   allowInstall = false,
 ): Promise<void> {
   const store = useAppStore.getState();
-  // One distro slot: switching drops the current connection first.
-  const prev = store.wsl;
+  // Reconnecting an already-attached distro: drop its old link first (its
+  // pins/toggles survive — addWsl keeps them for a known name).
+  const prev = store.wsls.find((w) => w.conn.name === distro);
   if (prev) {
     try {
-      await sshDisconnect(prev.connId);
+      await sshDisconnect(prev.conn.connId);
     } catch {
       /* ignore */
     }
-    useAppStore.getState().clearWsl();
+    useAppStore.getState().removeWsl(prev.conn.connId);
+  } else if (store.wsls.length >= MAX_WSLS) {
+    throw new Error(`Up to ${MAX_WSLS} WSL distros can be connected at once.`);
   }
   const { connId, user } = await wslConnect(distro, allowInstall);
   const listing = await fsListDir(connId, "");
@@ -33,6 +36,6 @@ export async function connectWslDistro(
     identityFile: null,
     proxyJump: null,
   };
-  useAppStore.getState().setWsl(conn, listing.path);
+  useAppStore.getState().addWsl(conn, listing.path);
   useAppStore.getState().openTerminal(connId, distro);
 }

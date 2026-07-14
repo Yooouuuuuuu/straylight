@@ -30,7 +30,7 @@ const TERM_MIME = "application/x-straylight-termentry";
 
 export function TerminalPanel() {
   const remotes = useAppStore((s) => s.remotes);
-  const wsl = useAppStore((s) => s.wsl);
+  const wsls = useAppStore((s) => s.wsls);
   const localConnId = useAppStore((s) => s.localConnId);
   const hostColors = useAppStore((s) => s.hostColors);
   const terminals = useAppStore((s) => s.terminals);
@@ -83,12 +83,12 @@ export function TerminalPanel() {
     const all: { connId: string; key: string; label: string; color: string }[] = [];
     if (localConnId)
       all.push({ connId: localConnId, key: "local", label: "Local", color: SECTION_LOCAL });
-    if (wsl)
+    for (const w of wsls)
       all.push({
-        connId: wsl.connId,
-        key: `wsl:${wsl.name}`,
-        label: wsl.name,
-        color: hostColors[`wsl:${wsl.name}`] ?? SECTION_WSL,
+        connId: w.conn.connId,
+        key: `wsl:${w.conn.name}`,
+        label: w.conn.name,
+        color: hostColors[`wsl:${w.conn.name}`] ?? SECTION_WSL,
       });
     for (const r of remotes)
       all.push({
@@ -102,7 +102,7 @@ export function TerminalPanel() {
       return i < 0 ? termGroupOrder.length : i;
     };
     return [...all].sort((a, b) => rank(a.connId) - rank(b.connId));
-  }, [localConnId, wsl, remotes, hostColors, termGroupOrder]);
+  }, [localConnId, wsls, remotes, hostColors, termGroupOrder]);
 
   const activeConn =
     terminals.find((t) => t.id === activeTerminalId)?.connId ?? null;
@@ -198,7 +198,11 @@ export function TerminalPanel() {
             onClick={() => pickGroup(g.connId)}
           >
             <span className="termgroup__letter">
-              {g.connId === localConnId ? "L" : g.connId === wsl?.connId ? "W" : "R"}
+              {g.connId === localConnId
+                ? "L"
+                : wsls.some((w) => w.conn.connId === g.connId)
+                  ? "W"
+                  : "R"}
             </span>
             {g.label}
             {(() => {

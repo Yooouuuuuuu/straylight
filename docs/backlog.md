@@ -49,12 +49,11 @@ completed backlog items get an *(ex-backlog)* tag in the manual test plan
 - [ ] A transfer pane's selection can go stale right after a delete.
 
 ### WSL
-- [ ] Auto-recover a dropped WSL session (re-provision `sshd` in the supervisor)
-      — today, if `sshd` dies mid-session you reconnect by hand.
-- [ ] Surface WSL in the reconnect UI — the `ssh-status` handler in `App.tsx`
-      matches only `remotes`, so a WSL drop/recovery updates no state dot and
-      triggers no tree-refresh/terminal-restart (verified 2026-07-13).
-- [ ] Multiple WSL distros connected at once (currently one slot per window).
+- [ ] Auto-recover a dropped WSL session (re-provision `sshd` in the
+      supervisor) — since 2026-07-14 a drop at least SHOWS (red status-bar
+      dot; state events wired), but recovery still needs a live sshd;
+      re-provisioning on reconnect failure is the remaining piece. Decision
+      pending ("might be weird to do — discuss after 1+3+3").
 - [ ] Auto-install `openssh-server` on non-`apt` distros (Alpine/Arch/openSUSE).
 - [ ] Remember a *declined* install so we don't re-prompt every click.
 
@@ -96,12 +95,10 @@ completed backlog items get an *(ex-backlog)* tag in the manual test plan
       UI — after ~30 s show the spinner/cancel as if it were a loud refresh.
 
 ### Multi-remote (2+ attached remotes)
-- [ ] The transfer panes only pair with the **primary** remote (host pickers +
-      refresh token track `s.remote` = `remotes[0]`).
-- [ ] The SCM panel's "open a repository" host picker only offers the primary
-      remote.
 - [ ] The global `connState` / status indicator briefly mirrors a *secondary*
-      remote's connect progress onto the primary.
+      remote's connect progress onto the primary. (The other two items here —
+      transfer panes and the SCM picker primary-only — were fixed in the
+      1+3+3 refactor, 2026-07-14.)
 
 ### Minor code defects (2026-07-09 audit — low severity)
 - [ ] `vcs_file_at` / `vcs_file_base` load whole `git show` output into memory
@@ -126,7 +123,9 @@ completed backlog items get an *(ex-backlog)* tag in the manual test plan
       ≥ ~4.5:1) — reuse existing theme slots first before inventing keys
       (`.btn--primary` → accent + section-fg was the pattern; the
       mode-switch active state and the dim per-row action icons are next
-      candidates).
+      candidates). Also: the 1+3+3 connection surfaces showed color issues
+      during verification (user, 2026-07-14) — include the multi-WSL host
+      bars / dots / chips in the sweep.
 
 ### Misc
 - [ ] Trim the Monaco bundle to a language subset (it currently ships every

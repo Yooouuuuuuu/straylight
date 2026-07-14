@@ -238,6 +238,22 @@ fn ensure_key(distro: &str) -> Result<PathBuf, String> {
     Ok(priv_path)
 }
 
+/// Pre-connect probe: does the distro's deterministic ssh port accept TCP?
+/// True means sshd is already up — a connect would be instant. Cheap (~400 ms
+/// cap), run by the WSL section for its per-distro readiness lights.
+#[tauri::command]
+pub async fn wsl_probe_ssh(distro: String) -> Result<bool, String> {
+    let addr = format!("127.0.0.1:{}", port_for(&distro));
+    Ok(matches!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(400),
+            tokio::net::TcpStream::connect(&addr),
+        )
+        .await,
+        Ok(Ok(_))
+    ))
+}
+
 /// A stable localhost port per distro (WSL2 shares one network namespace, so
 /// distros must not collide; the same distro reuses its port on reconnect).
 fn port_for(distro: &str) -> u16 {

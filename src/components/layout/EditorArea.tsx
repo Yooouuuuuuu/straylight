@@ -104,7 +104,8 @@ function EditorBreadcrumbs({ tab }: { tab: EditorTab }) {
   const { connId, path } = tab;
   const pins = useAppStore((s) => {
     if (connId === s.localConnId) return s.pinnedFolders;
-    if (s.wsl?.connId === connId) return s.wslPins;
+    const w = s.wsls.find((x) => x.conn.connId === connId);
+    if (w) return w.pins;
     return s.remotes.find((r) => r.conn.connId === connId)?.pins ?? [];
   });
 
@@ -210,7 +211,13 @@ function GroupPane({ gid, splitDrop }: { gid: number; splitDrop: boolean }) {
       <div className="editor-area__body">
         {active && !active.isBinary && active.truncated && (
           <div className="editor-banner">
-            ⚠ This file was truncated to 50 MB.
+            ⚠ This file was truncated to 50 MB — saving is disabled to protect it.
+          </div>
+        )}
+        {active && !active.isBinary && !active.truncated && active.lossy && (
+          <div className="editor-banner">
+            ⚠ Not valid UTF-8 — shown with � replacements; saving is disabled to
+            protect the original bytes.
           </div>
         )}
         <div className="editor-area__content">

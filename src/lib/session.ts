@@ -53,8 +53,10 @@ interface PersistedSession {
   sidebarVisible: boolean;
   terminalVisible: boolean;
   remotes: PersistedRemote[];
-  /** The connected WSL distro's name, for startup reconnect. */
+  /** Legacy (≤ one distro) — migrated into `wsls` on load. */
   wsl?: string | null;
+  /** The connected WSL distros' names, for startup reconnect. */
+  wsls?: string[];
   tabs: PersistedTab[];
   active: PersistedTab | null;
 }
@@ -111,13 +113,15 @@ const desiredRemotes = new Map<string, PersistedRemote>(
   (savedAtStartup?.remotes ?? []).map((r) => [persistedKey(r), r]),
 );
 
-// The WSL distro to restore, kept like desiredRemotes (survives transient
-// disconnects; cleared only by an explicit disconnect).
-let desiredWsl: string | null = savedAtStartup?.wsl ?? null;
+// The WSL distros to restore, kept like desiredRemotes (survive transient
+// disconnects; an entry is cleared only by an explicit disconnect).
+const desiredWsls = new Set<string>(
+  savedAtStartup?.wsls ?? (savedAtStartup?.wsl ? [savedAtStartup.wsl] : []),
+);
 
-/** Forget the saved WSL distro (on its explicit disconnect). */
-export function clearDesiredWsl(): void {
-  desiredWsl = null;
+/** Forget one saved WSL distro (on its explicit disconnect). */
+export function clearDesiredWsl(distro: string): void {
+  desiredWsls.delete(distro);
 }
 
 /** Remember a connected remote as one to restore next launch. */
@@ -206,14 +210,14 @@ function writeSnapshot(): void {
     }
   }
 
-  if (s.wsl) desiredWsl = s.wsl.name;
+  for (const w of s.wsls) desiredWsls.add(w.conn.name);
 
   const session: PersistedSession = {
     version: VERSION,
     sidebarVisible: s.sidebarVisible,
     terminalVisible: s.terminalVisible,
     remotes: [...desiredRemotes.values()],
-    wsl: desiredWsl,
+    wsls: [...desiredWsls],
     tabs: [...localTabs, ...remoteTabs],
     active,
   };
@@ -337,8 +341,9 @@ export async function restoreSession(
     // kind from settings: "always" connects silently, "ask" queues a startup
     // dialog (its checkbox flips the setting to "always"), "never" skips.
     const auto = autoConnectConfig;
-    if (s.wsl && auto.wsl !== "never") {
-      const distro = s.wsl;
+    const savedWsls = s.wsls ?? (s.wsl ? [s.wsl] : []);
+    for (const distro of savedWsls) {
+      if (auto.wsl === "never") break;
       const doConnect = () =>
         connectWslDistro(distro).catch((e) =>
           useAppStore
@@ -352,7 +357,7 @@ export async function restoreSession(
           label: distro,
           run: () => void doConnect(),
           // Declining forgets the distro — no ghost ask on the next launch.
-          onSkip: () => clearDesiredWsl(),
+          onSkip: () => clearDesiredWsl(distro),
         });
     }
 

@@ -7,8 +7,8 @@ use std::pin::Pin;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
 use crate::transport::{
-    any_basename, copy_variant, looks_binary, sort_entries, DirListing, FileContent, FileEntry,
-    FileStat, FileTransport, WriteResult, BINARY_SNIFF, MAX_READ_BYTES,
+    any_basename, copy_variant, decode_text, looks_binary, sort_entries, DirListing, FileContent,
+    FileEntry, FileStat, FileTransport, WriteResult, BINARY_SNIFF, MAX_READ_BYTES,
 };
 
 pub struct LocalTransport;
@@ -160,6 +160,7 @@ impl FileTransport for LocalTransport {
                 size,
                 modified,
                 truncated,
+                lossy: false,
             });
         }
 
@@ -168,14 +169,16 @@ impl FileTransport for LocalTransport {
             .await
             .map_err(|e| format!("could not read {path}: {e}"))?;
 
+        let (content, lossy) = decode_text(buffer);
         Ok(FileContent {
             path: path.to_string(),
-            content: String::from_utf8_lossy(&buffer).into_owned(),
+            content,
             is_binary: false,
-            encoding: "utf-8".to_string(),
+            encoding: if lossy { "non-utf-8" } else { "utf-8" }.to_string(),
             size,
             modified,
             truncated,
+            lossy,
         })
     }
 

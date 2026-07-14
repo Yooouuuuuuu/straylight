@@ -46,8 +46,8 @@ export function hostColorForConnKey(
 export function tabHostColor(connId: string): string | null {
   const s = useAppStore.getState();
   if (!connId || connId === s.localConnId) return null;
-  if (s.wsl?.connId === connId)
-    return s.hostColors[`wsl:${s.wsl.name}`] ?? SECTION_WSL;
+  const wsl = s.wsls.find((w) => w.conn.connId === connId);
+  if (wsl) return s.hostColors[`wsl:${wsl.conn.name}`] ?? SECTION_WSL;
   const remote = s.remotes.find((r) => r.conn.connId === connId);
   if (remote) return remoteColor(s.hostColors, remote.conn);
   return null;

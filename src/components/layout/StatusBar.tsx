@@ -21,7 +21,7 @@ function prettyLanguage(language: string): string {
 export function StatusBar() {
   const localConnId = useAppStore((s) => s.localConnId);
   const remotes = useAppStore((s) => s.remotes);
-  const wsl = useAppStore((s) => s.wsl);
+  const wsls = useAppStore((s) => s.wsls);
   const tabs = useAppStore((s) => s.tabs);
   const activeTabId = useAppStore((s) => s.activeTabId);
   const toggleTerminal = useAppStore((s) => s.toggleTerminal);
@@ -86,28 +86,42 @@ export function StatusBar() {
         <IconTerminalGlyph size={13} /> TERMINAL
       </span>
 
-      {/* One dot per connection (WSL + every remote); state spelled out on
-          hover only. WSL has no live state tracking yet (backlog) — its dot
-          reads connected while attached. */}
-      {wsl && (
-        <Tip label={`${wsl.name} connected (${wsl.user}@${wsl.host})`}>
-          <span className="statusbar__item statusbar__host">
-            <span className="dot dot--connected" />
-            {wsl.name}
-          </span>
-        </Tip>
+      {/* Connection dots, sectioned: WSL first, then remotes — a section only
+          exists while something is connected. State spells out on hover. */}
+      {wsls.length > 0 && (
+        <>
+          <span className="statusbar__sep" />
+          <span className="statusbar__seclabel">WSL</span>
+          {wsls.map((w) => (
+            <Tip
+              key={w.conn.connId}
+              label={`${w.conn.name} ${w.state} (${w.conn.user}@${w.conn.host})`}
+            >
+              <span className="statusbar__item statusbar__host">
+                <span className={`dot dot--${w.state}`} />
+                {w.conn.user}
+              </span>
+            </Tip>
+          ))}
+        </>
       )}
-      {remotes.map((r) => (
-        <Tip
-          key={r.conn.connId}
-          label={`${r.conn.name} ${r.state} (${r.conn.user}@${r.conn.host})`}
-        >
-          <span className="statusbar__item statusbar__host">
-            <span className={`dot dot--${r.state}`} />
-            {r.conn.name}
-          </span>
-        </Tip>
-      ))}
+      {remotes.length > 0 && (
+        <>
+          <span className="statusbar__sep" />
+          <span className="statusbar__seclabel">REMOTE</span>
+          {remotes.map((r) => (
+            <Tip
+              key={r.conn.connId}
+              label={`${r.conn.name} ${r.state} (${r.conn.user}@${r.conn.host})`}
+            >
+              <span className="statusbar__item statusbar__host">
+                <span className={`dot dot--${r.state}`} />
+                {r.conn.user}@{r.conn.host}
+              </span>
+            </Tip>
+          ))}
+        </>
+      )}
 
       <span className="statusbar__spacer" />
 

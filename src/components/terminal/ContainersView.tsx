@@ -19,7 +19,7 @@ interface HostContainers {
 export function ContainersView() {
   const localConnId = useAppStore((s) => s.localConnId);
   const remotes = useAppStore((s) => s.remotes);
-  const wsl = useAppStore((s) => s.wsl);
+  const wsls = useAppStore((s) => s.wsls);
   const openTerminal = useAppStore((s) => s.openTerminal);
 
   const [hosts, setHosts] = useState<HostContainers[]>([]);
@@ -35,7 +35,7 @@ export function ContainersView() {
   useEffect(() => {
     const conns = [
       localConnId ? { connId: localConnId, label: "Local" } : null,
-      wsl ? { connId: wsl.connId, label: wsl.name } : null,
+      ...wsls.map((w) => ({ connId: w.conn.connId, label: w.conn.name })),
       ...remotes.map((r) => ({ connId: r.conn.connId, label: r.conn.name })),
     ].filter((c): c is { connId: string; label: string } => c !== null);
 
@@ -74,7 +74,7 @@ export function ContainersView() {
       alive = false;
       window.clearInterval(timer);
     };
-  }, [localConnId, remotes, wsl]);
+  }, [localConnId, remotes, wsls]);
 
   const enter = (host: HostContainers, c: ContainerInfo) => {
     openTerminal(

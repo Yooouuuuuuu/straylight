@@ -38,8 +38,8 @@ export function ScmPanel() {
   const setScmVisible = useVcsStore((s) => s.setScmVisible);
   const openRepo = useVcsStore((s) => s.openRepo);
   const localConnId = useAppStore((s) => s.localConnId);
-  const remote = useAppStore((s) => s.remote);
-  const wsl = useAppStore((s) => s.wsl);
+  const remotes = useAppStore((s) => s.remotes);
+  const wsls = useAppStore((s) => s.wsls);
 
   const [picking, setPicking] = useState(false);
   const [browse, setBrowse] = useState<ConnChoice | null>(null);
@@ -48,8 +48,16 @@ export function ScmPanel() {
     localConnId
       ? { connId: localConnId, label: "Local", showDrives: true }
       : null,
-    remote ? { connId: remote.connId, label: remote.name, showDrives: false } : null,
-    wsl ? { connId: wsl.connId, label: wsl.name, showDrives: false } : null,
+    ...wsls.map((w) => ({
+      connId: w.conn.connId,
+      label: w.conn.name,
+      showDrives: false,
+    })),
+    ...remotes.map((r) => ({
+      connId: r.conn.connId,
+      label: r.conn.name,
+      showDrives: false,
+    })),
   ].filter((c): c is ConnChoice => c !== null);
 
   const startOpen = () => {
@@ -726,7 +734,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
               repo.lastChecked
                 ? `${!isLocal && !repo.eager ? "not monitored — " : ""}checked ${formatAgo(
                     Math.max(0, Math.floor((Date.now() - repo.lastChecked) / 1000)),
-                  )}`
+                  )}${repo.lastCheckFailed ? " — last check failed" : ""}`
                 : "not checked yet this session"
             }
           >

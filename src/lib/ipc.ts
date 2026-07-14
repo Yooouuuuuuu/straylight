@@ -60,6 +60,9 @@ export interface FileContent {
   size: number;
   modified: number;
   truncated: boolean;
+  /** The bytes weren't valid UTF-8 and were decoded with � replacements —
+   *  the content is NOT a faithful copy of the file (saving is blocked). */
+  lossy: boolean;
 }
 
 export interface FileStat {
@@ -249,6 +252,8 @@ export interface TransferOutcome {
   files: number;
   bytes: number;
   cancelled: boolean;
+  /** Symlinked directories skipped during the walk (a link cycle would loop). */
+  skippedLinks: number;
 }
 
 /** Stream a batch of entries from one connection into a directory on another
@@ -668,6 +673,12 @@ export interface WslDistro {
 /** List installed WSL distros (empty on non-Windows or when WSL is absent). */
 export function wslListDistros(): Promise<WslDistro[]> {
   return invoke("wsl_list_distros");
+}
+
+/** Pre-connect probe: is the distro's sshd already listening on its
+ *  deterministic localhost port? (~400 ms cap.) */
+export function wslProbeSsh(distro: string): Promise<boolean> {
+  return invoke("wsl_probe_ssh", { distro });
 }
 
 export interface PortInfo {

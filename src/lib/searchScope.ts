@@ -52,7 +52,7 @@ export function collectRoots(): SearchRoot[] {
     for (const p of pins) out.push({ connId, root: p, tag: base(p), kind });
   };
   add(s.localConnId, s.pinnedFolders, "local");
-  add(s.wsl?.connId, s.wslPins, "wsl");
+  for (const w of s.wsls) add(w.conn.connId, w.pins, "wsl");
   for (const r of s.remotes) add(r.conn.connId, r.pins, "remote");
   return out;
 }
@@ -66,7 +66,7 @@ export function availableKinds(): Set<SearchRoot["kind"]> {
   const s = useAppStore.getState();
   const out = new Set<SearchRoot["kind"]>();
   if (s.localConnId) out.add("local");
-  if (s.wsl) out.add("wsl");
+  if (s.wsls.length > 0) out.add("wsl");
   if (s.remotes.length > 0) out.add("remote");
   return out;
 }

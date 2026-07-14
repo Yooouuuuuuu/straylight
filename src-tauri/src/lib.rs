@@ -143,6 +143,7 @@ pub fn run() {
             ssh::pty::pty_close,
             ssh::pty::list_terminal_profiles,
             wsl::wsl_list_distros,
+            wsl::wsl_probe_ssh,
             wsl::wsl_connect,
             forward::port_forward_start,
             forward::port_forward_stop,

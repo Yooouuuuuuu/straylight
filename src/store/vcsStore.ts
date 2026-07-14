@@ -49,6 +49,9 @@ export interface TrackedRepo {
   lastUpdated: number | null;
   /** Last time a refresh ran, changed or not — drives poll/focus throttles. */
   lastChecked?: number | null;
+  /** The most recent check failed (transient link blip, moved repo…). Silent
+   *  polls surface this only in the stamp tooltip — never as a red card. */
+  lastCheckFailed?: boolean;
   /** The remote op currently running, or null. */
   remoteBusy?: "fetch" | "pull" | "push" | "update" | null;
   /** UI: the commit box is expanded (persisted per repo). */
@@ -167,7 +170,8 @@ function connKeyFor(connId: string): string | null {
   const remote = s.remotes.find((r) => r.conn.connId === connId);
   if (remote)
     return `${remote.conn.user}@${remote.conn.host}:${remote.conn.port}`;
-  if (s.wsl && connId === s.wsl.connId) return `wsl:${s.wsl.name}`;
+  const wsl = s.wsls.find((w) => w.conn.connId === connId);
+  if (wsl) return `wsl:${wsl.conn.name}`;
   return null;
 }
 
@@ -178,7 +182,8 @@ function connIdForKey(connKey: string): string | null {
     (r) => connKey === `${r.conn.user}@${r.conn.host}:${r.conn.port}`,
   );
   if (remote) return remote.conn.connId;
-  if (s.wsl && connKey === `wsl:${s.wsl.name}`) return s.wsl.connId;
+  const wsl = s.wsls.find((w) => connKey === `wsl:${w.conn.name}`);
+  if (wsl) return wsl.conn.connId;
   return null;
 }
 
@@ -300,6 +305,10 @@ const mapRepo = (
 // or a cancel) discards its result. This is the frontend-side "cancel".
 const tokens = new Map<string, number>();
 
+// Consecutive failed refreshes per repo (cleared on success). The ◉ poll backs
+// off exponentially on these, so a broken repo isn't re-polled every tick.
+const refreshFailures = new Map<string, number>();
+
 // Repo keys (`connId::root`) currently watched by the backend fs watcher.
 const watchedRepos = new Set<string>();
 
@@ -392,6 +401,9 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
     if (!repo) return;
     const connId = repo.connId ?? connIdForKey(connKey);
     if (!connId) {
+      // A background check racing a disconnect stays quiet; only an explicit
+      // refresh paints the card into the error state.
+      if (opts?.silent) return;
       set((s) => ({
         repos: mapRepo(s.repos, connKey, root, (r) => ({
           ...r,
@@ -417,6 +429,7 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
     try {
       const status = await vcsStatus(connId, root, repo.backend);
       if (tokens.get(id) !== token) return; // superseded or cancelled
+      refreshFailures.delete(id);
       set((s) => {
         const now = Date.now();
         const repos = mapRepo(s.repos, connKey, root, (r) => {
@@ -435,6 +448,7 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
             activity: "idle" as const,
             error: null,
             lastChecked: now,
+            lastCheckFailed: false,
             lastUpdated: stamp ? now : (r.lastUpdated ?? now),
           };
         });
@@ -443,6 +457,21 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       });
     } catch (e) {
       if (tokens.get(id) !== token) return;
+      refreshFailures.set(id, (refreshFailures.get(id) ?? 0) + 1);
+      if (opts?.silent) {
+        // A silent check failing must stay silent: keep the cached status and
+        // a calm card, note the failure for the stamp tooltip, and let the
+        // next (backed-off) poll retry. Only explicit refreshes go red.
+        set((s) => ({
+          repos: mapRepo(s.repos, connKey, root, (r) => ({
+            ...r,
+            activity: "idle" as const,
+            lastChecked: Date.now(),
+            lastCheckFailed: true,
+          })),
+        }));
+        return;
+      }
       set((s) => ({
         repos: mapRepo(s.repos, connKey, root, (r) => ({
           ...r,
@@ -783,10 +812,15 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       if (!r.connId || r.connId === local) continue; // local = fs watcher
       if (!r.eager) continue; // ◉ is the opt-in
       if (r.activity === "loading" || r.activity === "polling") continue;
-      // Slightly under the 5 s tick so a refresh from another trigger
-      // (save, focus) doesn't double up with the poll.
+      // Base wait sits slightly under the 5 s tick so a refresh from another
+      // trigger (save, focus) doesn't double up with the poll. Consecutive
+      // failures back the wait off exponentially (8 s, 16 s, … capped at
+      // 60 s), so a broken repo isn't hammered every tick; one success
+      // resets it.
+      const fails = refreshFailures.get(repoId(r.connKey, r.root)) ?? 0;
+      const wait = Math.min(4_000 * 2 ** fails, 60_000);
       const checked = r.lastChecked ?? r.lastUpdated;
-      if (checked && now - checked < 4_000) continue;
+      if (checked && now - checked < wait) continue;
       void get().refreshRepo(r.connKey, r.root, { silent: true });
     }
   },

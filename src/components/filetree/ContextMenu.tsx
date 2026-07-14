@@ -145,7 +145,7 @@ export function ContextMenu() {
               try {
                 const { downloadDir } = await import("@tauri-apps/api/path");
                 const dest = await downloadDir();
-                await fsTransferBatch(
+                const outcome = await fsTransferBatch(
                   `dl-${Date.now()}`,
                   menu.connId,
                   paths,
@@ -153,7 +153,13 @@ export function ContextMenu() {
                   dest,
                   true,
                 );
-                store.pushNotice("info", `Downloaded ${paths.length} item(s) to Downloads.`);
+                const skipped = outcome.skippedLinks
+                  ? ` (${outcome.skippedLinks} linked folder${outcome.skippedLinks === 1 ? "" : "s"} skipped)`
+                  : "";
+                store.pushNotice(
+                  "info",
+                  `Downloaded ${paths.length} item(s) to Downloads.${skipped}`,
+                );
               } catch (e) {
                 store.pushNotice("error", `Download failed: ${String(e)}`);
               }
