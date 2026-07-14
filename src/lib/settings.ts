@@ -90,7 +90,6 @@ export const CONFIRM_IDS = [
   "vcs-update",
   "vcs-push",
   "vcs-stash-pop",
-  "vcs-squash",
   "vcs-amend-pushed",
 ];
 

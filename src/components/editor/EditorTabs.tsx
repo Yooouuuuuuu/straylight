@@ -187,7 +187,18 @@ export function EditorTabs({ groupId }: { groupId: number }) {
             {tab.name}
             {tab.kind === "diff" ? " (changes)" : tab.kind === "merge" ? " (merge)" : ""}
           </span>
-          {tab.pinned ? null : (
+          {tab.pinned ? (
+            // Pinned tabs have no close button, but a dirty pinned tab still
+            // needs its unsaved dot — same slot, non-interactive.
+            tab.dirty ? (
+              <span
+                className="editor-tab__close editor-tab__close--pinned"
+                aria-hidden
+              >
+                <span className="editor-tab__dot" />
+              </span>
+            ) : null
+          ) : (
             <button
               className="editor-tab__close"
               title="Close"

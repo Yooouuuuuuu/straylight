@@ -20,10 +20,9 @@ const CONFIRM_LABELS: Record<string, string> = {
   "unpin-folder": "Unpinning a folder",
   "track-repo": "Adding a repository to Source Control",
   "remove-repo": "Removing a repository",
-  "vcs-update": "Merging / rebasing from the remote",
+  "vcs-update": "Merging the fetched upstream (Update)",
   "vcs-push": "Pushing to the remote",
   "vcs-stash-pop": "Popping a stash",
-  "vcs-squash": "Squashing into the last commit (jj)",
   "vcs-amend-pushed": "Amending a pushed commit",
 };
 

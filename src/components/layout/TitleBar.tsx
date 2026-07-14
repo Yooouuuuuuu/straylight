@@ -15,7 +15,6 @@ import {
 } from "../../lib/settings";
 import { applyTheme, savedThemeNames } from "../../lib/themes";
 import { useAppStore } from "../../store/appStore";
-import type { ConnectionState } from "../../lib/ipc";
 import { IconClose, IconMaximize, IconMinimize } from "../icons";
 
 function Logo({ size = 16 }: { size?: number }) {
@@ -31,16 +30,8 @@ function Logo({ size = 16 }: { size?: number }) {
   );
 }
 
-const STATE_LABELS: Record<ConnectionState, string> = {
-  connecting: "Connecting…",
-  connected: "Connected",
-  reconnecting: "Reconnecting…",
-  disconnected: "Disconnected",
-};
-
 export function TitleBar() {
   const remote = useAppStore((s) => s.remote);
-  const connState = useAppStore((s) => s.connState);
   const hostColors = useAppStore((s) => s.hostColors);
   const settingsIssues = useAppStore((s) => s.settingsIssues);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -112,25 +103,6 @@ export function TitleBar() {
         <div className="titlebar__brand" data-tauri-drag-region>
           <Logo />
           <span className="titlebar__title">Straylight</span>
-        </div>
-        <div className="titlebar__status" data-tauri-drag-region>
-          {remote ? (
-            <>
-              <span className={`dot dot--${connState}`} />
-              <span>
-                {remote.name}{" "}
-                <span className="mono">
-                  ({remote.user}@{remote.host})
-                </span>{" "}
-                · {STATE_LABELS[connState]}
-              </span>
-            </>
-          ) : (
-            <>
-              <span className="dot dot--local" />
-              <span>Local</span>
-            </>
-          )}
         </div>
       </div>
       <div className="titlebar__controls">

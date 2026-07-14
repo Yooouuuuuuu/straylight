@@ -8,6 +8,7 @@ import { setTabEol } from "../../lib/editorModels";
 import { useAppStore } from "../../store/appStore";
 import { useVcsStore } from "../../store/vcsStore";
 import { IconBranch, IconFolder, IconTerminalGlyph } from "../icons";
+import { Tip } from "../Tooltip";
 import { TransferProgressBar } from "../transfer/TransferProgressBar";
 
 function prettyLanguage(language: string): string {
@@ -19,6 +20,8 @@ function prettyLanguage(language: string): string {
 
 export function StatusBar() {
   const localConnId = useAppStore((s) => s.localConnId);
+  const remotes = useAppStore((s) => s.remotes);
+  const wsl = useAppStore((s) => s.wsl);
   const tabs = useAppStore((s) => s.tabs);
   const activeTabId = useAppStore((s) => s.activeTabId);
   const toggleTerminal = useAppStore((s) => s.toggleTerminal);
@@ -82,6 +85,29 @@ export function StatusBar() {
       >
         <IconTerminalGlyph size={13} /> TERMINAL
       </span>
+
+      {/* One dot per connection (WSL + every remote); state spelled out on
+          hover only. WSL has no live state tracking yet (backlog) — its dot
+          reads connected while attached. */}
+      {wsl && (
+        <Tip label={`${wsl.name} connected (${wsl.user}@${wsl.host})`}>
+          <span className="statusbar__item statusbar__host">
+            <span className="dot dot--connected" />
+            {wsl.name}
+          </span>
+        </Tip>
+      )}
+      {remotes.map((r) => (
+        <Tip
+          key={r.conn.connId}
+          label={`${r.conn.name} ${r.state} (${r.conn.user}@${r.conn.host})`}
+        >
+          <span className="statusbar__item statusbar__host">
+            <span className={`dot dot--${r.state}`} />
+            {r.conn.name}
+          </span>
+        </Tip>
+      ))}
 
       <span className="statusbar__spacer" />
 

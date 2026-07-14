@@ -1,8 +1,9 @@
 /** Application shell: title bar, the resizable sidebar / editor / terminal
  *  layout, the status bar, and global overlays (connection dialog, toasts).
  *
- *  A window always has a local session (opened at startup) and may attach one
- *  remote SSH connection; the terminal belongs to the remote. */
+ *  A window always has a local session (opened at startup) and can attach a
+ *  WSL distro plus up to three SSH remotes at once; trees, terminals, and
+ *  tracked repos are all per-host. */
 import { useEffect, useRef } from "react";
 import {
   Panel,
@@ -176,12 +177,24 @@ export default function App() {
     };
   }, []);
 
-  // Remote/WSL repos have no watcher — catch up when the window regains focus
-  // (e.g. after git ops in an external terminal), throttled per repo.
+  // Window refocus = an extra poll tick for MONITORED (◉) remote/WSL repos —
+  // ◉ off means "don't touch this repo except for my own in-app actions",
+  // and local repos are watcher-live, so both are skipped by the poll.
   useEffect(() => {
-    const onFocus = () => useVcsStore.getState().refreshAll(5_000);
+    const onFocus = () => useVcsStore.getState().pollEagerRemotes();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
+  // ◉ on a WSL/remote repo = live polling: refresh every ~5 s while the
+  // window is focused, so terminal-driven git/jj ops inside the app show up
+  // without a refocus/F5 (local repos are watcher-live instead).
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!document.hasFocus()) return;
+      useVcsStore.getState().pollEagerRemotes();
+    }, 5_000);
+    return () => window.clearInterval(timer);
   }, []);
 
   // A port forward's tunnel failed (e.g. nothing listening on the remote port)

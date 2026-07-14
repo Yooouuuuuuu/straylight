@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Planned
 
+- **1 + 3 + 3 connections** — up to three WSL distros alongside the three
+  remotes (the WSL slot becomes a list, like remotes did in 0.8.12).
+- **WSL pre-connect lights** — green/yellow/gray per distro in the WSL
+  section (running + sshd ready / running / stopped), via a cheap TCP probe
+  of the distro's deterministic ssh port.
+- **WSL connection state surfaced** — the status-bar dot goes red/orange on
+  a dropped WSL link (today the ssh-status events for WSL are ignored);
+  auto-recovery (re-provision sshd) stays a separate later conversation.
 - **Tip tooltip rollout** — convert all ~139 native `title=` tooltips to the
   themed Tip component (texts reviewed surface by surface), then walk test
   plan Part H.
@@ -27,6 +35,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (VS Code "hot exit"); doubles as a WSL/remote edit safeguard.
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
+
+## [0.9.3] - 2026-07-14
+
+The monitoring model, and a UX polish sweep out of the test pass.
+
+### Added
+
+- **◉ now means "monitor", and it's ON by default** (one-time migration).
+  Monitored WSL/remote repos are checked every ~5 s while the window is
+  focused (plus on refocus), so terminal-driven git/jj ops inside the app
+  show up without F5 — this closes the view-first loop on remote hosts.
+  ◉ off = "don't touch this repo except for my own in-app actions" (for
+  huge repos where status is expensive, jj's snapshot side effect, slow
+  links, shared servers). Local repos stay watcher-live (◉ locked on).
+  Monitoring runs status only — it never pulls, never prompts.
+- **The card stamp now means one thing: "changed … ago"** — the last time
+  the repo changed *as far as Straylight has seen*. It resets when a check
+  finds a real difference (statuses carry a head `oid`, so message-only
+  amends/rebases count) or when you save/file-op inside the repo in the app
+  (any host, monitored or not — your own action is a witnessed change).
+  Silent background checks never flash a spinner or reset the counter, the
+  history stops refetching identical results, ages under 10 s read as a
+  calm "less than 10 s ago" instead of ticking, and hovering the stamp
+  answers the other question: "checked … ago" (with a "not monitored"
+  prefix where apt). Manual ⟳ / F5 stay loud.
+- **Card drag got tab-strip manners**: an insertion stripe shows where the
+  dragged card will land (above/below the hovered card's midpoint), the
+  cursor never shows "blocked" inside the panel, and dropping on empty
+  space just puts the card back.
+- **git ⇄ jj lens swap on the history surfaces** — colocated repos get an
+  explicit "swap to git/jj history" button on its own line, in the sidebar
+  history panel AND the editor log tab (the tab flips in place; card,
+  panel, and tab always agree).
+- **The monitor icon is a heartbeat** — an ECG pulse when monitoring, a
+  flatline when off (◉ retired; the eye was already the hidden-files
+  toggle).
+- **Push/ahead counts are superscripts** — ↑² instead of ↑2, on the push
+  button and the branch line's ahead/behind pair.
+- **Connection dots moved to the status bar** — one dot + the connection's
+  name (the ssh-config alias / distro) per attached connection, WSL + every
+  remote, not just the primary. Hover spells it out: "my_pc_2 connected
+  (liangyou@myserver)". Green solid = connected, orange pulse =
+  connecting/reconnecting, red = dropped. The title bar's old primary-only
+  status text is gone — the top-left is identity + drag space now.
+- **The empty editor is a welcome screen** — logo, a one-line "pin a folder
+  in the explorer" pointer, and five command shortcuts. The "Connect to a
+  new server" button is gone (the sidebar owns connecting).
+- **Middle-click opens a file permanently** in the explorer (double-click
+  semantics; single-click stays preview) — VS Code behavior.
+- **New hidden-files eye icons** — hand-drawn open/closed-lid pair replaces
+  the old outline/slash eyes (explorer toolbars + transfer panes).
+- **Readable primary buttons** — `.btn--primary` (Commit and friends) now
+  uses the theme's accent with its designated on-accent text color
+  (`section-fg`) and a brightness hover, replacing the Dracula-era purple
+  fill and its hardcoded lilac hover that read badly under the Straylight
+  themes.
+
+### Fixed
+
+- **A pinned dirty tab now shows its unsaved dot** (the dot lived inside
+  the close button, which pinned tabs don't render).
+- **A deleted/unreachable pinned folder no longer spins forever** — a
+  failed listing was reloaded instantly and endlessly, so the "Folder
+  unavailable" message never got a frame to render (also a busy CPU loop on
+  instant failures). The message now points at F5; the per-root Retry
+  button is gone (refresh is refresh).
 
 ## [0.9.2] - 2026-07-13
 

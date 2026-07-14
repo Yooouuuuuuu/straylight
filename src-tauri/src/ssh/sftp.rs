@@ -1,6 +1,6 @@
-//! SFTP as a [`FileTransport`]: read-only directory listing, file reading (with
-//! fast binary detection), and stat over a remote SSH connection. Writing and
-//! transfers arrive in Phase 2.
+//! SFTP as a [`FileTransport`]: directory listing, file read/write (with fast
+//! binary detection and save-conflict checks), rename/create/remove/copy/move,
+//! and streamed transfer handles, over a remote SSH connection's SFTP channel.
 
 use std::sync::Arc;
 

@@ -1,5 +1,5 @@
 /** Generic confirmation for VC actions that mutate the working tree or publish
- *  (Update/Rebase, Push, stash Pop, amending a pushed commit, jj squash).
+ *  (Update, Push, stash Pop, amending a pushed commit).
  *  Dialogs opened with an id offer "don't ask again" (settings.json
  *  `confirms` — delete the key there to bring a dialog back). */
 import { useEffect, useState } from "react";

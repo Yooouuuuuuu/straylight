@@ -1,7 +1,7 @@
-//! WSL integration. Step 1: enumerate installed distros for the sidebar's WSL
-//! section. Later steps provision an `sshd` inside a distro (via `wsl.exe -u
-//! root`) and connect to it as a `localhost` SSH host, reusing the SSH transport
-//! — see `docs/wsl-connection.md`.
+//! WSL integration: enumerate installed distros for the sidebar's WSL section,
+//! provision an `sshd` inside a distro on connect (consent-gated, via `wsl.exe
+//! -u root`), and attach it as a `localhost` SSH host, reusing the SSH
+//! transport — see `docs/wsl-connection.md`.
 
 use std::path::PathBuf;
 

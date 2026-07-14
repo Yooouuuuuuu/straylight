@@ -5,8 +5,8 @@ control** built with Tauri v2 (Rust backend) and React (frontend). The VS Code
 Remote-SSH experience without the weight: target ~30–50 MB memory, ~10 MB
 installer.
 
-This doc describes the system **as it exists** (rewritten 2026-07-13, accurate
-through v0.8.15 + the unreleased fixes). Feature-level behavior lives in the
+This doc describes the system **as it exists** (rewritten 2026-07-13; verified
+as-built for the 1.0.0 release). Feature-level behavior lives in the
 README; per-release detail in CHANGELOG.md; promises in
 [stability.md](stability.md); deferred work in [backlog.md](backlog.md).
 

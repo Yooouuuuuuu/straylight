@@ -87,7 +87,7 @@ pub struct WriteResult {
     pub modified: i64,
 }
 
-/// Read-only file operations. Phase 2 adds `write_file` here.
+/// The file operations every transport (SFTP, local) implements.
 #[async_trait::async_trait]
 pub trait FileTransport: Send + Sync {
     /// List a directory. An empty path resolves to a transport-defined default

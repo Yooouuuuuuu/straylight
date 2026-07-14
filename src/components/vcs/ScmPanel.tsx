@@ -1,8 +1,10 @@
 /** Right-side Source Control panel: a stack of per-repo cards. Repos are opened
- *  explicitly (validated as a real repo), don't auto-refresh until toggled
- *  "eager", and show a running indicator (which doubles as a manual cancel).
- *  Slice 1 is read-only — the change list, branch, and counts; commit/diff come
- *  in later slices. */
+ *  explicitly (validated as a real repo). Local repos are file-watched live;
+ *  WSL/remote repos are ◉-monitored (silent ~5 s polls while the window is
+ *  focused) unless toggled off. A manual refresh shows a spinner that doubles
+ *  as a cancel; git cards carry the full mutation surface while jj cards are
+ *  view-first (bookmark switch/create, discard, fetch — see
+ *  docs/version-control.md). */
 import { useEffect, useState, type ReactNode } from "react";
 
 import { useAppStore } from "../../store/appStore";
@@ -14,9 +16,16 @@ import { openFileByPath } from "../../lib/openFile";
 import { vcsBranches, type VcsBranch } from "../../lib/ipc";
 import { vcsClass, vcsLetter } from "../../lib/vcsDecorations";
 import { FolderBrowser } from "../FolderBrowser";
-import { RelativeTime } from "../RelativeTime";
+import { RelativeTime, formatAgo } from "../RelativeTime";
 import { Tip } from "../Tooltip";
-import { IconClose, IconPanelCollapse, IconPlus, IconRefresh } from "../icons";
+import {
+  IconClose,
+  IconPanelCollapse,
+  IconPlus,
+  IconPulse,
+  IconPulseOff,
+  IconRefresh,
+} from "../icons";
 
 interface ConnChoice {
   connId: string;
@@ -98,7 +107,17 @@ export function ScmPanel() {
         </div>
       )}
 
-      <div className="scm__body">
+      <div
+        className="scm__body"
+        // Never show the blocked cursor while dragging a card around the
+        // panel — dropping on empty space just puts it back (no-op).
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes("application/x-straylight-repo")) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+          }
+        }}
+      >
         {repos.length === 0 ? (
           <div className="scm__empty">No repositories. Click + to open one.</div>
         ) : (
@@ -242,24 +261,33 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   );
 
   const dragId = `${repo.connKey}::${repo.root}`;
+  // Insertion preview while another card is dragged over this one — above or
+  // below the midpoint decides where it would land (tab-strip style).
+  const [dropPos, setDropPos] = useState<"before" | "after" | null>(null);
 
   return (
     <div
-      className="repo-card"
+      className={`repo-card ${dropPos ? `repo-card--drop-${dropPos}` : ""}`}
       style={{ borderColor: hostColorForConnKey(hostColors, repo.connKey) }}
       title={`${repo.connKey} — ${repo.root}`}
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes("application/x-straylight-repo")) {
           e.preventDefault();
           e.dataTransfer.dropEffect = "move";
+          const rect = e.currentTarget.getBoundingClientRect();
+          setDropPos(e.clientY < rect.top + rect.height / 2 ? "before" : "after");
         }
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropPos(null);
       }}
       onDrop={(e) => {
         const from = e.dataTransfer.getData("application/x-straylight-repo");
         if (from && from !== dragId) {
           e.preventDefault();
-          moveRepo(from, dragId);
+          moveRepo(from, dragId, dropPos === "after");
         }
+        setDropPos(null);
       }}
     >
       <div
@@ -303,22 +331,24 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
           </button>
         </Tip>
         {isLocal ? (
-          <Tip label="Live — this repo is file-watched; changes appear by themselves">
-            <span className="icon-btn icon-btn--active icon-btn--static">◉</span>
+          <Tip label="Monitored live — file-watched; changes appear by themselves">
+            <span className="icon-btn icon-btn--static">
+              <IconPulse size={14} />
+            </span>
           </Tip>
         ) : (
           <Tip
             label={
               repo.eager
-                ? "Live updates on (refresh after in-app saves) — click to pause"
-                : "Live updates off — click to refresh after in-app saves"
+                ? "Monitoring — checks every 5 s, plus your in-app saves; click to stop"
+                : "Not monitored — only your in-app saves update this repo; click to monitor"
             }
           >
             <button
-              className={`icon-btn ${repo.eager ? "icon-btn--active" : ""}`}
+              className="icon-btn"
               onClick={() => toggleEager(repo.connKey, repo.root)}
             >
-              {repo.eager ? "◉" : "○"}
+              {repo.eager ? <IconPulse size={14} /> : <IconPulseOff size={14} />}
             </button>
           </Tip>
         )}
@@ -366,8 +396,16 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
             </span>
             {(st.ahead || st.behind) && (
               <span className="repo-card__ab">
-                {st.ahead ? `↑${st.ahead}` : ""}
-                {st.behind ? `↓${st.behind}` : ""}
+                {st.ahead ? (
+                  <>
+                    ↑<sup className="sup-count">{st.ahead}</sup>
+                  </>
+                ) : null}
+                {st.behind ? (
+                  <>
+                    ↓<sup className="sup-count">{st.behind}</sup>
+                  </>
+                ) : null}
               </span>
             )}
             <span className="repo-card__count">{summarize(repo)}</span>
@@ -408,7 +446,9 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                     {repo.remoteBusy === "push" ? (
                       <span className="spinner spinner--sm" />
                     ) : st.ahead ? (
-                      `↑${st.ahead}`
+                      <>
+                        ↑<sup className="sup-count">{st.ahead}</sup>
+                      </>
                     ) : (
                       "↑"
                     )}
@@ -681,9 +721,19 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
         <div className="repo-card__stamp">updating…</div>
       ) : (
         repo.lastUpdated && (
-          <div className="repo-card__stamp">
-            updated <RelativeTime at={repo.lastUpdated} />
-          </div>
+          <Tip
+            label={
+              repo.lastChecked
+                ? `${!isLocal && !repo.eager ? "not monitored — " : ""}checked ${formatAgo(
+                    Math.max(0, Math.floor((Date.now() - repo.lastChecked) / 1000)),
+                  )}`
+                : "not checked yet this session"
+            }
+          >
+            <div className="repo-card__stamp">
+              changed <RelativeTime at={repo.lastUpdated} title={null} />
+            </div>
+          </Tip>
         )
       )}
     </div>

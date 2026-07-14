@@ -158,6 +158,22 @@ export function FileNode({
       style={{ paddingLeft: 6 + depth * 14 }}
       onClick={renaming ? undefined : handleClick}
       onDoubleClick={renaming ? undefined : handleDoubleClick}
+      // Middle-click = open permanently (double-click semantics), VS Code
+      // style; preventDefault suppresses the OS autoscroll gesture.
+      onMouseDown={
+        renaming
+          ? undefined
+          : (e) => {
+              if (e.button === 1) e.preventDefault();
+            }
+      }
+      onAuxClick={
+        renaming
+          ? undefined
+          : (e) => {
+              if (e.button === 1 && !entry.isDir) onOpen({ preview: false });
+            }
+      }
       onContextMenu={(event) => {
         event.preventDefault();
         onContextMenu(event.clientX, event.clientY);

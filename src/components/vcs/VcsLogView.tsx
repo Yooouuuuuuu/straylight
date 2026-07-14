@@ -41,13 +41,29 @@ export function VcsLogTabHead({
     ? hostColorForConnKey(hostColors, repo.connKey)
     : "var(--border)";
   return (
-    <div className="vcs-logtab__head" title={root} style={{ borderLeftColor: color }}>
-      <span className="vcs-logtab__kind">
-        {backend === "jj" ? "jj history" : "git history"}
-      </span>
-      {" · "}
-      {repo?.label ?? basename(root)}
-    </div>
+    <>
+      <div className="vcs-logtab__head" title={root} style={{ borderLeftColor: color }}>
+        <span className="vcs-logtab__kind">
+          {backend === "jj" ? "jj history" : "git history"}
+        </span>
+        {" · "}
+        {repo?.label ?? basename(root)}
+      </div>
+      {repo?.colocated && (
+        <button
+          className="history-swap history-swap--tab"
+          onClick={() => {
+            // Flip this tab's lens, and keep the repo card in agreement.
+            const next = backend === "jj" ? "git" : "jj";
+            useAppStore.getState().setLogTabBackend(connId, root, next);
+            if (repo.backend !== next)
+              useVcsStore.getState().toggleBackend(repo.connKey, repo.root);
+          }}
+        >
+          swap to {backend === "jj" ? "git" : "jj"} history
+        </button>
+      )}
+    </>
   );
 }
 

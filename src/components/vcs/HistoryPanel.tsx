@@ -72,6 +72,17 @@ export function HistoryPanel() {
       >
         {repo.label}
       </div>
+      {/* Colocated repos: an explicit lens swap on its own line. */}
+      {repo.colocated && (
+        <button
+          className="history-swap"
+          onClick={() =>
+            useVcsStore.getState().toggleBackend(repo.connKey, repo.root)
+          }
+        >
+          swap to {repo.backend === "jj" ? "git" : "jj"} history
+        </button>
+      )}
       <div className="history-panel__body">
         <VcsLogView connId={repo.connId} root={repo.root} backend={repo.backend} />
       </div>

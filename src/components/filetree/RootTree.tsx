@@ -176,7 +176,10 @@ export function RootTree({
   useEffect(() => {
     if (collapsed) return;
     const state = dirs[rootPath];
-    if (state?.entries || state?.loading) return;
+    // `error` must stop the effect too — otherwise a failed listing (deleted
+    // folder, dead host) re-loads immediately and forever, so the
+    // "unavailable + Retry" row never gets a frame to render.
+    if (state?.entries || state?.loading || state?.error) return;
     void loadDir(rootPath).then(() => markRefreshed(connId));
   }, [collapsed, rootPath, dirs, loadDir, markRefreshed, connId]);
 
@@ -431,14 +434,8 @@ export function RootTree({
           ) : rootState.error ? (
             <div className="filetree__message filetree__message--stack">
               <span>Folder unavailable — it may have been removed, or the host
-              isn't responding.</span>
+              isn't responding. Refresh (F5) to try again.</span>
               <span className="filetree__error-detail">{rootState.error}</span>
-              <button
-                className="btn btn--ghost"
-                onClick={() => void loadDir(rootPath)}
-              >
-                Retry
-              </button>
             </div>
           ) : (
             renderDir(rootPath, 0)

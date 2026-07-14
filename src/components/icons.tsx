@@ -197,29 +197,99 @@ export function IconRefresh({ size = 16, className }: IconProps) {
   );
 }
 
-export function IconEye({ size = 16, className }: IconProps) {
+/** Heartbeat / ECG — "this repo is monitored". */
+export function IconPulse({ size = 16, className }: IconProps) {
   return (
     <svg {...svgProps(size)} className={className}>
       <path
-        d="M1.5 8S3.8 3.5 8 3.5 14.5 8 14.5 8 12.2 12.5 8 12.5 1.5 8 1.5 8Z"
+        d="M1.5 8h3L6 4.5l3 7L10.5 8h4"
         stroke="currentColor"
-        strokeWidth="1.2"
+        strokeWidth="1.3"
+        strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <circle cx="8" cy="8" r="1.8" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
+/** Flatline — monitoring off. */
+export function IconPulseOff({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M1.5 8h13"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+export function IconEye({ size = 16, className }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+    >
+      <path
+        d="M2.5 12C4.6 7.7 8.1 5 12 5s7.4 2.7 9.5 7c-2.1 4.3-5.6 7-9.5 7s-7.4-2.7-9.5-7Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle
+        cx="12"
+        cy="12"
+        r="3"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
 export function IconEyeOff({ size = 16, className }: IconProps) {
   return (
-    <svg {...svgProps(size)} className={className}>
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+    >
       <path
-        d="M6.3 6.3A1.8 1.8 0 0 0 8 9.8M3 3l10 10M4.8 4.9C2.9 5.9 1.5 8 1.5 8s2.3 4.5 6.5 4.5c1 0 1.9-.2 2.7-.6M9.5 4c4 .6 5 4 5 4s-.5 1-1.4 2"
+        d="M2.5 10c2.1 3.2 5.6 5 9.5 5s7.4-1.8 9.5-5"
         stroke="currentColor"
-        strokeWidth="1.2"
+        strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
+      />
+      <path
+        d="M12 15v3.5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M6.6 13.9 4.5 16.7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M17.4 13.9l2.1 2.8"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
       />
     </svg>
   );

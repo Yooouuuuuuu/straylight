@@ -2057,15 +2057,18 @@
   cursor: not-allowed;
 }
 
+/* Primary action: accent-filled, with the theme's designated on-accent text
+   color (`section-fg` — the same slot the accent-tinted section bars use).
+   Hover brightens instead of hardcoding a color, so every theme works. */
 .btn--primary {
-  background: var(--purple);
-  border-color: var(--purple);
-  color: var(--bg-secondary);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--section-fg);
   font-weight: 600;
 }
 
 .btn--primary:hover {
-  background: #cba6fb;
+  filter: brightness(1.15);
 }
 
 .btn--ghost {
@@ -3842,6 +3845,15 @@ select option {
   display: none;
 }
 
+/* A pinned dirty tab has no × to swap to — its dot stays put on hover. */
+.editor-tab__close--pinned {
+  pointer-events: none;
+}
+
+.editor-tab--dirty:hover .editor-tab__close--pinned .editor-tab__dot {
+  display: block;
+}
+
 .editor-tab--dirty:hover .editor-tab__x {
   display: inline-flex;
   opacity: 0.8;
@@ -4538,7 +4550,8 @@ select option {
 }
 
 /* An icon-btn-shaped indicator that is not clickable (e.g. the locked-on
-   live dot on local repo cards). */
+   monitor dot on local repo cards). Monitoring-on is the default state, so
+   it sits quiet and gray like its neighbors. */
 .icon-btn--static {
   display: inline-flex;
   align-items: center;
@@ -4548,7 +4561,57 @@ select option {
 
 .icon-btn--static:hover {
   background: transparent;
-  color: var(--cyan); /* stay in the active color — a locked indicator never reacts */
+  color: var(--fg-secondary); /* a locked indicator never reacts */
+}
+
+/* Card drag: insertion stripe above/below the hovered card (tab-strip
+   style) — shows where the dragged card would land. */
+.repo-card--drop-before {
+  box-shadow: 0 -3px 0 0 var(--accent);
+}
+
+.repo-card--drop-after {
+  box-shadow: 0 3px 0 0 var(--accent);
+}
+
+/* Small raised count beside ↑/↓ (push button, ahead/behind pair). */
+.sup-count {
+  font-size: 0.62em;
+  line-height: 0;
+  vertical-align: super;
+  margin-left: 1px;
+}
+
+/* Per-connection dots in the status bar: dot + user@host, state on hover. */
+.statusbar__host {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+}
+
+/* Colocated repos: the explicit lens swap on its own line ("swap to git
+   history"), under the history header (sidebar) / head line (editor tab). */
+.history-swap {
+  align-self: flex-start;
+  margin: 0 var(--space-3) var(--space-2);
+  padding: 1px var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.history-swap:hover {
+  color: var(--fg-primary);
+  background: var(--bg-tertiary);
+}
+
+.history-swap--tab {
+  margin: 0 var(--space-4) var(--space-2);
 }
 
 .toast-stack {

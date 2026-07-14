@@ -584,6 +584,8 @@ interface AppState {
     backend: string;
     label: string;
   }) => void;
+  /** Flip an open log tab's lens (git ⇄ jj on a colocated repo). */
+  setLogTabBackend: (connId: string, root: string, backend: string) => void;
   setActiveTab: (id: string) => void;
   cycleTab: (direction: 1 | -1) => void;
   closeTab: (id: string, allowPinned?: boolean) => void;
@@ -1380,6 +1382,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
       };
       return groupsPatch(s, [...s.tabs, tab], id);
     }),
+
+  setLogTabBackend: (connId, root, backend) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) =>
+        t.id === `log::${connId}::${root}` ? { ...t, vcsBackend: backend } : t,
+      ),
+    })),
 
   setActiveTab: (id) => set((s) => groupsPatch(s, s.tabs, id)),
 

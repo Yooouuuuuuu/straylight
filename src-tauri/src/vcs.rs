@@ -1,4 +1,4 @@
-//! Version control (git; jj arrives in a later slice).
+//! Version control (git + jj).
 //!
 //! VCS operations run on the host that owns the repo — an SSH exec channel for
 //! remote/WSL, or a local process — because Straylight has no local clone (see
@@ -46,10 +46,15 @@ pub struct VcsStatus {
     pub ahead: Option<u32>,
     pub behind: Option<u32>,
     pub changes: Vec<VcsChange>,
+    /// Head fingerprint — changes on ANY history rewrite even when the change
+    /// list doesn't (amend, rebase), so the frontend's "did anything actually
+    /// change?" comparison can skip no-op refreshes. git: `branch.oid`;
+    /// jj: `<@ commit id>/<@- commit id>`.
+    pub oid: String,
 }
 
 /// Validate that `dir` is a repository and return its backend + root. Rejects a
-/// non-repo so the UI can refuse to add it. (git only for now.)
+/// non-repo so the UI can refuse to add it.
 #[tauri::command]
 pub async fn vcs_open(
     state: State<'_, AppState>,
@@ -1017,7 +1022,7 @@ async fn jj_status(state: &AppState, conn_id: &str, root: &str) -> Result<VcsSta
             "-r",
             "@",
             "-T",
-            "bookmarks ++ \"\\t\" ++ change_id.short() ++ \"\\t\" ++ description.first_line()",
+            "bookmarks ++ \"\\t\" ++ change_id.short() ++ \"\\t\" ++ description.first_line() ++ \"\\t\" ++ commit_id.short()",
         ],
     )
     .await?;
@@ -1026,7 +1031,8 @@ async fn jj_status(state: &AppState, conn_id: &str, root: &str) -> Result<VcsSta
         conn_id,
         root,
         &[
-            "jj", "--color", "never", "log", "--no-graph", "-r", "@-", "-T", "bookmarks",
+            "jj", "--color", "never", "log", "--no-graph", "-r", "@-", "-T",
+            "bookmarks ++ \"\\t\" ++ commit_id.short()",
         ],
     )
     .await?;
@@ -1034,7 +1040,10 @@ async fn jj_status(state: &AppState, conn_id: &str, root: &str) -> Result<VcsSta
     let fields: Vec<&str> = at.stdout.trim_end().split('\t').collect();
     let at_bm = fields.first().map(|s| s.trim()).unwrap_or("");
     let change_id = fields.get(1).map(|s| s.trim()).unwrap_or("");
-    let parent_bm = parent.stdout.trim();
+    let at_commit = fields.get(3).map(|s| s.trim()).unwrap_or("");
+    let pfields: Vec<&str> = parent.stdout.trim_end().split('\t').collect();
+    let parent_bm = pfields.first().map(|s| s.trim()).unwrap_or("");
+    let parent_commit = pfields.get(1).map(|s| s.trim()).unwrap_or("");
     let reference = if !at_bm.is_empty() {
         at_bm.to_string()
     } else if !parent_bm.is_empty() {
@@ -1049,6 +1058,7 @@ async fn jj_status(state: &AppState, conn_id: &str, root: &str) -> Result<VcsSta
         ahead: None,
         behind: None,
         changes,
+        oid: format!("{at_commit}/{parent_commit}"),
     })
 }
 
@@ -1148,6 +1158,7 @@ fn kind_from_code(code: char) -> &'static str {
 /// followed by a separate NUL field holding the original path.
 fn parse_porcelain_v2(data: &str) -> VcsStatus {
     let mut reference = String::new();
+    let mut oid = String::new();
     let mut ahead = None;
     let mut behind = None;
     let mut changes = Vec::new();
@@ -1158,6 +1169,8 @@ fn parse_porcelain_v2(data: &str) -> VcsStatus {
         let t = tokens[i];
         if let Some(rest) = t.strip_prefix("# branch.head ") {
             reference = rest.to_string();
+        } else if let Some(rest) = t.strip_prefix("# branch.oid ") {
+            oid = rest.to_string();
         } else if let Some(rest) = t.strip_prefix("# branch.ab ") {
             for part in rest.split_whitespace() {
                 if let Some(a) = part.strip_prefix('+') {
@@ -1256,6 +1269,7 @@ fn parse_porcelain_v2(data: &str) -> VcsStatus {
         ahead,
         behind,
         changes,
+        oid,
     }
 }
 

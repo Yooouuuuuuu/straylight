@@ -45,8 +45,7 @@ pub enum ConnectionState {
     Disconnected,
 }
 
-/// Status payload emitted on the `ssh-status` event and returned by
-/// [`ssh_get_status`].
+/// Status payload emitted on the `ssh-status` event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionStatus {
@@ -161,8 +160,8 @@ impl Connection {
     }
 }
 
-/// russh client handler. Phase 1 trusts every host key (trust-on-first-use);
-/// Phase 2 will verify against `known_hosts`.
+/// russh client handler. Host keys are trusted on first use; `known_hosts`
+/// verification is a documented limitation (see docs/backlog.md).
 pub struct ClientHandler;
 
 #[async_trait::async_trait]

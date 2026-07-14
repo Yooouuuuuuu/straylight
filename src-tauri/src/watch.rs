@@ -1,7 +1,9 @@
 //! Filesystem watcher for **local** repos, so the Source Control panel updates
 //! live (VS Code-style) when files or `.git`/`.jj` change outside the app —
 //! e.g. `git add` in a terminal or an editor save elsewhere. Remote/WSL repos
-//! have no watcher (no agent on the host); they refresh on window focus instead.
+//! have no watcher (no agent on the host); the ◉ monitor polls them instead
+//! (~5 s while the window is focused, plus on refocus — see the frontend's
+//! `vcsStore.pollEagerRemotes`).
 //!
 //! Events are debounced (trailing ~300 ms of quiet) and emitted to the frontend
 //! as one `vcs-fs-change` per burst; the frontend adds its own guard against

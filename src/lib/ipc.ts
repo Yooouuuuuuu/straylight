@@ -314,7 +314,7 @@ export function fsTransferCheck(
 }
 
 // ---------------------------------------------------------------------------
-// Version control (git; jj later)
+// Version control (git + jj)
 // ---------------------------------------------------------------------------
 
 export interface VcsRepoInfo {
@@ -337,6 +337,9 @@ export interface VcsStatus {
   ahead: number | null;
   behind: number | null;
   changes: VcsChange[];
+  /** Head fingerprint — moves on any history rewrite (amend/rebase) even
+   *  when the change list doesn't; used for "did anything change?" checks. */
+  oid: string;
 }
 
 /** Validate that `dir` is a repository; returns its backend + root, or errors. */

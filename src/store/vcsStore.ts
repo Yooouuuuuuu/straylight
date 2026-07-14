@@ -41,9 +41,14 @@ export interface TrackedRepo {
   label: string;
   eager: boolean;
   status: VcsStatus | null;
-  activity: "idle" | "loading" | "error";
+  /** "polling" = a silent background refresh (no spinner, no stamp flip). */
+  activity: "idle" | "loading" | "polling" | "error";
   error: string | null;
+  /** Last time the status actually CHANGED — drives the "updated … ago"
+   *  stamp and the history refetch. A no-op refresh does not advance it. */
   lastUpdated: number | null;
+  /** Last time a refresh ran, changed or not — drives poll/focus throttles. */
+  lastChecked?: number | null;
   /** The remote op currently running, or null. */
   remoteBusy?: "fetch" | "pull" | "push" | "update" | null;
   /** UI: the commit box is expanded (persisted per repo). */
@@ -95,7 +100,11 @@ interface VcsState {
   openRepoFromExplorer: (connId: string, path: string) => void;
   removeRepo: (connKey: string, root: string) => void;
   toggleEager: (connKey: string, root: string) => void;
-  refreshRepo: (connKey: string, root: string) => Promise<void>;
+  refreshRepo: (
+    connKey: string,
+    root: string,
+    opts?: { silent?: boolean; forceStamp?: boolean },
+  ) => Promise<void>;
   cancelRefresh: (connKey: string, root: string) => void;
   stage: (connKey: string, root: string, paths: string[]) => Promise<void>;
   unstage: (connKey: string, root: string, paths: string[]) => Promise<void>;
@@ -115,7 +124,7 @@ interface VcsState {
   toggleCommitOpen: (connKey: string, root: string) => void;
   /** Reorder cards: move the repo with id `fromId` to `toId`'s position. Ids
    *  are `${connKey}::${root}` (the card drag payload). */
-  moveRepo: (fromId: string, toId: string) => void;
+  moveRepo: (fromId: string, toId: string, after?: boolean) => void;
   /** Colocated repos: flip the driving backend (jj ⇄ git) and refresh. */
   toggleBackend: (connKey: string, root: string) => void;
   /** Incoming block dismissals (session-only; ⇣ un-dismisses). */
@@ -132,7 +141,12 @@ interface VcsState {
   onFileChanged: (connId: string, path: string) => void;
   /** Refresh every connected repo. `throttleMs` skips repos refreshed more
    *  recently than that (0 = force). */
-  refreshAll: (throttleMs: number) => void;
+  refreshAll: (
+    throttleMs: number,
+    opts?: { silent?: boolean; skipLocal?: boolean },
+  ) => void;
+  /** Poll tick for ◉ WSL/remote repos (local repos are watcher-live). */
+  pollEagerRemotes: () => void;
   /** A watched local repo's files changed on disk (debounced burst). */
   onFsChange: (connId: string, root: string) => void;
   /** Start/stop backend filesystem watchers to match the tracked local repos. */
@@ -193,17 +207,24 @@ function persist(repos: TrackedRepo[]): void {
   }
 }
 
+// One-time migration (2026-07-14): ◉ changed meaning from "eager refresh"
+// to "monitor" and its default flipped to ON — reset every stored repo to
+// the new default once; user toggles persist normally afterwards.
+const MONITOR_MIGRATED_KEY = "straylight.monitorDefaultOn";
+
 function load(): TrackedRepo[] {
   try {
     const arr = JSON.parse(localStorage.getItem(KEY) ?? "[]");
     if (!Array.isArray(arr)) return [];
+    const migrate = !localStorage.getItem(MONITOR_MIGRATED_KEY);
+    if (migrate) localStorage.setItem(MONITOR_MIGRATED_KEY, "1");
     return arr.map((d) => ({
       connKey: String(d.connKey),
       connId: null,
       root: String(d.root),
       backend: String(d.backend ?? "git"),
       label: String(d.label ?? basename(String(d.root))),
-      eager: !!d.eager,
+      eager: migrate ? true : !!d.eager,
       status: d.status ?? null,
       activity: "idle" as const,
       error: null,
@@ -317,7 +338,7 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
           root,
           backend: info.backend,
           label: basename(root) || root,
-          eager: false,
+          eager: true, // monitored by default (◉ = monitor, 2026-07-14)
           status: null,
           activity: "idle" as const,
           error: null,
@@ -366,7 +387,7 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       void get().refreshRepo(connKey, root);
   },
 
-  refreshRepo: async (connKey, root) => {
+  refreshRepo: async (connKey, root, opts) => {
     const repo = get().repos.find((r) => r.connKey === connKey && r.root === root);
     if (!repo) return;
     const connId = repo.connId ?? connIdForKey(connKey);
@@ -387,7 +408,9 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       repos: mapRepo(s.repos, connKey, root, (r) => ({
         ...r,
         connId,
-        activity: "loading",
+        // Silent (poll / focus / watcher) refreshes don't show the spinner
+        // or flip the stamp to "updating…" — only explicit ones do.
+        activity: opts?.silent ? "polling" : "loading",
         error: null,
       })),
     }));
@@ -395,13 +418,26 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       const status = await vcsStatus(connId, root, repo.backend);
       if (tokens.get(id) !== token) return; // superseded or cancelled
       set((s) => {
-        const repos = mapRepo(s.repos, connKey, root, (r) => ({
-          ...r,
-          status,
-          activity: "idle" as const,
-          error: null,
-          lastUpdated: Date.now(),
-        }));
+        const now = Date.now();
+        const repos = mapRepo(s.repos, connKey, root, (r) => {
+          // "Checked" always advances; the stamp ("changed … ago", which the
+          // history also keys off) only when the result differs — a no-op
+          // poll must not reset the counter or refetch the history. An
+          // in-app save/file-op forces the stamp (we witnessed the change,
+          // even when the status SHAPE is identical — e.g. an already-M
+          // file re-saved).
+          const differs =
+            !r.status || JSON.stringify(r.status) !== JSON.stringify(status);
+          const stamp = differs || !!opts?.forceStamp;
+          return {
+            ...r,
+            status: differs ? status : r.status,
+            activity: "idle" as const,
+            error: null,
+            lastChecked: now,
+            lastUpdated: stamp ? now : (r.lastUpdated ?? now),
+          };
+        });
         persist(repos);
         return { repos, decorations: buildDecorations(repos) };
       });
@@ -635,15 +671,18 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       incomingHidden: { ...s.incomingHidden, [repoId(connKey, root)]: false },
     })),
 
-  moveRepo: (fromId, toId) =>
+  moveRepo: (fromId, toId, after) =>
     set((s) => {
       const id = (r: TrackedRepo) => `${r.connKey}::${r.root}`;
       const from = s.repos.findIndex((r) => id(r) === fromId);
-      const to = s.repos.findIndex((r) => id(r) === toId);
-      if (from < 0 || to < 0 || from === to) return s;
+      if (from < 0 || id(s.repos[from]) === toId) return s;
       const repos = [...s.repos];
       const [moved] = repos.splice(from, 1);
-      repos.splice(to, 0, moved);
+      // Recompute the target AFTER removal so the insert index is right in
+      // both drag directions; `after` = the drop landed past the midpoint.
+      const to = repos.findIndex((r) => id(r) === toId);
+      if (to < 0) return s;
+      repos.splice(after ? to + 1 : to, 0, moved);
       persist(repos);
       return { repos };
     }),
@@ -722,13 +761,33 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
     }
   },
 
-  refreshAll: (throttleMs) => {
+  refreshAll: (throttleMs, opts) => {
+    const local = useAppStore.getState().localConnId;
     const now = Date.now();
     for (const r of get().repos) {
       if (!r.connId) continue;
-      if (r.activity === "loading") continue;
-      if (throttleMs > 0 && r.lastUpdated && now - r.lastUpdated < throttleMs) continue;
-      void get().refreshRepo(r.connKey, r.root);
+      // Local repos are watcher-live — an automatic catch-up (window focus)
+      // can't tell them anything new, so it skips them entirely.
+      if (opts?.skipLocal && r.connId === local) continue;
+      if (r.activity === "loading" || r.activity === "polling") continue;
+      const checked = r.lastChecked ?? r.lastUpdated;
+      if (throttleMs > 0 && checked && now - checked < throttleMs) continue;
+      void get().refreshRepo(r.connKey, r.root, { silent: opts?.silent });
+    }
+  },
+
+  pollEagerRemotes: () => {
+    const local = useAppStore.getState().localConnId;
+    const now = Date.now();
+    for (const r of get().repos) {
+      if (!r.connId || r.connId === local) continue; // local = fs watcher
+      if (!r.eager) continue; // ◉ is the opt-in
+      if (r.activity === "loading" || r.activity === "polling") continue;
+      // Slightly under the 5 s tick so a refresh from another trigger
+      // (save, focus) doesn't double up with the poll.
+      const checked = r.lastChecked ?? r.lastUpdated;
+      if (checked && now - checked < 4_000) continue;
+      void get().refreshRepo(r.connKey, r.root, { silent: true });
     }
   },
 
@@ -737,11 +796,14 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
     const r = get().repos.find(
       (x) => x.connId === connId && norm(x.root).replace(/\/+$/, "") === target,
     );
-    if (!r || r.activity === "loading") return;
+    if (!r || r.activity === "loading" || r.activity === "polling") return;
     // Our own status call touches `.git/index` (stat-cache refresh) right after
     // it completes — ignore the echo so watch → refresh can't self-loop.
-    if (r.lastUpdated && Date.now() - r.lastUpdated < 1_000) return;
-    void get().refreshRepo(r.connKey, r.root);
+    const checked = r.lastChecked ?? r.lastUpdated;
+    if (checked && Date.now() - checked < 1_000) return;
+    // Watcher-driven = background: no spinner/stamp flash; the stamp still
+    // resets when the refresh finds real changes.
+    void get().refreshRepo(r.connKey, r.root, { silent: true });
   },
 
   syncWatchers: () => {
@@ -773,10 +835,16 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
     for (const r of get().repos) {
       if (
         r.connId === connId &&
-        r.eager &&
         np.startsWith(norm(r.root).replace(/\/+$/, "") + "/")
       ) {
-        void get().refreshRepo(r.connKey, r.root);
+        // In-app saves/file-ops ALWAYS refresh the containing repo — even
+        // unmonitored (◉ off) ones: the user's own action is the one change
+        // source we always know about. Silent (no spinner), but the stamp
+        // resets unconditionally (forceStamp — we witnessed the change).
+        void get().refreshRepo(r.connKey, r.root, {
+          silent: true,
+          forceStamp: true,
+        });
       }
     }
   },

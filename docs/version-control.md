@@ -5,7 +5,7 @@ hosts: status, tree decorations, diffs, stage/commit, history with a
 multi-lane graph, branches/bookmarks, stash, conflicts + a 3-way merge editor,
 and fetch / update / push with incoming review.
 
-Rewritten 2026-07-13 to describe what shipped (0.8.0 → 0.8.15). The command
+Rewritten 2026-07-13 and kept as-built; accurate as of 1.0.0. The command
 spikes below remain the authoritative reference for the parsers in
 `src-tauri/src/vcs.rs`. Still-deferred items are listed at the end and in
 [backlog.md](backlog.md).
@@ -128,11 +128,18 @@ there is no staging and no "untracked".
 - **Local repos are live**: a recursive `notify` watcher on the repo root
   (300 ms debounce → `vcs-fs-change` → refresh), so terminal-side `git add` /
   commits appear by themselves — VS Code-style, watcher-driven, no timers.
-- **Remote/WSL repos** refresh on window focus (throttled), after in-app
-  mutations, on manual ⟳, and on **F5 / Ctrl+R = app-wide Refresh All**
-  (explorer roots + repos + clean tabs; dirty tabs untouched; connections and
-  terminals are NOT restarted). A per-repo live-update toggle (◉) opts into
-  eager refresh — keep **< ~5 eager** over SSH.
+- **Remote/WSL repos**: the per-repo **◉ = monitor** (ON by default) —
+  status checked every ~5 s while the app window is focused, plus on
+  refocus. This closes the terminal-driven loop on remote hosts, where
+  there is no watcher. ◉ off = the repo is only touched by your own in-app
+  actions (for huge repos, jj's snapshot side effect, slow links). In-app
+  saves/file-ops always refresh the containing repo, monitored or not.
+  Explicit refreshes: SC-header ⟳ and **F5 / Ctrl+R = app-wide Refresh All**
+  (explorer roots + repos + clean tabs; dirty tabs untouched; connections
+  and terminals are NOT restarted). Keep **< ~5 monitored** over SSH.
+  The card stamp means "**changed** … ago" (last observed change — resets
+  on found differences and on in-app saves, never on no-op checks); hover
+  it for "checked … ago". Background checks are silent; ⟳/F5 are loud.
 - History re-fetches whenever its repo's status refreshes — one refresh
   policy for everything.
 

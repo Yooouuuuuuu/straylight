@@ -29,8 +29,6 @@ import { VcsLogTabHead, VcsLogView } from "../vcs/VcsLogView";
 
 function EmptyState() {
   const busyPath = useAppStore((s) => s.busyPath);
-  const openDialog = useAppStore((s) => s.openDialog);
-  const remote = useAppStore((s) => s.remote);
 
   if (busyPath) {
     return (
@@ -51,22 +49,11 @@ function EmptyState() {
         alt=""
         aria-hidden
       />
-      <div className="empty-state__title">Straylight</div>
+      <div className="empty-state__title">Welcome to Straylight</div>
       <div className="empty-state__hint">
-        Open a local folder or connect to a server in the sidebar, then pick a
-        file to view it.
-        {remote ? (
-          <>
-            {" "}
-            Toggle the terminal with <kbd>Ctrl</kbd> <kbd>`</kbd>.
-          </>
-        ) : null}
+        Pin a folder in the explorer — Local, WSL, or a remote server — then
+        open a file to start.
       </div>
-      {!remote && (
-        <button className="btn btn--primary" onClick={() => openDialog()}>
-          Connect to a new server
-        </button>
-      )}
       <div className="empty-state__keys">
         <div>
           <span>Show all commands</span>
@@ -83,6 +70,10 @@ function EmptyState() {
         <div>
           <span>Toggle terminal</span>
           <kbd>Ctrl+`</kbd>
+        </div>
+        <div>
+          <span>Toggle the sidebar</span>
+          <kbd>Ctrl+B</kbd>
         </div>
       </div>
     </div>

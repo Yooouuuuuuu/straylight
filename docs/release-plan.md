@@ -122,8 +122,8 @@ the same effect. Revisit only if users actually complain.
 
 ## Version bump mechanics
 
-The version lives in **three files** that must stay in sync (all `0.8.15`
-today): `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`
+The version lives in **three files** that must stay in sync:
+`package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`
 (plus `Cargo.lock`, updated by the next build). Then a `CHANGELOG.md` entry
 and a `vX.Y.Z` commit + tag, matching the existing history.
 

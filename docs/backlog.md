@@ -90,6 +90,11 @@ completed backlog items get an *(ex-backlog)* tag in the manual test plan
       the same wall-clock second as the tab's last read/save is silently
       overwritten (the write path has no content check).
 
+### Version control, small
+- [ ] Surface a silently hung background monitor check: with no timeouts (by
+      design), a hung silent poll leaves the repo stuck in "polling" with no
+      UI — after ~30 s show the spinner/cancel as if it were a loud refresh.
+
 ### Multi-remote (2+ attached remotes)
 - [ ] The transfer panes only pair with the **primary** remote (host pickers +
       refresh token track `s.remote` = `remotes[0]`).
@@ -116,6 +121,12 @@ completed backlog items get an *(ex-backlog)* tag in the manual test plan
       attributes — host bars, tab strips, terminal panel chips, status bar.
       Note: disabled buttons fire no mouse events, so they show no tip —
       decide per case whether that matters.
+- [ ] **Color/contrast sweep after the test pass** (user, 2026-07-14): go
+      through every themed control with a contrast rule (interactive text
+      ≥ ~4.5:1) — reuse existing theme slots first before inventing keys
+      (`.btn--primary` → accent + section-fg was the pattern; the
+      mode-switch active state and the dim per-row action icons are next
+      candidates).
 
 ### Misc
 - [ ] Trim the Monaco bundle to a language subset (it currently ships every
@@ -150,7 +161,8 @@ completed backlog items get an *(ex-backlog)* tag in the manual test plan
 ### Cleanup
 The full unused-code sweep ran twice — 0.8.7 (all commands invoked, dead
 exports removed) and the 2026-07-09 audit (npm deps: all used; Tauri commands:
-61/61 wired; no dead modules). One candidate remains:
+61/61 wired — 59 remain since 0.9.1 removed `vcs_describe` / `vcs_squash`;
+no dead modules). One candidate remains:
 - [ ] Drop the 3 likely-unused window capability permissions
       (`core:window:allow-maximize` / `allow-unmaximize` / `allow-is-maximized`
       in `src-tauri/capabilities/default.json` — only `toggle-maximize` has a
