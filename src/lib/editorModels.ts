@@ -15,6 +15,13 @@ const savedVersions = new Map<string, number>();
 const editors = new Set<monaco.editor.IStandaloneCodeEditor>();
 let bridgeInstalled = false;
 
+/** Called after every dirty recompute (i.e. every content change). The drafts
+ *  module registers here — it imports us, so we can't import it back. */
+let onEdited: ((tabId: string) => void) | null = null;
+export function setOnModelEdited(cb: (tabId: string) => void): void {
+  onEdited = cb;
+}
+
 export function recomputeDirty(tabId: string): void {
   const model = models.get(tabId);
   if (!model) return;
@@ -22,6 +29,7 @@ export function recomputeDirty(tabId: string): void {
   useAppStore
     .getState()
     .setTabDirty(tabId, model.getAlternativeVersionId() !== saved);
+  onEdited?.(tabId);
 }
 
 /** The tab's model, created from its seed content on first use. */
@@ -37,6 +45,33 @@ export function acquireModel(tab: EditorTab): monaco.editor.ITextModel {
     savedVersions.set(tab.id, model.getAlternativeVersionId());
   }
   return model;
+}
+
+/** Mark a tab dirty regardless of its version history — used when a
+ *  background save turns out NOT to have landed (hash guard refused / commit
+ *  failed): the optimistic "saved" state was wrong, and no undo position may
+ *  count as saved until a real save records one. */
+export function markTabUnsaved(tabId: string): void {
+  if (!models.has(tabId)) return;
+  savedVersions.set(tabId, -1);
+  recomputeDirty(tabId);
+}
+
+/** Lay restored-draft text over a tab's model as ONE undoable edit. The saved
+ *  version stays at the disk-content seed, so the tab reads dirty and Ctrl+Z
+ *  walks back to the original — where the dirty flag clears, exactly like
+ *  undoing ordinary edits. Returns false when the model doesn't exist (the
+ *  caller acquires it first). */
+export function applyDraftContent(tabId: string, content: string): boolean {
+  const model = models.get(tabId);
+  if (!model) return false;
+  model.pushEditOperations(
+    [],
+    [{ range: model.getFullModelRange(), text: content }],
+    () => null,
+  );
+  recomputeDirty(tabId);
+  return true;
 }
 
 /** Convert a tab's line endings in place (undoable edit; marks it dirty —

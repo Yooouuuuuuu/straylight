@@ -76,9 +76,16 @@ completed backlog items get an *(ex-backlog)* tag in the manual test plan
       the "Connect to a server" button.
 
 ### Data safety
-- [ ] Local "hot exit" backup of unsaved edits — cache dirty buffers locally and
-      restore on reopen (survives drop / crash / accidental close). Fills the
-      v0.4.0 gap where session restore reopens tabs by path but reloads from disk.
+- [ ] **Staged remote saves** — saving over SSH truncates in place today, so a
+      drop mid-save tears the file. Designed 2026-07-14 (not built):
+      upload-to-temp → detached server-side `cp`+`cmp` commit → marker ack →
+      reconcile on reconnect; see [atomic-save.md](atomic-save.md). Pairs with
+      hot exit below.
+- [ ] **Hot exit** — local drafts of unsaved edits (survives crash / close /
+      power loss). Designed 2026-07-14 — [hot-exit.md](hot-exit.md): dirty
+      content drafts + clean metadata stubs, restore-ask on relaunch, warning
+      bar + compare, per-host cleanup panel. **Builds before staged saves**
+      (its restore/compare surfaces are reused there).
 - [ ] Reconnect edges (v0.4.0): input typed during an outage is lost; unclean
       disconnect on window close; `reset_sftp` can block ~45 s on a hung op; host
       key not re-validated on restore.

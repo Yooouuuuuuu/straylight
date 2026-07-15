@@ -36,6 +36,15 @@ export interface Settings {
    *  connects silently, "never" skips. The ask dialog's checkbox sets
    *  "always". */
   autoConnect?: { wsl?: string; remote?: string };
+  /** Hot-exit drafts: local copies of unsaved edits (app config dir,
+   *  `drafts/`), surviving crash/close. `enabled: false` turns writing and
+   *  restoring off (existing drafts stay on disk for the cleanup panel). */
+  drafts?: { enabled?: boolean };
+  /** Session restore: whether drafts are loaded back into reopened files —
+   *  "ask" (default) decides per host (a checkbox on that host's connect
+   *  popup, or a standalone popup for Local / auto-connected hosts);
+   *  "always" restores silently once each host is up. */
+  restore?: { openFiles?: string };
   /** Bottom-panel tool groups: hide the ones you never use, and tune how often
    *  the open tab re-polls (seconds; nothing polls while closed). */
   panels?: {
@@ -111,6 +120,8 @@ function settingsTemplate(): Settings {
     terminalFont: { family: "Fira Code", size: 13 },
     confirms: Object.fromEntries(CONFIRM_IDS.map((id) => [id, true])),
     autoConnect: { wsl: "ask", remote: "ask" },
+    drafts: { enabled: true },
+    restore: { openFiles: "ask" },
     panels: { ...PANEL_DEFAULTS },
   };
 }
@@ -184,6 +195,13 @@ export let panelsConfig = { ...PANEL_DEFAULTS };
 export let autoConnectConfig: { wsl: "ask" | "always" | "never"; remote: "ask" | "always" | "never" } = {
   wsl: "ask",
   remote: "ask",
+};
+/** Hot-exit drafts on/off (settings `drafts.enabled`). */
+export let draftsConfig: { enabled: boolean } = { enabled: true };
+/** Whether drafts load back into restored files (settings `restore.openFiles`):
+ *  "ask" = per-host decision at startup; "always" = silent restore. */
+export let restoreConfig: { openFiles: "ask" | "always" } = {
+  openFiles: "ask",
 };
 let confirms: Record<string, boolean> = {};
 
@@ -336,6 +354,37 @@ async function loadAndApply(): Promise<void> {
     wsl: mode(s.autoConnect?.wsl, "wsl"),
     remote: mode(s.autoConnect?.remote, "remote"),
   };
+
+  // Hot-exit drafts (enabled flag) and the restore-drafts policy.
+  draftsConfig = { enabled: true };
+  if (s.drafts !== undefined) {
+    if (s.drafts && typeof s.drafts === "object") {
+      if (s.drafts.enabled !== undefined) {
+        if (typeof s.drafts.enabled === "boolean") {
+          draftsConfig.enabled = s.drafts.enabled;
+        } else {
+          issues.push('drafts: "enabled" must be true or false');
+        }
+      }
+    } else {
+      issues.push('drafts: must be an object like { "enabled": true }');
+    }
+  }
+  restoreConfig = { openFiles: "ask" };
+  if (s.restore !== undefined) {
+    if (s.restore && typeof s.restore === "object") {
+      const v = s.restore.openFiles;
+      if (v !== undefined) {
+        if (v === "ask" || v === "always") {
+          restoreConfig.openFiles = v;
+        } else {
+          issues.push('restore: "openFiles" must be "ask" or "always"');
+        }
+      }
+    } else {
+      issues.push('restore: must be an object like { "openFiles": "ask" }');
+    }
+  }
 
   // Bottom-panel groups (visibility flags + poll intervals, 3–3600 s).
   const pl = s.panels ?? {};

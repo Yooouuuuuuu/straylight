@@ -7,6 +7,7 @@
  *  reload on change. The editor stays where it was — unless it was scrolled to
  *  the bottom, in which case it follows the tail. */
 import { setTabContentInPlace } from "./activeEditor";
+import { updateStub } from "./drafts";
 import {
   fileUnwatch,
   fileWatch,
@@ -14,6 +15,7 @@ import {
   fsStat,
   onFileFsChange,
 } from "./ipc";
+import { hasPendingSave } from "./stagedSave";
 import { useAppStore } from "../store/appStore";
 
 /** Re-read a tab from disk and swap its content in place, if it's safe to. */
@@ -21,6 +23,9 @@ export async function reloadCleanTab(tabId: string): Promise<void> {
   const tab = useAppStore.getState().tabs.find((t) => t.id === tabId);
   if (!tab || tab.dirty || tab.isBinary || tab.truncated) return;
   if (tab.kind && tab.kind !== "file") return;
+  // A staged save's own commit bumps the mtime — don't reload the tab from
+  // our in-flight write (it would flicker and reset undo).
+  if (hasPendingSave(tab.connId, tab.path)) return;
   try {
     const file = await fsReadFile(tab.connId, tab.path);
     const cur = useAppStore.getState().tabs.find((t) => t.id === tabId);
@@ -29,6 +34,7 @@ export async function reloadCleanTab(tabId: string): Promise<void> {
     if (file.modified === cur.modified && file.content === cur.content) return;
     useAppStore.getState().reloadTabContent(tabId, file);
     setTabContentInPlace(tabId, file.content);
+    updateStub(cur.connId, cur.path, file.modified, file.size);
   } catch {
     /* unreadable right now (deleted?) — leave the tab as-is */
   }

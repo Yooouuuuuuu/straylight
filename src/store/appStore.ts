@@ -15,6 +15,7 @@ import {
   type SshHostEntry,
   type TransferProgress,
 } from "../lib/ipc";
+import { setTabPinned } from "../lib/pinnedTabs";
 
 /** The one in-flight cross-connection transfer (global, so it survives the
  *  transfer panel closing and shows in the status bar too). */
@@ -60,6 +61,19 @@ export interface EditorTab {
   /** The file wasn't valid UTF-8 and was decoded with replacement characters —
    *  saving is blocked (it would write the damage back over the original). */
   lossy?: boolean;
+  /** A hot-exit draft exists for this file but wasn't loaded — the banner
+   *  offers Restore / Compare / Discard (docs/hot-exit.md). */
+  draftAvailable?: boolean;
+  /** The tab's content came from a restored draft (dirty by construction). */
+  draftApplied?: boolean;
+  /** The file's mtime when the draft was made — differs from `modified` when
+   *  the file changed on the server while we were away (warning banner). */
+  draftBaselineMtime?: number;
+  /** The buffer diverges from a server copy that changed under us (a save-time
+   *  conflict, a guard refusal, or a restored draft whose file moved). While
+   *  set, Ctrl+S is blocked — the conflict bar's Overwrite / Discard (each
+   *  confirmed) is the only way out. */
+  conflict?: boolean;
   lineEnding: "LF" | "CRLF";
   dirty: boolean;
   cursor: CursorPosition;
@@ -250,6 +264,19 @@ export function remoteHostKey(r: RemoteConnection): string {
   return `${r.user}@${r.host}:${r.port}`;
 }
 
+/** Stable connection identity for a live connId — "local" / "wsl:<distro>" /
+ *  "user@host:port" (the same convention the VCS panel persists by). Null for
+ *  a connId that isn't attached right now. */
+export function connKeyForConnId(connId: string): string | null {
+  const s = useAppStore.getState();
+  if (connId === s.localConnId) return "local";
+  const w = s.wsls.find((x) => x.conn.connId === connId);
+  if (w) return `wsl:${w.conn.name}`;
+  const r = s.remotes.find((x) => x.conn.connId === connId);
+  if (r) return remoteHostKey(r.conn);
+  return null;
+}
+
 // ---- multi-remote -----------------------------------------------------------
 
 export const MAX_REMOTES = 3;
@@ -431,7 +458,6 @@ interface AppState {
   activeTabId: string | null;
   busyPath: string | null;
   /** A save refused because the file changed on disk; holds the pending content. */
-  conflict: { tabId: string; content: string } | null;
   /** A close blocked by unsaved changes, awaiting the user's choice. */
   closeConfirm: { tabId: string } | null;
 
@@ -535,8 +561,22 @@ interface AppState {
   setForwardCount: (n: number) => void;
   /** Startup "connect to last …?" asks, shown one at a time. Skipping runs
    *  `onSkip` (drops the host from the saved session — no re-ask next time). */
-  connectAsks: { kind: "wsl" | "remote"; label: string; run: () => void; onSkip?: () => void }[];
-  pushConnectAsk: (a: { kind: "wsl" | "remote"; label: string; run: () => void; onSkip?: () => void }) => void;
+  /** Startup asks. `draftsCount` on a connect ask adds the default-checked
+   *  "also restore N drafts" checkbox, delivered as `run`'s argument. */
+  connectAsks: {
+    kind: "wsl" | "remote" | "drafts";
+    label: string;
+    draftsCount?: number;
+    run: (restoreDrafts?: boolean) => void;
+    onSkip?: () => void;
+  }[];
+  pushConnectAsk: (a: {
+    kind: "wsl" | "remote" | "drafts";
+    label: string;
+    draftsCount?: number;
+    run: (restoreDrafts?: boolean) => void;
+    onSkip?: () => void;
+  }) => void;
   shiftConnectAsk: () => void;
   /** Reorder terminals in the list (drag). */
   moveTerminal: (fromId: string, toId: string) => void;
@@ -619,6 +659,15 @@ interface AppState {
   closeTab: (id: string, allowPinned?: boolean) => void;
   forceCloseTab: (id: string) => void;
   setTabDirty: (id: string, dirty: boolean) => void;
+  /** Merge hot-exit draft state into a tab (restore/discard flows). */
+  setTabDraft: (
+    id: string,
+    d: {
+      draftAvailable?: boolean;
+      draftApplied?: boolean;
+      draftBaselineMtime?: number;
+    },
+  ) => void;
   /** Mark a tab written to disk. `content` syncs the tab's seed text so the
    *  file watcher's reload guard recognizes our own save (else it would
    *  reload the file and wipe the undo history). */
@@ -640,8 +689,8 @@ interface AppState {
   setTabCursor: (id: string, cursor: CursorPosition) => void;
   setBusyPath: (path: string | null) => void;
 
-  setConflict: (tabId: string, content: string) => void;
-  clearConflict: () => void;
+  /** Set/clear a tab's conflict flag (drives the conflict bar + Ctrl+S block). */
+  setTabConflict: (id: string, on: boolean) => void;
   clearCloseConfirm: () => void;
 
   setSelected: (node: TreeNode | null) => void;
@@ -736,7 +785,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   activeGroupId: 0,
   groupActive: {},
   busyPath: null,
-  conflict: null,
   closeConfirm: null,
 
   selected: null,
@@ -1354,6 +1402,21 @@ export const useAppStore = create<AppState>()((set, get) => ({
         lastPinned >= 0 ? lastPinned + 1 : firstOfGroup >= 0 ? firstOfGroup : rest.length;
       const tabs = rest.slice();
       tabs.splice(insert, 0, { ...tab, pinned, previewTab: false });
+      // Persist the pin per host — pinned files reopen on every connect
+      // (lib/pinnedTabs; closing a pinned tab does not unpin the file).
+      if (!tab.kind || tab.kind === "file") {
+        const wslOwner = s.wsls.find((w) => w.conn.connId === tab.connId);
+        const remoteOwner = s.remotes.find((r) => r.conn.connId === tab.connId);
+        const connKey =
+          tab.connId === s.localConnId
+            ? "local"
+            : wslOwner
+              ? `wsl:${wslOwner.conn.name}`
+              : remoteOwner
+                ? remoteHostKey(remoteOwner.conn)
+                : null;
+        if (connKey) setTabPinned(connKey, tab.path, pinned);
+      }
       return { tabs };
     }),
 
@@ -1519,7 +1582,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
       return {
         ...groupsPatch(s, tabs, focus),
         terminals,
-        conflict: s.conflict?.tabId === id ? null : s.conflict,
         closeConfirm: s.closeConfirm?.tabId === id ? null : s.closeConfirm,
       };
     }),
@@ -1533,6 +1595,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
       ),
     })),
 
+  setTabDraft: (id, d) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === id ? { ...t, ...d } : t)),
+    })),
+
   setTabLineEnding: (id, eol) =>
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === id ? { ...t, lineEnding: eol } : t)),
@@ -1542,10 +1609,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set((s) => ({
       tabs: s.tabs.map((t) =>
         t.id === id
-          ? { ...t, dirty: false, modified, ...(content !== undefined ? { content } : {}) }
+          ? {
+              ...t,
+              dirty: false,
+              modified,
+              conflict: false,
+              ...(content !== undefined ? { content } : {}),
+            }
           : t,
       ),
-      conflict: s.conflict?.tabId === id ? null : s.conflict,
     })),
 
   reloadTabContent: (id, file) =>
@@ -1574,8 +1646,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   setBusyPath: (busyPath) => set({ busyPath }),
 
-  setConflict: (tabId, content) => set({ conflict: { tabId, content } }),
-  clearConflict: () => set({ conflict: null }),
+  setTabConflict: (id, on) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === id ? { ...t, conflict: on } : t)),
+    })),
   clearCloseConfirm: () => set({ closeConfirm: null }),
 
   setSelected: (selected) =>

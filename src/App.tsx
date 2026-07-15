@@ -21,8 +21,10 @@ import {
 } from "./lib/ipc";
 import { useAppStore } from "./store/appStore";
 import { useVcsStore } from "./store/vcsStore";
+import { initDrafts } from "./lib/drafts";
 import { initFileWatching } from "./lib/fileWatch";
 import { initSettings } from "./lib/settings";
+import { startSaveSweep } from "./lib/stagedSave";
 import { initThemes } from "./lib/themes";
 import { initSessionPersistence, restoreSession } from "./lib/session";
 import { useKeyboard } from "./hooks/useKeyboard";
@@ -35,7 +37,6 @@ import { StatusBar } from "./components/layout/StatusBar";
 import { ScmPanel } from "./components/vcs/ScmPanel";
 import { HistoryPanel } from "./components/vcs/HistoryPanel";
 import { ConnectionDialog } from "./components/connection/ConnectionDialog";
-import { ConflictDialog } from "./components/editor/ConflictDialog";
 import { CloseConfirmDialog } from "./components/editor/CloseConfirmDialog";
 import { ContextMenu } from "./components/filetree/ContextMenu";
 import { TabContextMenu } from "./components/editor/TabContextMenu";
@@ -106,11 +107,17 @@ export default function App() {
   // remote/WSL: mtime poll) — watching a growing log just works.
   useEffect(() => initFileWatching(), []);
 
+  // Re-check parked staged-save records on connected hosts (~60 s).
+  useEffect(() => startSaveSweep(), []);
+
   // Theme layer first (it subscribes to settings), then load settings.json
-  // (zoom, keybinding overrides, colors) and keep it live.
+  // (zoom, keybinding overrides, colors) and keep it live. Drafts follow
+  // settings (they read draftsConfig/restoreConfig) and must init even if
+  // settings failed — session restore awaits the draft index.
   useEffect(() => initThemes(), []);
   useEffect(() => {
-    if (localConnId) void initSettings(localConnId);
+    if (localConnId)
+      void initSettings(localConnId).finally(() => void initDrafts(localConnId));
   }, [localConnId]);
 
   // Once the local session is up, restore the previous session exactly once:
@@ -355,7 +362,6 @@ export default function App() {
       </div>
       <StatusBar />
       {dialogOpen && <ConnectionDialog />}
-      <ConflictDialog />
       <CloseConfirmDialog />
       <NewEntryDialog />
       <DeleteConfirmDialog />

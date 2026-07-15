@@ -1,4 +1,5 @@
 /** Shown when closing a tab with unsaved changes: Save, Don't save, or Cancel. */
+import { deleteDraftFor } from "../../lib/drafts";
 import { saveTab } from "../../lib/saveFile";
 import { useAppStore } from "../../store/appStore";
 
@@ -50,7 +51,12 @@ export function CloseConfirmDialog() {
           </button>
           <button
             className="btn"
-            onClick={() => forceCloseTab(target.id)}
+            onClick={() => {
+              // Explicitly dropping the edits resolves their hot-exit draft
+              // too — the net is for accidents, not chosen discards.
+              deleteDraftFor(target.connId, target.path);
+              forceCloseTab(target.id);
+            }}
           >
             Don’t save
           </button>

@@ -25,11 +25,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Containers, later:** file browsing inside containers, logs, start/stop.
 - **Transfer polish (later):** drag directly between the sidebar trees, OS
   drag-in/out, and multi cut/copy/paste in the explorer.
-- **Local draft backup of unsaved edits** — survive a connection drop / crash /
-  accidental close by caching dirty buffers locally and restoring them on reopen
-  (VS Code "hot exit"); doubles as a WSL/remote edit safeguard.
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
+
+## [0.9.5] - 2026-07-15
+
+Data safety: don't lose an edit to a crash or a dropped save.
+
+### Added
+
+- **Hot exit — local drafts of unsaved edits.** Every dirty buffer is cached
+  locally (app config dir, `drafts/`) as you type, so a crash, close, or power
+  loss can't take it. On relaunch each host offers to restore its drafts (a
+  checkbox on that host's connect ask, or a standalone prompt for Local and
+  auto-connected hosts; `restore.openFiles`: `ask` / `always`). A file with an
+  unresolved draft — and every pinned file — now reopens on **every** connect,
+  including a mid-session reconnect. A restored draft is undoable back to the
+  original. Manage or wipe both lists in **Settings → Pinned files / Drafts**;
+  turn drafts off entirely for sensitive hosts. WSL editor tabs restore across
+  relaunch too.
+- **Staged remote saves.** Saving over SSH/WSL no longer truncates the file in
+  place: the buffer uploads to a `.straysave` temp, then a **detached,
+  server-side `cp` commit** swaps it into the original inode and verifies it —
+  so a dropped connection can never tear the file, and ownership, symlinks, and
+  hard links survive (unlike a rename). Ctrl+S returns immediately; the commit
+  confirms in the background, finishes on its own, and reconciles on the next
+  reconnect if the link dropped. A per-file queue serializes rapid saves, and
+  the commit is **hash-guarded** so an edit from elsewhere is never silently
+  overwritten.
+
+### Changed
+
+- **Save conflicts are a bar, not a modal — and Ctrl+S is blocked until you
+  resolve them.** When the file changed on the server under you, the tab shows
+  **Compare / Overwrite / Discard** (each destructive choice confirms) instead
+  of a pop-up you could dismiss by pressing save again. Restored-draft and
+  changed-on-disk cases share the one surface.
+- **SSH compression** (`zlib@openssh.com`) is preferred on every connection —
+  saves, transfers, and terminal traffic shrink on slow links; a server without
+  it negotiates `none`.
+
+### Fixed
+
+- **Auto-reconnect no longer gives up.** The reconnect supervisor retries
+  indefinitely (backoff capped at 30 s, attempt count shown) instead of
+  surrendering after eight attempts; only an explicit Disconnect stops it.
 
 ## [0.9.4] - 2026-07-14
 

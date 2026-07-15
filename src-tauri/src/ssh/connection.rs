@@ -185,6 +185,18 @@ fn client_config() -> Arc<client::Config> {
         // as a dead handle instead of hanging — the supervisor reconnects.
         keepalive_interval: Some(Duration::from_secs(15)),
         keepalive_max: 3,
+        // Prefer compression (atomic-save.md decision 14): text traffic —
+        // saves, transfers, terminal scroll — shrinks 3–5× on slow links.
+        // `zlib@openssh.com` is what OpenSSH servers offer; servers without
+        // compression negotiate `none` and nothing changes.
+        preferred: russh::Preferred {
+            compression: std::borrow::Cow::Borrowed(&[
+                russh::compression::ZLIB_LEGACY,
+                russh::compression::ZLIB,
+                russh::compression::NONE,
+            ]),
+            ..Default::default()
+        },
         ..Default::default()
     })
 }
@@ -435,9 +447,6 @@ const PROBE_INTERVAL_SECS: u64 = 12;
 /// A live connection answers a channel-open quickly; bound the probe so a
 /// half-open socket (sleep, Wi-Fi roam) is treated as dead rather than hanging.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
-/// Give up automatic reconnection after this many consecutive failures (the UI
-/// then offers a manual Reconnect).
-const MAX_RECONNECT_ATTEMPTS: u32 = 8;
 
 /// Spawn the reconnect supervisor for a connection, unless one is already
 /// running for it.
@@ -452,8 +461,10 @@ fn ensure_supervisor(app: AppHandle, conn: Arc<Connection>) {
 }
 
 /// Watch a connection's health; on a dropped transport, transition to
-/// `Reconnecting` and retry with backoff until it recovers, the user
-/// disconnects, or we exhaust the attempt budget.
+/// `Reconnecting` and retry with backoff (capped at 30 s) until it recovers or
+/// the user explicitly disconnects — never give up on our own (the house
+/// no-automatic-timeouts rule: the user decides). A long outage costs one
+/// probe every ~30 s.
 async fn supervise(app: AppHandle, conn: Arc<Connection>) {
     loop {
         if sleep_or_stopped(&conn, PROBE_INTERVAL_SECS).await {
@@ -502,22 +513,17 @@ async fn supervise(app: AppHandle, conn: Arc<Connection>) {
                     break;
                 }
                 Err(e) => {
-                    if attempt >= MAX_RECONNECT_ATTEMPTS {
-                        *conn.state.lock().await = ConnectionState::Disconnected;
-                        emit_status(
-                            &app,
-                            &conn.id,
-                            ConnectionState::Disconnected,
-                            Some(format!("could not reconnect after {attempt} attempts: {e}")),
-                        );
-                        log::warn!("connection {} gave up reconnecting: {e}", conn.id);
-                        return;
-                    }
                     emit_status(
                         &app,
                         &conn.id,
                         ConnectionState::Reconnecting,
-                        Some(format!("reconnect attempt {attempt} failed: {e}")),
+                        Some(format!(
+                            "reconnect attempt {attempt} failed: {e} — retrying in {delay}s"
+                        )),
+                    );
+                    log::info!(
+                        "connection {} reconnect attempt {attempt} failed: {e}",
+                        conn.id
                     );
                     if sleep_or_stopped(&conn, delay).await {
                         return;

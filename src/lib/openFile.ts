@@ -1,6 +1,7 @@
 /** Read a file (remote SFTP or local) and open it as an editor tab, applying
  *  language detection and large/binary-file handling. An already-open file is
  *  just focused. */
+import { maybeAttachDraft, updateStub } from "./drafts";
 import { fsReadFile, type FileEntry } from "./ipc";
 import { languageForFile } from "./language";
 import { basename } from "./format";
@@ -50,6 +51,19 @@ export async function openRemoteFile(
       lineEnding,
     };
     store.openTab(tab, opts);
+
+    if (!file.isBinary) {
+      // Hot exit: remember where this tab last saw the file, and surface (or
+      // auto-restore) an unsaved draft from a previous session.
+      updateStub(connId, file.path, file.modified, file.size);
+      const opened = useAppStore
+        .getState()
+        .tabs.find(
+          (t) =>
+            t.connId === connId && t.path === file.path && (!t.kind || t.kind === "file"),
+        );
+      if (opened) void maybeAttachDraft(opened.id);
+    }
 
     if (!file.isBinary) {
       if (file.truncated) {

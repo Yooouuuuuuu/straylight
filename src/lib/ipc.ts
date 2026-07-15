@@ -592,6 +592,34 @@ export function vcsRemoteCancel(connId: string, root: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Staged saves (docs/atomic-save.md)
+// ---------------------------------------------------------------------------
+
+/** Dispatch the detached server-side commit of a staged save: hash-guard the
+ *  target (`expectedHash`; "-" skips — explicit Overwrite), cp the uploaded
+ *  temp into its inode, cmp-verify, acknowledge via the ok/err marker.
+ *  Returns once the job is STARTED (survives a connection drop). */
+export function saveCommit(
+  connId: string,
+  dir: string,
+  tmp: string,
+  orig: string,
+  okMarker: string,
+  errMarker: string,
+  expectedHash: string,
+): Promise<void> {
+  return invoke("save_commit", {
+    connId,
+    dir,
+    tmp,
+    orig,
+    okMarker,
+    errMarker,
+    expectedHash,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Preferences
 // ---------------------------------------------------------------------------
 

@@ -13,8 +13,19 @@ import {
   type EditorTab,
 } from "../../store/appStore";
 
+import {
+  compareDraftForTab,
+  discardDraftForTab,
+  restoreDraftForTab,
+} from "../../lib/drafts";
+import {
+  compareWithDisk,
+  discardToServer,
+  overwriteConflict,
+} from "../../lib/saveFile";
 import { pruneModels } from "../../lib/editorModels";
 import { focusTerminal } from "../../lib/terminalFocus";
+import { useVcsStore } from "../../store/vcsStore";
 import { mountTerminalIn, parkTerminal } from "../../lib/terminalSlots";
 import { useAppStore } from "../../store/appStore";
 import { SettingsView } from "../settings/SettingsView";
@@ -168,6 +179,7 @@ function GroupPane({ gid, splitDrop }: { gid: number; splitDrop: boolean }) {
   const active = useAppStore(
     (s) => s.tabs.find((t) => t.id === activeId) ?? null,
   );
+  const askConfirm = useVcsStore((s) => s.askConfirm);
   const multi = useAppStore((s) => s.editorGroups.length > 1);
   const isFocused = useAppStore((s) => s.activeGroupId === gid);
   const setActiveGroup = useAppStore((s) => s.setActiveGroup);
@@ -220,6 +232,91 @@ function GroupPane({ gid, splitDrop }: { gid: number; splitDrop: boolean }) {
             protect the original bytes.
           </div>
         )}
+        {/* Conflict bar: your buffer diverges from a server copy that changed
+            under you (a save-time conflict, a guard refusal, or a restored
+            draft whose file moved). Ctrl+S is blocked; the only ways out are
+            Overwrite / Discard, each confirmed. */}
+        {active &&
+          (!active.kind || active.kind === "file") &&
+          active.conflict && (
+            <div className="editor-banner">
+              ⚠ {active.name} changed on the server since you opened it — saving
+              is blocked until you resolve this.
+              <span className="editor-banner__spacer" />
+              <button
+                className="editor-banner__act"
+                title="Diff your version against the file on the server"
+                onClick={() => void compareWithDisk(active.id)}
+              >
+                Compare
+              </button>
+              <button
+                className="editor-banner__act"
+                title="Save your version, replacing the server's newer one"
+                onClick={() =>
+                  askConfirm(
+                    "Overwrite the server's version?",
+                    `${active.name} was changed on the server. Overwrite it with your version? Their change will be lost.`,
+                    () => void overwriteConflict(active.id),
+                  )
+                }
+              >
+                Overwrite
+              </button>
+              <button
+                className="editor-banner__act"
+                title="Discard your changes and load the server's version"
+                onClick={() =>
+                  askConfirm(
+                    "Discard your changes?",
+                    `Throw away your unsaved changes to ${active.name} and load the version on the server?`,
+                    () => void discardToServer(active.id),
+                  )
+                }
+              >
+                Discard
+              </button>
+            </div>
+          )}
+        {/* Draft-available bar: an unresolved draft exists but isn't loaded
+            (the buffer is the disk content). Not a conflict — no Ctrl+S
+            block. Discard still confirms (it destroys unsaved edits). */}
+        {active &&
+          (!active.kind || active.kind === "file") &&
+          !active.conflict &&
+          active.draftAvailable && (
+            <div className="editor-banner">
+              Unsaved changes from a previous session exist for this file.
+              <span className="editor-banner__spacer" />
+              <button
+                className="editor-banner__act"
+                title="Diff the draft against the file on disk"
+                onClick={() => void compareDraftForTab(active.id)}
+              >
+                Compare
+              </button>
+              <button
+                className="editor-banner__act"
+                title="Load the draft into this tab (marks it unsaved)"
+                onClick={() => void restoreDraftForTab(active.id)}
+              >
+                Restore
+              </button>
+              <button
+                className="editor-banner__act"
+                title="Delete the draft (the file is untouched)"
+                onClick={() =>
+                  askConfirm(
+                    "Discard the draft?",
+                    `Delete the unsaved changes cached for ${active.name}? This can't be undone; the file on the host is untouched.`,
+                    () => void discardDraftForTab(active.id),
+                  )
+                }
+              >
+                Discard
+              </button>
+            </div>
+          )}
         <div className="editor-area__content">
           <MonacoWrapper groupId={gid} />
           {active?.kind === "diff" ? (

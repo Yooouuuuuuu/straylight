@@ -3886,6 +3886,27 @@ select option {
   font-size: var(--font-size-sm);
 }
 
+/* Pushes a banner's action buttons to the right edge. */
+.editor-banner__spacer {
+  flex: 1;
+}
+
+/* Inline banner action (hot-exit draft Restore / Compare / Discard). */
+.editor-banner__act {
+  padding: 1px var(--space-3);
+  font-size: var(--font-size-xs);
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.editor-banner__act:hover {
+  background: rgba(255, 184, 108, 0.18);
+}
+
 .empty-state {
   position: absolute;
   inset: 0;

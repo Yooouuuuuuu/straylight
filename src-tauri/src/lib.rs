@@ -9,6 +9,7 @@ pub mod ports;
 pub mod exec;
 pub mod forward;
 pub mod prefs;
+pub mod save;
 pub mod ssh;
 pub mod transport;
 pub mod vcs;
@@ -152,6 +153,7 @@ pub fn run() {
             ports::port_list,
             vcs::vcs_incoming,
             prefs::settings_path,
+            save::save_commit,
             vcs::vcs_open,
             vcs::vcs_status,
             vcs::vcs_file_base,
