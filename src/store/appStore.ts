@@ -414,6 +414,22 @@ interface AppState {
   dialogPrefill: SshHostEntry | null;
   /** Optional note shown atop the connect dialog (e.g. why it opened). */
   dialogNote: string | null;
+  /** Prompt to unlock an encrypted key: the key path + a callback that retries
+   *  the connection with the entered passphrase (held in memory only). */
+  passphrasePrompt: { keyPath: string; onSubmit: (passphrase: string) => void } | null;
+  /** Host-key decision. `unknown`: first contact — show the fingerprint and let
+   *  the user trust it (`onTrust` records it, then retries). `changed`: the key
+   *  differs from `known_hosts` — refuse loudly, no trust path. */
+  hostKeyPrompt:
+    | {
+        kind: "unknown";
+        host: string;
+        port: number;
+        fingerprint: string;
+        onTrust: () => void;
+      }
+    | { kind: "changed"; host: string; port: number }
+    | null;
   /** True while the transfer panel is open — so global F2/Delete don't act on
    *  the explorer selection while the transfer pane owns those keys. */
   transferOpen: boolean;
@@ -502,6 +518,10 @@ interface AppState {
 
   setDialogOpen: (open: boolean) => void;
   openDialog: (prefill?: SshHostEntry | null, note?: string | null) => void;
+  openPassphrasePrompt: (p: { keyPath: string; onSubmit: (passphrase: string) => void }) => void;
+  closePassphrasePrompt: () => void;
+  openHostKeyPrompt: (p: NonNullable<AppState["hostKeyPrompt"]>) => void;
+  closeHostKeyPrompt: () => void;
   setTransferOpen: (open: boolean) => void;
   setFinderOpen: (open: boolean) => void;
   setSearchOpen: (open: boolean) => void;
@@ -753,6 +773,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   dialogOpen: false,
   dialogPrefill: null,
   dialogNote: null,
+  passphrasePrompt: null,
+  hostKeyPrompt: null,
   transferOpen: false,
   finderOpen: false,
   searchOpen: false,
@@ -971,6 +993,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
     ),
   openDialog: (prefill = null, note = null) =>
     set({ dialogOpen: true, dialogPrefill: prefill, dialogNote: note }),
+  openPassphrasePrompt: (passphrasePrompt) => set({ passphrasePrompt }),
+  closePassphrasePrompt: () => set({ passphrasePrompt: null }),
+  openHostKeyPrompt: (hostKeyPrompt) => set({ hostKeyPrompt }),
+  closeHostKeyPrompt: () => set({ hostKeyPrompt: null }),
   setTransferOpen: (transferOpen) => set({ transferOpen }),
   setFinderOpen: (finderOpen) => set({ finderOpen }),
   setSearchOpen: (searchOpen) => set({ searchOpen }),

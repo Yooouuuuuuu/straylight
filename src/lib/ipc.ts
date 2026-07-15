@@ -15,7 +15,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type AuthMethod =
   | { type: "password"; password: string }
-  | { type: "auto"; identityFile?: string | null };
+  | { type: "auto"; identityFile?: string | null; passphrase?: string | null };
 
 export type ConnectionState =
   | "connecting"
@@ -123,6 +123,12 @@ export function sshDisconnect(connId: string): Promise<void> {
 /** Manually re-establish a dropped connection, keeping the same connId. */
 export function sshReconnect(connId: string): Promise<void> {
   return invoke("ssh_reconnect", { connId });
+}
+
+/** Record an unknown host's key in `~/.ssh/known_hosts` after the user accepts
+ *  its fingerprint. The stashed key is consumed; retry the connection after. */
+export function sshTrustHost(host: string, port: number): Promise<void> {
+  return invoke("ssh_trust_host", { host, port });
 }
 
 

@@ -71,7 +71,7 @@ Iterate 0.10.x until the checklist passes clean.
 
 - [ ] Audit [stability.md](stability.md) — every promise in it holds.
 - [ ] Re-check the documented security limitations are still acceptable to
-      publish: trust-on-first-use host keys, no passphrase-protected keys.
+      publish: no ssh-agent, jump-host key not verified, single-hop ProxyJump.
       They stay documented limitations for 1.0 unless decided otherwise.
 - [ ] `CHANGELOG.md` 1.0.0 entry; bump versions (see below); tag `v1.0.0`.
 - [ ] Create a GitHub Release manually; attach the setup.exe (and .msi).

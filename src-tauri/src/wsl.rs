@@ -331,6 +331,7 @@ pub async fn wsl_connect(
     let (user, port, key_path) = provisioned;
     let auth = crate::ssh::connection::AuthMethod::Auto {
         identity_file: Some(key_path.to_string_lossy().into_owned()),
+        passphrase: None,
     };
     let conn_id = crate::ssh::connection::ssh_connect(
         state,

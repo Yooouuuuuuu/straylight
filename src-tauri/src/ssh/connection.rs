@@ -26,14 +26,21 @@ pub enum AuthMethod {
     /// Authenticate with a password held in memory for this session only.
     Password { password: String },
     /// Key-based auth that mirrors OpenSSH: try the config `IdentityFile`, then
-    /// the default on-disk keys (`~/.ssh/id_*`). Unencrypted keys only — there
-    /// is no ssh-agent and no passphrase prompt; add an `IdentityFile` host to
-    /// your SSH config to use a key.
+    /// the default on-disk keys (`~/.ssh/id_*`). A `passphrase` for an encrypted
+    /// key is held in memory for the session only (never written to disk); when
+    /// an encrypted key is found and no passphrase is set, connect fails with a
+    /// `KEY_NEEDS_PASSPHRASE:` error so the UI can prompt. No ssh-agent yet.
     Auto {
         #[serde(default)]
         identity_file: Option<String>,
+        #[serde(default)]
+        passphrase: Option<String>,
     },
 }
+
+/// Error prefix (`KEY_NEEDS_PASSPHRASE:<key path>`) the frontend matches to
+/// pop a passphrase prompt for an encrypted key.
+pub const KEY_NEEDS_PASSPHRASE: &str = "KEY_NEEDS_PASSPHRASE:";
 
 /// Coarse connection state surfaced to the UI status bar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,9 +167,74 @@ impl Connection {
     }
 }
 
-/// russh client handler. Host keys are trusted on first use; `known_hosts`
-/// verification is a documented limitation (see docs/backlog.md).
-pub struct ClientHandler;
+/// Markers the frontend matches to act on a host-key refusal. UNKNOWN carries
+/// the `SHA256:…` fingerprint (show it, offer to trust); CHANGED is bare
+/// (refuse loudly — the key differs from `known_hosts`). Host/port come from
+/// the connect profile on the UI side.
+pub const HOST_KEY_UNKNOWN: &str = "HOST_KEY_UNKNOWN:";
+pub const HOST_KEY_CHANGED: &str = "HOST_KEY_CHANGED";
+
+/// Filled by `check_server_key` so `ssh_connect` can turn a refusal into the
+/// right prompt after the (aborted) handshake.
+#[derive(Default)]
+enum HostKeyOutcome {
+    #[default]
+    Pending,
+    Trusted,
+    Unknown {
+        fingerprint: String,
+        key: russh_keys::key::PublicKey,
+    },
+    Changed,
+}
+
+/// The user's `~/.ssh/known_hosts` (the real OpenSSH location on every OS — the
+/// russh-keys convenience helper uses `~/ssh` without the dot on Windows, so we
+/// resolve it ourselves and use the `_path` APIs).
+fn known_hosts_path() -> Option<std::path::PathBuf> {
+    directories::UserDirs::new().map(|d| d.home_dir().join(".ssh").join("known_hosts"))
+}
+
+/// Loopback (WSL / localhost) has no MITM surface — verifying it would only nag
+/// the user about their own provisioned distro (OpenSSH's
+/// `NoHostAuthenticationForLocalhost`).
+fn is_loopback(host: &str) -> bool {
+    host == "localhost" || host == "::1" || host.starts_with("127.")
+}
+
+/// russh client handler. Verifies the server key against `known_hosts` (unless
+/// `verify` is false, e.g. loopback), refusing an unknown or changed key so the
+/// UI can prompt — no auth is ever attempted against an unverified host.
+pub struct ClientHandler {
+    host: String,
+    port: u16,
+    verify: bool,
+    outcome: Arc<std::sync::Mutex<HostKeyOutcome>>,
+}
+
+fn target_handler(
+    host: &str,
+    port: u16,
+    outcome: Arc<std::sync::Mutex<HostKeyOutcome>>,
+) -> ClientHandler {
+    ClientHandler {
+        host: host.to_string(),
+        port,
+        verify: !is_loopback(host),
+        outcome,
+    }
+}
+
+/// A jump/bastion handler. Jump-host key verification is a follow-up (we don't
+/// refuse an unknown bastion here), so it never verifies.
+fn jump_handler(host: &str, port: u16) -> ClientHandler {
+    ClientHandler {
+        host: host.to_string(),
+        port,
+        verify: false,
+        outcome: Arc::new(std::sync::Mutex::new(HostKeyOutcome::Pending)),
+    }
+}
 
 #[async_trait::async_trait]
 impl client::Handler for ClientHandler {
@@ -170,9 +242,43 @@ impl client::Handler for ClientHandler {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh_keys::key::PublicKey,
+        server_public_key: &russh_keys::key::PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        let mut out = self.outcome.lock().unwrap();
+        if !self.verify {
+            *out = HostKeyOutcome::Trusted;
+            return Ok(true);
+        }
+        let Some(path) = known_hosts_path() else {
+            // No home dir to check against — don't hard-block, but this is rare.
+            *out = HostKeyOutcome::Trusted;
+            return Ok(true);
+        };
+        let unknown = || HostKeyOutcome::Unknown {
+            fingerprint: format!("SHA256:{}", server_public_key.fingerprint()),
+            key: server_public_key.clone(),
+        };
+        match russh_keys::known_hosts::check_known_hosts_path(
+            &self.host,
+            self.port,
+            server_public_key,
+            &path,
+        ) {
+            Ok(true) => {
+                *out = HostKeyOutcome::Trusted;
+                Ok(true)
+            }
+            // Present but the key differs — the MITM / swapped-server case.
+            Err(russh_keys::Error::KeyChanged { .. }) => {
+                *out = HostKeyOutcome::Changed;
+                Ok(false)
+            }
+            // Absent, or no known_hosts file yet — first-connect, needs consent.
+            _ => {
+                *out = unknown();
+                Ok(false)
+            }
+        }
     }
 }
 
@@ -219,11 +325,59 @@ fn parse_jump(spec: &str, default_user: &str) -> (String, String, u16) {
         Some((u, r)) => (u.to_string(), r),
         None => (default_user.to_string(), first),
     };
-    let (host, port) = match rest.rsplit_once(':') {
-        Some((h, p)) => (h.to_string(), p.parse().unwrap_or(22)),
-        None => (rest.to_string(), 22),
-    };
+    let (host, port) = split_host_port(rest);
     (user, host, port)
+}
+
+/// Split `host[:port]`, tolerating IPv6. Bracketed forms carry an optional
+/// port (`[::1]` → port 22, `[::1]:2222` → 2222); a bare IPv6 literal (two or
+/// more colons, no brackets) can't express a port, so it's all host; otherwise
+/// split on the single colon.
+fn split_host_port(s: &str) -> (String, u16) {
+    if let Some(rest) = s.strip_prefix('[') {
+        if let Some(close) = rest.find(']') {
+            let host = rest[..close].to_string();
+            let port = rest[close + 1..]
+                .strip_prefix(':')
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(22);
+            return (host, port);
+        }
+    }
+    if s.matches(':').count() >= 2 {
+        return (s.to_string(), 22); // bare IPv6, no port possible
+    }
+    match s.rsplit_once(':') {
+        Some((h, p)) => (h.to_string(), p.parse().unwrap_or(22)),
+        None => (s.to_string(), 22),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_jump;
+
+    #[test]
+    fn parse_jump_forms_and_ipv6() {
+        let j = |s: &str| parse_jump(s, "me");
+        // Basic [user@]host[:port]
+        assert_eq!(j("host"), ("me".into(), "host".into(), 22));
+        assert_eq!(j("user@host:2222"), ("user".into(), "host".into(), 2222));
+        assert_eq!(
+            j("jump@bastion.example.com:22"),
+            ("jump".into(), "bastion.example.com".into(), 22)
+        );
+        // IPv6: bracketed (optional port) and bare (no port possible)
+        assert_eq!(j("[::1]:22"), ("me".into(), "::1".into(), 22));
+        assert_eq!(j("[::1]"), ("me".into(), "::1".into(), 22));
+        assert_eq!(
+            j("u@[2001:db8::1]:2222"),
+            ("u".into(), "2001:db8::1".into(), 2222)
+        );
+        assert_eq!(j("::1"), ("me".into(), "::1".into(), 22));
+        // Chained ProxyJump: only the first hop is used.
+        assert_eq!(j("a@h1:22,b@h2:33"), ("a".into(), "h1".into(), 22));
+    }
 }
 
 /// Open a (possibly jumped) SSH transport and return the unauthenticated handle
@@ -234,30 +388,36 @@ async fn open_handle(
     port: u16,
     user: &str,
     proxy_jump: Option<&str>,
+    outcome: Arc<std::sync::Mutex<HostKeyOutcome>>,
 ) -> Result<(client::Handle<ClientHandler>, Option<client::Handle<ClientHandler>>), String> {
     match proxy_jump {
         None | Some("") => {
-            let handle = client::connect(config, (host, port), ClientHandler)
+            let handle = client::connect(config, (host, port), target_handler(host, port, outcome))
                 .await
                 .map_err(|e| format!("could not reach {host}:{port}: {e}"))?;
             Ok((handle, None))
         }
         Some(spec) => {
             let (juser, jhost, jport) = parse_jump(spec, user);
-            let mut jump = client::connect(config.clone(), (jhost.as_str(), jport), ClientHandler)
-                .await
-                .map_err(|e| format!("could not reach jump host {jhost}:{jport}: {e}"))?;
+            let mut jump =
+                client::connect(config.clone(), (jhost.as_str(), jport), jump_handler(&jhost, jport))
+                    .await
+                    .map_err(|e| format!("could not reach jump host {jhost}:{jport}: {e}"))?;
             // Authenticate the bastion with the same on-disk-key chain.
-            auth_auto(&mut jump, &juser, None)
+            auth_auto(&mut jump, &juser, None, None)
                 .await
                 .map_err(|e| format!("jump host authentication failed: {e}"))?;
             let channel = jump
                 .channel_open_direct_tcpip(host, port as u32, "127.0.0.1", 0)
                 .await
                 .map_err(|e| format!("jump host could not reach {host}:{port}: {e}"))?;
-            let handle = client::connect_stream(config, channel.into_stream(), ClientHandler)
-                .await
-                .map_err(|e| format!("could not establish SSH through jump host: {e}"))?;
+            let handle = client::connect_stream(
+                config,
+                channel.into_stream(),
+                target_handler(host, port, outcome),
+            )
+            .await
+            .map_err(|e| format!("could not establish SSH through jump host: {e}"))?;
             Ok((handle, Some(jump)))
         }
     }
@@ -280,17 +440,22 @@ async fn authenticate(
                 Err("the server rejected the password".to_string())
             }
         }
-        AuthMethod::Auto { identity_file } => {
-            auth_auto(handle, user, identity_file.as_deref()).await
-        }
+        AuthMethod::Auto {
+            identity_file,
+            passphrase,
+        } => auth_auto(handle, user, identity_file.as_deref(), passphrase.as_deref()).await,
     }
 }
 
 /// Key-based auth: try the config IdentityFile, then the default on-disk keys.
+/// `passphrase` (if any) unlocks an encrypted key. An encrypted key found with
+/// no passphrase returns `KEY_NEEDS_PASSPHRASE:<path>` so the UI can prompt; a
+/// passphrase that fails to unlock returns a clear "incorrect passphrase".
 async fn auth_auto(
     handle: &mut client::Handle<ClientHandler>,
     user: &str,
     identity_file: Option<&str>,
+    passphrase: Option<&str>,
 ) -> Result<(), String> {
     let mut candidates: Vec<std::path::PathBuf> = Vec::new();
     if let Some(path) = identity_file {
@@ -303,21 +468,41 @@ async fn auth_auto(
         }
     }
 
+    // An encrypted key we couldn't open with no passphrase (→ prompt), and
+    // whether a supplied passphrase failed to load a key (→ "incorrect").
+    let mut encrypted_locked: Option<String> = None;
+    let mut load_failed_with_pass = false;
+
     for path in candidates {
         if !path.exists() {
             continue;
         }
-        if let Ok(key) = russh_keys::load_secret_key(&path, None) {
-            if let Ok(true) = handle
-                .authenticate_publickey(user, Arc::new(key))
-                .await
-            {
-                log::info!("authenticated with key {}", path.display());
-                return Ok(());
+        match russh_keys::load_secret_key(&path, passphrase) {
+            Ok(key) => {
+                if let Ok(true) = handle.authenticate_publickey(user, Arc::new(key)).await {
+                    log::info!("authenticated with key {}", path.display());
+                    return Ok(());
+                }
             }
+            // Encrypted, and no passphrase was given to unlock it.
+            Err(russh_keys::Error::KeyIsEncrypted) => {
+                if encrypted_locked.is_none() {
+                    encrypted_locked = Some(path.to_string_lossy().into_owned());
+                }
+            }
+            // Any other load error while a passphrase was set is almost always
+            // a wrong passphrase (a corrupt key is far rarer).
+            Err(_) if passphrase.is_some() => load_failed_with_pass = true,
+            Err(_) => {}
         }
     }
 
+    if passphrase.is_some() && load_failed_with_pass {
+        return Err("could not unlock the key — the passphrase may be incorrect".to_string());
+    }
+    if let Some(path) = encrypted_locked {
+        return Err(format!("{KEY_NEEDS_PASSPHRASE}{path}"));
+    }
     Err("key authentication failed — no usable key was accepted. Add a host with \
          an IdentityFile to your SSH config, or use a password connection."
         .to_string())
@@ -346,11 +531,42 @@ pub async fn ssh_connect(
 
     // Enforce a connect timeout so an unreachable host fails fast instead of
     // hanging on the OS default (~20s on Windows).
-    let connect = open_handle(client_config(), &host, port, &user, proxy_jump.as_deref());
+    let outcome = Arc::new(std::sync::Mutex::new(HostKeyOutcome::Pending));
+    let connect = open_handle(
+        client_config(),
+        &host,
+        port,
+        &user,
+        proxy_jump.as_deref(),
+        outcome.clone(),
+    );
     let (mut handle, jump) =
         match tokio::time::timeout(std::time::Duration::from_secs(10), connect).await {
             Ok(Ok(pair)) => pair,
-            Ok(Err(e)) => return Err(fail(&app, &conn_id, e)),
+            Ok(Err(e)) => {
+                // A host-key refusal surfaces as a specific, actionable error.
+                // The error carries only the fingerprint — the UI already has
+                // host/port from the connect profile (avoids parsing them back
+                // out past an IPv6 host or the fingerprint's own colons).
+                let refusal = {
+                    match &*outcome.lock().unwrap() {
+                        HostKeyOutcome::Unknown { fingerprint, key } => {
+                            Some((format!("{HOST_KEY_UNKNOWN}{fingerprint}"), Some(key.clone())))
+                        }
+                        HostKeyOutcome::Changed => Some((HOST_KEY_CHANGED.to_string(), None)),
+                        _ => None,
+                    }
+                };
+                if let Some((_, Some(key))) = &refusal {
+                    // Stash the key so `ssh_trust_host` can record it if the user accepts.
+                    state
+                        .pending_host_keys
+                        .lock()
+                        .await
+                        .insert(format!("{host}:{port}"), key.clone());
+                }
+                return Err(fail(&app, &conn_id, refusal.map(|(m, _)| m).unwrap_or(e)));
+            }
             Err(_) => {
                 return Err(fail(
                     &app,
@@ -409,6 +625,29 @@ pub async fn ssh_disconnect(
     }
     emit_status(&app, &conn_id, ConnectionState::Disconnected, None);
     log::info!("session {conn_id} closed");
+    Ok(())
+}
+
+/// Record a host's public key in `~/.ssh/known_hosts` after the user accepts it
+/// from the fingerprint prompt (the key was stashed when the unknown-host
+/// connect was refused). The frontend then retries the connection, which now
+/// verifies.
+#[tauri::command]
+pub async fn ssh_trust_host(
+    state: State<'_, AppState>,
+    host: String,
+    port: u16,
+) -> Result<(), String> {
+    let key = state
+        .pending_host_keys
+        .lock()
+        .await
+        .remove(&format!("{host}:{port}"))
+        .ok_or("no pending host key to trust — reconnect and try again")?;
+    let path = known_hosts_path().ok_or("could not resolve ~/.ssh/known_hosts")?;
+    russh_keys::known_hosts::learn_known_hosts_path(&host, port, &key, &path)
+        .map_err(|e| format!("could not record the host key: {e}"))?;
+    log::info!("trusted host key for {host}:{port}");
     Ok(())
 }
 
@@ -554,12 +793,16 @@ async fn sleep_or_stopped(conn: &Connection, secs: u64) -> bool {
 /// Re-open and re-authenticate the transport, swapping the live handle in place
 /// so the connection id and all channels opened afterwards target the new link.
 async fn reestablish(conn: &Connection) -> Result<(), String> {
+    // A reconnect can't prompt; on a known host the key still verifies (and a
+    // changed key correctly refuses — the supervisor keeps retrying).
+    let outcome = Arc::new(std::sync::Mutex::new(HostKeyOutcome::Pending));
     let connect = open_handle(
         client_config(),
         &conn.info.host,
         conn.info.port,
         &conn.info.user,
         conn.proxy_jump.as_deref(),
+        outcome,
     );
     let (mut handle, jump) = match tokio::time::timeout(Duration::from_secs(10), connect).await {
         Ok(Ok(pair)) => pair,

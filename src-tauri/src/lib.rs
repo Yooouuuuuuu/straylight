@@ -60,6 +60,10 @@ pub struct AppState {
     /// `connId::root`. The string is a per-op token so an op only ever clears
     /// its own slot (see `vcs::run_cancellable`).
     pub vcs_ops: Mutex<HashMap<String, (String, tokio::sync::oneshot::Sender<()>)>>,
+    /// Server public keys awaiting the user's trust decision (keyed by
+    /// `host:port`), stashed when an unknown-host connect was refused so
+    /// `ssh_trust_host` can write the accepted one into `known_hosts`.
+    pub pending_host_keys: Mutex<HashMap<String, russh_keys::key::PublicKey>>,
 }
 
 impl AppState {
@@ -74,6 +78,7 @@ impl AppState {
             file_watchers: Mutex::new(HashMap::new()),
             jj_paths: Mutex::new(HashMap::new()),
             vcs_ops: Mutex::new(HashMap::new()),
+            pending_host_keys: Mutex::new(HashMap::new()),
         }
     }
 
@@ -120,6 +125,7 @@ pub fn run() {
             ssh::connection::ssh_connect,
             ssh::connection::ssh_disconnect,
             ssh::connection::ssh_reconnect,
+            ssh::connection::ssh_trust_host,
             transport::local_connect,
             transport::list_drives,
             transport::fs_find,

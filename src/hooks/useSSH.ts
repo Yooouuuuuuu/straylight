@@ -9,6 +9,7 @@ import {
   sshConnect,
   sshDisconnect,
   sshReconnect,
+  sshTrustHost,
   type AuthMethod,
 } from "../lib/ipc";
 import {
@@ -100,13 +101,62 @@ export function useSSH() {
       } catch (error) {
         const message = String(error);
         store.setConnState("disconnected", message);
-        // A config host with no usable key: fall back to password entry rather
-        // than a dead-end error, when the caller offers that path.
-        if (
+        // The key is encrypted and we have no (or a wrong) passphrase — prompt
+        // for it and retry with the passphrase held in memory only.
+        const needsPass = message.match(/KEY_NEEDS_PASSPHRASE:(.*)$/);
+        const hadPass = profile.auth.type === "auto" && !!profile.auth.passphrase;
+        // Host-key verification (known_hosts). UNKNOWN: first contact — show the
+        // fingerprint and let the user trust it, then retry. CHANGED: the key no
+        // longer matches known_hosts — refuse loudly (no one-click override).
+        const unknownHost = message.match(/HOST_KEY_UNKNOWN:(.*)$/);
+        if (unknownHost) {
+          store.openHostKeyPrompt({
+            kind: "unknown",
+            host: profile.host,
+            port: profile.port,
+            fingerprint: unknownHost[1].trim(),
+            onTrust: () => {
+              store.closeHostKeyPrompt();
+              void (async () => {
+                try {
+                  await sshTrustHost(profile.host, profile.port);
+                } catch (e) {
+                  store.pushNotice("error", `Could not trust host: ${String(e)}`);
+                  return;
+                }
+                void connect(profile, opts);
+              })();
+            },
+          });
+        } else if (/HOST_KEY_CHANGED/.test(message)) {
+          store.openHostKeyPrompt({
+            kind: "changed",
+            host: profile.host,
+            port: profile.port,
+          });
+        } else if (needsPass) {
+          const identityFile =
+            profile.auth.type === "auto" ? (profile.auth.identityFile ?? null) : null;
+          store.openPassphrasePrompt({
+            keyPath: needsPass[1].trim(),
+            onSubmit: (passphrase) => {
+              store.closePassphrasePrompt();
+              void connect(
+                { ...profile, auth: { type: "auto", identityFile, passphrase } },
+                opts,
+              );
+            },
+          });
+        } else if (
           opts?.onKeyAuthFail &&
           /no usable key|key authentication failed/i.test(message)
         ) {
+          // A config host with no usable key: fall back to password entry
+          // rather than a dead-end error, when the caller offers that path.
           opts.onKeyAuthFail();
+        } else if (hadPass && /passphrase/i.test(message)) {
+          // Wrong passphrase on a retry — one clear toast (the prompt closed).
+          store.pushNotice("error", "Incorrect passphrase — try connecting again.");
         } else {
           store.pushNotice("error", `Connection failed: ${message}`);
         }

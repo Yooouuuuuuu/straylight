@@ -37,6 +37,8 @@ import { StatusBar } from "./components/layout/StatusBar";
 import { ScmPanel } from "./components/vcs/ScmPanel";
 import { HistoryPanel } from "./components/vcs/HistoryPanel";
 import { ConnectionDialog } from "./components/connection/ConnectionDialog";
+import { PassphraseDialog } from "./components/connection/PassphraseDialog";
+import { HostKeyDialog } from "./components/connection/HostKeyDialog";
 import { CloseConfirmDialog } from "./components/editor/CloseConfirmDialog";
 import { ContextMenu } from "./components/filetree/ContextMenu";
 import { TabContextMenu } from "./components/editor/TabContextMenu";
@@ -362,6 +364,8 @@ export default function App() {
       </div>
       <StatusBar />
       {dialogOpen && <ConnectionDialog />}
+      <PassphraseDialog />
+      <HostKeyDialog />
       <CloseConfirmDialog />
       <NewEntryDialog />
       <DeleteConfirmDialog />

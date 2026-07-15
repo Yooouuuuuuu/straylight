@@ -59,10 +59,15 @@ exists is in the [design docs](README.md).
   machinery.
 
 ### Connections / auth
-- **Passphrase-protected keys** (today: unencrypted keys or password only).
-- **`known_hosts` verification** (currently trust-on-first-use).
-- **Chained `ProxyJump`** (only the first hop is used); IPv6 bastion specs
-  (`[::1]:22`) mis-parse in `parse_jump`.
+- **Explicit `IdentityFile` isn't exclusive** — if the named key is encrypted
+  but an unencrypted default key (`~/.ssh/id_*`) also authenticates, the default
+  is used silently (no passphrase prompt). Decide whether a specified key should
+  be tried on its own, like OpenSSH's `IdentitiesOnly=yes`.
+- **ssh-agent** support (Pageant on Windows / the agent socket on Unix) — the
+  "unlock once" alternative to the passphrase prompt.
+- **Jump-host `known_hosts` verification** — the target host is verified, but a
+  bastion's key is still trusted blindly (`jump_handler` skips the check).
+- **Chained `ProxyJump`** (only the first hop is used today).
 - **Port forwards aren't torn down on disconnect** — the listener keeps the
   `Connection` alive (and the local port bound) until stopped by hand.
 
@@ -85,8 +90,7 @@ exists is in the [design docs](README.md).
 - Promote the reconcile **moved-baseline** warning to a full
   Compare / Commit / Discard dialog (v1 is a toast).
 - **Reconnect edges** (v0.4.0): input typed during an outage is lost; unclean
-  disconnect on window close; `reset_sftp` can block ~45 s on a hung op; host
-  key not re-validated on restore.
+  disconnect on window close; `reset_sftp` can block ~45 s on a hung op.
 - Save-conflict is still **mtime-second-granular** on the *local* direct-write
   path (the remote path is now hash-guarded).
 

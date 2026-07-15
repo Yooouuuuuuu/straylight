@@ -32,6 +32,19 @@ history of design changes — lives in the docs: the decision ledger in
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 
+## [0.9.7] - 2026-07-15
+
+### Added
+
+- **SSH host-key verification** against `~/.ssh/known_hosts`. An unknown host
+  shows its SHA256 fingerprint to trust on first contact; a changed key is
+  refused (no one-click override). Loopback (WSL/localhost) is skipped;
+  re-verified on reconnect and session restore.
+- **Passphrase-protected keys** — an encrypted key prompts for its passphrase
+  (kept in memory only) and connects.
+- **IPv6 `ProxyJump`** — bracketed forms like `[::1]:22` and
+  `user@[2001:db8::1]:2222` now parse.
+
 ## [0.9.6] - 2026-07-15
 
 ### Changed

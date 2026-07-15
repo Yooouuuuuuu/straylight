@@ -61,7 +61,7 @@ sizes persist. Every UI color comes from CSS custom properties fed by
 | `transport/mod.rs` | The `FileTransport` trait (list/stat/read/write/rename/remove/copy/move/create + streamed open_read/open_write) and every `fs_*` command: listing, read/write with conflict detection and UTF-8 checks, find/search, Properties (`fs_measure`), and the **streaming transfer engine** ([transfers.md](transfers.md)). |
 | `transport/local.rs` | Local filesystem implementation (tokio::fs; drive listing on Windows). |
 | `save.rs` | `save_commit` — the detached, hash-guarded server-side commit step of a **staged remote save** ([data-safety.md](data-safety.md)). |
-| `ssh/connection.rs` | Connect, auth, ProxyJump (first hop), the reconnect supervisor (retries indefinitely, 30 s backoff cap), status events, `direct-tcpip` channels, compression preference. Host keys are **trust-on-first-use**; auth = key files then password — no ssh-agent, no passphrase prompt (both backlog). |
+| `ssh/connection.rs` | Connect, auth, ProxyJump (first hop), the reconnect supervisor (retries indefinitely, 30 s backoff cap), status events, `direct-tcpip` channels, compression preference. Host keys verify against `~/.ssh/known_hosts` (fingerprint prompt on first contact, refuse on a changed key, loopback/WSL skipped); auth = key files (passphrase-prompted if encrypted) then password — no ssh-agent yet (backlog). |
 | `ssh/config.rs` | `~/.ssh/config` parser (Host/HostName/User/Port/IdentityFile/ProxyJump first hop). |
 | `ssh/sftp.rs` | SFTP as a `FileTransport`. One SFTP subsystem channel per connection, serialized by a mutex. |
 | `ssh/pty.rs` | PTY shells: an SSH session channel per remote terminal, ConPTY via portable-pty locally. Output streams as `pty-output` events; input/resize/close come back via `pty_*` commands. |
@@ -94,9 +94,9 @@ user explicitly disconnects — matching the house rule of no automatic timeouts
 It emits `ssh-status` events; the frontend keeps tabs/tree/terminals attached
 and restarts each terminal's PTY via an epoch bump when the link returns. On
 reconnect it also reopens pinned + drafted files and reconciles any pending
-staged saves (see below). Honest limits (backlog): input typed during an
-outage is lost (no buffering/replay), and the host key isn't re-verified on
-restore.
+staged saves (see below); the host key re-verifies on both reconnect and
+session restore, so a swapped server is refused. Honest limit (backlog): input
+typed during an outage is lost (no buffering/replay).
 
 ### Saving
 
@@ -200,9 +200,10 @@ terminal chips, and the title-bar tint all follow it.
 - **Run the real binary on the host** for VCS / find / grep / containers /
   ports / the save-commit — no local clone, no reimplementation; output parsed
   only in stable machine formats.
-- **No ssh-agent.** Key files from `IdentityFile` / `~/.ssh/id_*` (unencrypted
-  only) or password, held in memory. Passphrase prompting and known_hosts are
-  backlog; trust-on-first-use until then.
+- **No ssh-agent** (backlog). Key files from `IdentityFile` / `~/.ssh/id_*`
+  (passphrase-prompted if encrypted) or password, held in memory. Host identity
+  verifies against `known_hosts` — fingerprint prompt on first contact, refuse
+  on a changed key.
 - **One window, many hosts** (local + up to 3 WSL + up to 3 remotes).
 - **Settings-as-theme:** no separate theme files; presets fill the settings.json
   color sections.
