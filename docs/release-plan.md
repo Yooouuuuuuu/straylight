@@ -7,42 +7,21 @@ iOS/mobile is a separate post-1.0 discussion (remote-only rework).
 
 ## Phases
 
-### Phase 1 — 0.9.0 + 0.9.x: test & fix, from source (current)
+### Phase 1 — 0.9.x: test & fix, from source (current)
 
-**0.9.0 = today's app + the audit bug fixes + the doc/README refresh.** Cut
-it, then run the FULL manual test plan (`docs/dev/phase3-test-plan.md`,
-Parts A–G) in `npm run tauri dev`; every fix batch ships as a **0.9.x** point
-release. Exit criteria: a clean full pass on the latest 0.9.x.
+Run entirely from source (`npm run tauri dev`); every fix batch ships as a
+**0.9.x** point release. Exit criteria: a clean manual test pass on the latest
+0.9.x.
 
-**Status 2026-07-10: the three audit fixes are in** (see CHANGELOG
-"Unreleased → Fixed"); `cargo test` passes (20/20) and `tsc` is clean.
-Remaining: the test pass itself (Parts A–G; the fixes' regressions are
-Part G).
+**Status (0.9.5):** 0.9.0 cut the audit-fixed app + the doc refresh; 0.9.1–0.9.5
+then added jj view-first, the ◉ monitor, multi-WSL (1 + 3 + 3), and the
+data-safety pass — staged remote saves, hot-exit drafts, and the conflict bar
+([data-safety.md](data-safety.md)). `cargo test` (25/25) and `tsc` are clean.
+**Now testing:** the data-safety plan (`docs/dev/data-safety-test-plan.md`)
+plus the standing manual plan (`docs/dev/phase3-test-plan.md`, Parts A–G).
 
-- [x] **Settings live-reload dies after closing a settings.json tab** — the
-      open-tab watcher sync (`src/lib/fileWatch.ts:51`) unwatches the same
-      un-refcounted backend watcher (`src-tauri/src/watch.rs`, keyed
-      `connId::path`) that `initSettings` relies on. Breaks the stability.md
-      promise that settings.json is "watched, live-applied". Fix: refcount the
-      watcher map (or a second logical owner key).
-- [x] **Concurrent remote VCS ops cancel each other** — `run_cancellable`
-      (`src-tauri/src/vcs.rs:599`) has one cancel slot per repo; a second
-      fetch/push replaces the first op's sender, spuriously cancelling it, and
-      the survivor becomes uncancellable. Reachable by double-clicking ⇣
-      (`ScmPanel.tsx:379` has no busy guard; neither does `vcsStore.remoteOp`).
-      Fix: guard `remoteOp` on `remoteBusy` + don't evict the other op's slot.
-- [x] **Cancelling a transfer that overwrites deletes the destination** —
-      `stream_file` (`src-tauri/src/transport/mod.rs:707`) removes `dest_path`
-      on cancel/error, but when overwriting, that's the user's pre-existing
-      file (already truncated by `open_write`). Fix: stream to a temp name and
-      rename into place on success.
-
-Nice-to-have (not blockers): multi-remote blind spots (TransferPane refresh +
-SCM open-repo picker only see the primary remote), the `initSettings` listener
-leak, same-second save-conflict miss.
-
-**Decided 2026-07-13:** 0.9.0 is "today's app + bugfixes" — no new features
-gate it. Backlog features keep flowing in point releases as usual.
+Point releases carry features freely — no feature gates the phase; the gate is
+the test pass.
 
 ### Phase 2 — 0.10.0: package + self-install
 
@@ -70,6 +49,11 @@ machine) and walk the checklist:
       **once** → More info → Run anyway → installs without admin prompt.
 - [ ] App launches; window, theme, and Fira Code fonts correct (fonts are
       bundled, not fetched).
+- [ ] **Measure and confirm the README's headline figures** on a **release**
+      build (not `tauri dev`): idle RAM (README says ~30–50 MB) and the NSIS
+      `setup.exe` size (README says ~10 MB). Replace the README numbers with
+      the measured ones, or adjust the claim. Until this runs, treat both as
+      **targets**, not verified.
 - [ ] Local: browse folders, open/edit/save a file, terminal (pwsh or
       PowerShell 5.1 fallback).
 - [ ] WSL: distro listed, sshd provisioning consent flow, browse + terminal.
@@ -85,8 +69,7 @@ Iterate 0.10.x until the checklist passes clean.
 
 ### Phase 3 — 1.0.0: public on GitHub
 
-- [ ] Audit [stability.md](stability.md) — every promise in it holds (the
-      settings-watcher bug above violates one today).
+- [ ] Audit [stability.md](stability.md) — every promise in it holds.
 - [ ] Re-check the documented security limitations are still acceptable to
       publish: trust-on-first-use host keys, no passphrase-protected keys.
       They stay documented limitations for 1.0 unless decided otherwise.
@@ -105,8 +88,8 @@ After 1.0 is out (each optional, all free):
       when manual builds get tedious).
 - [ ] **SignPath** free open-source code signing — removes the SmartScreen
       warning for direct downloads.
-- [ ] **Auto-update** — per the backlog, only worth it once people actually
-      install releases; needs an updater keypair + the CI workflow.
+- [ ] **Auto-update** — per [future-work.md](future-work.md), only worth it
+      once people actually install releases; needs an updater keypair + CI.
 
 ## Why unsigned is fine (decision record)
 
@@ -124,8 +107,9 @@ the same effect. Revisit only if users actually complain.
 
 The version lives in **three files** that must stay in sync:
 `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`
-(plus `Cargo.lock`, updated by the next build). Then a `CHANGELOG.md` entry
-and a `vX.Y.Z` commit + tag, matching the existing history.
+(plus `Cargo.lock`, synced by a `cargo` command). Then a `CHANGELOG.md` entry
+and a simple `vX.Y.Z` commit, matching the existing history. Point releases
+aren't tagged; **1.0.0** gets the tag + a GitHub Release.
 
 ## Platform notes
 

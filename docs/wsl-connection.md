@@ -138,15 +138,18 @@ managers can be added later.
 
 ## Sidebar / connection model
 
-A third **WSL** section joins **Local** and **Remote**. WSL gets its **own slot**,
-independent of the remote slot, so a window can hold **N local folders + 1 WSL
-distro + 1 remote server** at the same time. The WSL section lists the discovered
-distros (default highlighted, system ones hidden); clicking one provisions and
-connects it as a root.
+A **WSL** section joins **Local** and **Remote**, independent of the remote
+slots: a window can hold **local folders + up to three WSL distros + up to
+three SSH remotes** at once (1 + 3 + 3). The WSL section lists the discovered
+distros (default highlighted, system ones hidden, a readiness dot per distro);
+clicking one provisions and connects it as a root with its own host bar, and
+the section's + attaches more (hidden at three). Each connected distro is a
+full peer — color, pins, terminal group, VCS, search, status-bar dot — and all
+attached distros restore on relaunch.
 
 ---
 
-## Transfers (shipped — see [drag-drop.md](drag-drop.md))
+## Transfers (shipped — see [transfers.md](transfers.md))
 
 Because WSL is its own transport, transfers involving it are **transport-to-
 transport**, which the transfer engine supports:
@@ -218,9 +221,10 @@ Backend lives in `src-tauri/src/wsl.rs`; the sidebar section is
   restart `sshd` on a **deterministic per-distro loopback port** with
   `StrictModes=no` (loopback + key-only, so permission strictness can't reject
   the key); finally hand a normal SSH connection to `ssh_connect`.
-- **Slot.** `wsl` / `wslRootPath` in the store — its own slot, with its own
-  hidden/refresh/"ago" state, a sidebar toolbar matching Local/Remote, and a WSL
-  terminal opened on connect. Reuses SFTP, the PTY, and the reconnect supervisor.
+- **Slots.** `wsls[]` in the store (up to three, with legacy single-`wsl`
+  mirrors of the first) — each distro has its own hidden/refresh/"ago" state, a
+  sidebar toolbar matching Local/Remote, and a terminal opened on connect.
+  Reuses SFTP, the PTY, and the reconnect supervisor per distro.
 - **Performance.** `wsl.exe` work happens **only on a connect click** (~3 short
   calls + a 0.5s `sshd` restart). All file/terminal I/O afterwards is SFTP/PTY
   over loopback to native ext4 — no `wsl.exe`, no 9P.
@@ -235,27 +239,24 @@ Backend lives in `src-tauri/src/wsl.rs`; the sidebar section is
   / kill-while-disconnected all recover correctly; only kill-while-connected
   needs the manual round-trip. **Future fix:** on a WSL connection drop, have the
   supervisor re-run provisioning before re-opening the transport.
-- WSL connections aren't surfaced in the reconnect UI (`App.tsx` watches only the
-  `remote` slot).
+- WSL connection state **is** surfaced (0.9.4): a dropped link shows a red
+  status-bar dot, and a successful reconnect refreshes the tree + restarts the
+  terminal like a remote. (Auto re-provisioning on failure is still future
+  work — a reconnect only succeeds if `sshd` still lives, per the point above.)
 - `sshd` is restarted on every explicit connect (idempotent; cheap).
-- WSL sessions aren't silently restored across launches — since 0.8.15 a
-  **startup dialog offers the last distro** (`autoConnect.wsl`:
-  ask / always / never; "always" reconnects silently).
+- All attached distros — and their editor tabs — restore on relaunch, gated by
+  the startup ask (`autoConnect.wsl`: ask / always / never; "always" is silent).
 
 ### Future work
 
-- **Auto-recover a dropped WSL session** (re-provision in the supervisor) — see above.
-- **Local realtime backup of unsaved edits** (general, not WSL-specific). Today an
-  unsaved buffer lives only in the Monaco model, so a connection drop / crash /
-  accidental close can lose edits. Like VS Code "hot exit": debounce-save each
-  dirty tab's content to a local cache as you type, and restore it on reopen if
-  it's newer than the on-disk file (clearing the cache on a successful save). This
-  also fills the gap left in v0.4.0 session-persistence, which reopens tabs by path
-  but reloads from disk rather than caching dirty content.
+- **Auto-recover a dropped WSL session** (re-provision `sshd` in the supervisor
+  on a connection drop) — see the limitation above.
+
+(Local hot-exit backup of unsaved edits — once listed here — shipped in 0.9.5;
+see [data-safety.md](data-safety.md). Multiple distros at once shipped in 0.9.4.)
 
 ## Open questions
 
-- Multiple distros connected at once (currently: one WSL slot per window — revisit
-  if there's demand).
 - Whether to remember a *declined* install to avoid re-prompting on later clicks.
-- Exact transfer optimization for WSL ↔ Windows (defer to the drag-and-drop design).
+- A WSL ⇄ Windows transfer fast path via `wsl.exe` (defer to
+  [transfers.md](transfers.md)).

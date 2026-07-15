@@ -1,0 +1,80 @@
+# Transfers — cross-connection file copies
+
+Copy files and folders **between connections** — local ⇄ WSL ⇄ remote — that
+have no direct path and must be relayed through the app. Same-connection
+copy/move already exists (`fs_copy` / `fs_move`); this is the cross-connection
+case.
+
+---
+
+## The tool
+
+A two-pane copier, docked as a **Transfers tool group** in the bottom panel.
+Each pane has a host picker (offering every connected local / WSL / remote), a
+file tree for that host, and hidden-files toggle. Left pane defaults to Local.
+
+- **Copy only.** Drag a file/folder from one pane onto a folder in the other,
+  or select + copy/paste between panes. There is deliberately **no cut/move
+  across connections** — a failed cross-host move can lose data, so it must
+  never exist here.
+- **Collisions** prompt once: **Overwrite / Keep both / Cancel**. "Keep both"
+  uniquifies (`name copy`); "Overwrite" writes in place / merges into an
+  existing folder; nested collisions overwrite/merge.
+- **Progress** shows a live bar (`file 3/12 · 740 MB / 2.1 GB`) with Cancel; it
+  rides along in the status bar after the panel is closed, and the destination
+  tree refreshes on completion.
+
+---
+
+## The engine
+
+Transfers are **streamed, transport-to-transport**. `fs_transfer_batch` relays
+each file through a 256 KB buffer from the source transport's `open_read` to
+the destination's `open_write` — so peak memory is one buffer regardless of
+file size, and there is **no size cap**. (The earlier engine buffered whole
+files in RAM behind a 512 MB limit; streaming replaced it.)
+
+- **Pre-pass.** `measure` recursively totals bytes + file count for an accurate
+  overall progress bar before the copy starts.
+- **Progress events.** `transfer-progress` is emitted throttled to ~100 ms plus
+  one per file boundary.
+- **Cancellation.** `AppState` holds an `AtomicBool` per `transfer_id`;
+  `fs_transfer_cancel` trips it, and the copy loop checks it every chunk and
+  before each entry — cooperative, no forced task abort.
+- **Partial-file safety.** Each file streams to a temporary `.straypart`
+  sibling and is renamed over the destination **only once fully written** (a
+  plain SFTP rename won't replace an existing target on most servers, so the
+  commit falls back to remove-then-rename, keeping the temp if both fail). A
+  cancel or mid-stream error best-effort deletes the temp; a pre-existing
+  destination being overwritten is never touched, and no silently truncated
+  copy is left behind.
+- **Symlinked directories are skipped** — a link cycle (`ln -s . self`) would
+  otherwise recurse forever; symlinks to files still copy as regular files, and
+  the count of skipped links is reported in the completion toast. (The measure
+  and copy walks apply the same skip, so totals match.)
+
+WSL is its own transport, so a WSL ⇄ remote copy is relayed through the app
+(read one SSH endpoint, write the other). SSH-level `zlib` compression, when
+negotiated, shrinks transfer bytes on the wire for free.
+
+## Why not rsync
+
+rsync needs an rsync binary on **both** ends (Windows ships none; minimal
+hosts may lack it) and wants its **own** ssh connection rather than the single
+multiplexed session we already hold. It also doesn't fit the remote ⇄ WSL /
+remote ⇄ remote relay, and its delta advantage only helps re-syncs, not a
+first-time drag-to-copy. So we stream over the SFTP session we already own, and
+can add rsync's good ideas (resume, delta) natively later if wanted.
+
+## Deliberately not done (yet)
+
+- **Resume** an interrupted transfer (SFTP positioned writes make it possible
+  later; for now a dropped file restarts).
+- **Delta** transfer (rsync-style); rarely useful for drag-to-copy.
+- **Metadata preservation** beyond content (perms/mtime/symlink recreation).
+- **OS drag-in/out** (Explorer ⇄ tree). A one-off **Download** to the Windows
+  Downloads folder ships via the file context menu.
+- **Sidebar-to-sidebar drag** — cross-host drag lives only in this tool, not
+  the explorer trees.
+- A **WSL ⇄ Windows fast path** via `wsl.exe` (same machine, skip the SSH
+  relay).

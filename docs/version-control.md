@@ -5,10 +5,9 @@ hosts: status, tree decorations, diffs, stage/commit, history with a
 multi-lane graph, branches/bookmarks, stash, conflicts + a 3-way merge editor,
 and fetch / update / push with incoming review.
 
-Rewritten 2026-07-13 and kept as-built; accurate as of 1.0.0. The command
-spikes below remain the authoritative reference for the parsers in
-`src-tauri/src/vcs.rs`. Still-deferred items are listed at the end and in
-[backlog.md](backlog.md).
+Kept as-built. The command spikes below are the authoritative reference for the
+parsers in `src-tauri/src/vcs.rs`. Deferred items are in
+[future-work.md](future-work.md).
 
 ## Core insight
 
@@ -190,7 +189,15 @@ jj arm of `vcs_update` refuses with a hint.)
 
 ## Still deferred
 
-Blame; per-hunk staging; the global status concurrency cap; jj ignored-file
-dimming; real askpass-style auth prompting (interactive fetch/push auth hangs
-on the no-TTY channel — Cancel is the escape; use the terminal). Tracked in
-[backlog.md](backlog.md).
+The global status concurrency cap; jj ignored-file dimming; real askpass-style
+auth prompting (interactive fetch/push auth hangs on the no-TTY channel —
+Cancel is the escape; use the terminal). Tracked in
+[future-work.md](future-work.md).
+
+## Deliberately not doing
+
+**Per-hunk staging and inline blame.** They add GUI complexity for power-user
+git operations that belong in the integrated terminal — inconsistent with the
+lean, terminal-driven stance ("jj is view-first" above, generalized). Someone
+who wants to stage a hunk or run blame knows the git commands; the panel stays
+simple.

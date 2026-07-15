@@ -5,6 +5,10 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+Entries record *what shipped*, kept simple. The *why* behind a design — and the
+history of design changes — lives in the docs: the decision ledger in
+[docs/README.md](docs/README.md) and the per-subsystem design docs.
+
 ## [Unreleased]
 
 ### Planned
@@ -27,6 +31,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   drag-in/out, and multi cut/copy/paste in the explorer.
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
+
+## [0.9.6] - 2026-07-15
+
+### Changed
+
+- **Docs overhaul.** Reorganized `docs/` around a present-tense design-doc
+  model with a new [docs/README.md](docs/README.md) index + design-decision
+  ledger (the "why it changed" history lives there, so the docs stay
+  "what it is now" and this changelog stays code-focused). Merged the transfer
+  docs into `transfers.md` and the save + hot-exit docs into `data-safety.md`;
+  renamed `backlog.md` → `future-work.md` with priority tiers; rewrote
+  `architecture.md` as-built (1 + 3 + 3, staged saves, drafts). Rewrote the
+  root README — corrected stack facts (russh, Node 20.19+, DOM-renderer
+  fallback), added a **Data Safety** pillar and a **Security & limitations**
+  section.
 
 ## [0.9.5] - 2026-07-15
 

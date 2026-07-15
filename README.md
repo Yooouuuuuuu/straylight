@@ -1,48 +1,58 @@
 # Straylight
 
-A lightweight, open-source desktop application engineered to replace VS Code for remote server development. Straylight delivers the essential VS Code Remote-SSH experience—combining an **SSH file manager, embedded terminals, a tabbed code editor, and source control**—built on a Tauri v2 (Rust) backend and a React frontend. 
+**In modern development, you don't always need a heavy IDE packed with background micro-services.** If you don't rely on massive extension ecosystems, Straylight is the cleaner, redesigned alternative for remote work: an **SSH file manager, embedded terminals, a tabbed code editor, and source control** all in one lightweight desktop app.
 
-The project achieves a massive resource reduction, operating at **~30–50 MB of memory** (compared to VS Code's ~500 MB) packed inside a **~10 MB installer**.
+Built with **Tauri v2** (a Rust backend on the OS-native WebView) and a **React/TypeScript** frontend, Straylight runs far lighter than an Electron IDE — around **~30–50 MB of idle RAM** (versus VS Code's ~500 MB), in a **~10 MB installer**.
 
-**Status (v0.9.0):** Production-ready for source-build testing. A single unified window supports side-by-side management of local folders, up to three WSL distributions, and up to three concurrent SSH remotes. Installers and binaries will debut with the v0.10.0 release (see `docs/release-plan.md`).
+**Built for the AI era.** Your coding agent lives in the terminal now — so Straylight gives it a real one. Genuine system PTYs on the host mean tools like Claude Code run right where your code does, next to the files, editor, and source control they touch. (We build Straylight this way, too.)
+
+**Status:** Runs from source (the 0.9.x test pass — see `docs/release-plan.md`). Installers and binaries debut with the 0.10.0 release.
 
 > 💡 **[Insert a high-resolution screenshot or a looping 15-second WebP/GIF here showing Local, WSL, and a Remote server side-by-side, featuring a split Monaco editor and an open terminal.]**
 
 ---
 
+## Why Straylight Exists
+
+VS Code's remote architecture takes over your window: connecting to a remote means downloading and running a heavy Node server, extension hosts, and language servers on your target machine, dedicating the whole UI to that single context.
+
+Straylight is a fundamental architectural redesign. We use plain SSH and SFTP with **zero remote agents**. Because we do less per function, we can afford to do much more at once.
+
+* **Not Kidnapped:** A single unified window manages your Local folders, up to three WSL distributions, and up to three concurrent SSH remotes side by side.
+* **Pin Without Penalty:** Because Straylight doesn't charge you a massive RAM tax per context, you can pin as many directories and track as many version control repositories as you want across multiple hosts without closing things to stay fast.
+* **No Remote Bloat:** No language servers, no extension hosts, no hidden daemons eating your server's CPU and memory.
+
+---
+
 ## Key Features & Pillars
 
-### 🖥️ Unified Multi-Host Workspace
-* **True Multi-Root Sidebar:** Seamlessly blend pinned local folders, local WSL distributions, and up to three remote SSH targets within a single window.
-* **Host Identity Colors:** Assign a stable identity color to each remote (via right-click). The host bar, title-bar tint, editor tab stripes, terminal chips, and Source Control card borders dynamically match this color for instant visual context.
-* **Resilient Sessions & Auto-Reconnect:** Dropped SSH connections automatically reconnect with exponential backoff. Workspace layouts, editor splits, pinned/preview tabs, open files, and connected hosts are fully persisted and restored on relaunch.
+### 🛟 Instant, Crash-Safe File Saving
+* **No Network Wait:** When you hit `Ctrl+S`, Straylight clears the dirty state and returns control to you *instantly*. The upload and commit run in the background, so you never wait on the link to save.
+* **Staged Remote Saves:** We upload to a temporary file over SFTP, then commit it into place on the server with a native `cp` (not a rename) — designed so that a connection dropping mid-transfer won't leave you with a half-written or corrupted file.
+* **Hot-Exit Drafts & Conflict Bar:** Every unsaved edit is cached locally as you type. If a file changes on the server while you are editing it, Straylight blocks the save and surfaces a **Compare / Overwrite / Discard** prompt to prevent silent clobbering.
 
-### ⚡ Deep WSL & SSH Integration
-* **Native-Speed WSL Access:** Straylight bypasses the slow `\\wsl$` network bridge. It automatically provisions an internal SSH server inside your WSL distribution (with explicit user consent) and attaches to it over a native `localhost` SSH connection, achieving raw ext4 performance.
-* **Robust SSH Client:** Connect to `~/.ssh/config` hosts in a single click, supporting `IdentityFile` key authentication with automatic fallback to password entry. Built-in support for single-hop `ProxyJump` bastions and explicit 10-second connection timeouts.
+### 🌿 Lightweight Version Control (Git & Jujutsu)
+Track multiple repos across different hosts seamlessly in the left panel, keeping the UI highly active without the massive overhead.
+* **Live on Git Change:** Local repositories update automatically via near-zero-cost native file watchers. For remote repositories, live-updating is an opt-in poll, keeping network round-trips strictly under your control.
+* **Native Execution:** All VCS commands execute the real `git` / `jj` binary over the existing SSH connection. No local clone is required, meaning your remote `.gitconfig`, hooks, and signing keys work exactly as expected.
+* **A Complete Git & jj GUI:** Side-by-side diffs, stage/commit, interactive branch history, and a native 3-way merge editor. For Jujutsu (`jj`) users, Straylight provides a view-first visualizer (status, conflicts, multi-lane history) while jj mutations are driven from the terminal. Colocated repos feature a UI badge to instantly toggle the backend.
 
-### 🛠️ Advanced File Management & Streamed Transfers
-* **Full Keyboard Navigation:** Complete tree navigation via keyboard (`Arrows`, `Enter`, `Home/End`, `PageUp/PageDown` to jump between roots) with persistent collapse/expand states.
-* **Zero-Cap Streaming Transfers:** A dedicated multi-pane transfer tool copies files directly between any two hosts (Local ⇄ WSL ⇄ Remote) using true streams. To ensure atomicity, files are written to a temporary name and renamed into place upon completion—canceling a transfer will never corrupt an existing destination file.
-
-### 🌿 First-Class Version Control (Git & Jujutsu)
-* **Dual Git & Jujutsu (`jj`) Engine:** Run source control workloads directly on the host machine where the repository lives. No local cloning or heavy remote daemons required. 
-* **Colocated Repo Support:** If a repository contains both `.git` and `.jj`, a badge in the UI lets you instantly toggle the driving backend.
-* **Live Commits & Interactive History:** Features file-watched local updates, remote status refreshes on window focus, side-by-side diffing, conflict resolution (with a native 3-way merge editor), and a live multi-lane commit graph. Interactive network actions (`fetch`, `push`) include safety confirmation gates and a hard cancel banner for hung remote auth.
+### ⚡ Deep WSL & Resilient SSH
+* **Never Gives Up:** A dropped SSH connection reconnects on its own with exponential backoff (capped at 30s) and keeps retrying until it recovers or you manually disconnect. Tabs, splits, and terminals stay alive across drops.
+* **Native-Speed WSL:** Bypassing the slow `\\wsl$` bridge, Straylight auto-provisions an internal SSH server inside your WSL distro (with consent) and connects over a native `localhost` SSH link for native ext4 speed.
+* **Zero-Cap Streaming Transfers:** A dedicated multi-pane transfer tool streams files directly between any two hosts (Local ⇄ WSL ⇄ Remote) with no file size limits.
 
 ### ⌨️ Professional Editor & Terminal Experience
-* **Splittable Monaco Editor:** Supports up to three distinct editor tab split groups. Features italic preview tabs, explicit tab pinning, breadcrumbs, sticky scroll, real-time Markdown preview (`Ctrl+Shift+V`), line-ending conversion (`LF`/`CRLF`), and a lightweight mode optimized for massive log files.
-* **Hardware-Accelerated Terminals:** Powered by `xterm.js` (WebGL with canvas fallback) driving genuine system PTYs. Terminals are grouped by host, support drag-and-drop reordering, and feature a **Pop-out (`⇱`)** action that detaches a running terminal into an editor tab.
-
-### 🔌 Bottom-Panel Power Tools
-* **Live Port Monitoring:** Track listening TCP ports (process name, PID, address) across all connected hosts with one-click local port forwarding.
-* **Container Shelling:** Detects running Podman or Docker containers on any active host—click any container to instantly drop into an interactive shell.
+* **Splittable Monaco Editor:** The core text editing experience is identical to VS Code (Monaco). Features up to three split groups, explicit tab pinning, sticky scroll, real-time Markdown preview (`Ctrl+Shift+V`), line-ending conversion (`LF`/`CRLF`), and a lightweight mode for massive log files.
+* **Hardware-Accelerated Terminals:** `xterm.js` driving genuine system PTYs. Terminals are grouped by host, drag-reorder, and feature a **Pop-out (`⇱`)** action that detaches a running terminal into an editor tab without restarting your shell.
 
 ---
 
 ## Architecture
 
-Straylight achieves its extreme efficiency by removing heavy remote agents and local clones. A single SSH connection per remote host is multiplexed into distinct, lightweight channels handling specific tasks. All version control commands, file-finding, and shell operations execute binaries natively on the remote host via a custom asynchronous `exec` runner.
+Straylight achieves its efficiency by removing heavy remote agents and local clones. A single SSH connection per host is multiplexed into distinct channels. All version control commands, file-finding, and shell operations execute native binaries on the host via a custom asynchronous `exec` runner. 
+
+Design docs live in [`docs/`](docs/README.md).
 
 ```mermaid
 flowchart TB
@@ -54,7 +64,7 @@ flowchart TB
 
     subgraph Transport [Transport Translation Layer]
         FT{FileTransport Trait}
-        Exec[Async Exec Runner\nsrc/exec.rs]
+        Exec[Async Exec Runner\nsrc-tauri/src/exec.rs]
         Tauri <--> FT
         Tauri <--> Exec
     end
@@ -65,7 +75,7 @@ flowchart TB
     end
 
     subgraph RemoteHost [Remote Server / WSL Instance]
-        Tunnel{Multiplexed SSH Session\nvia thrussh}
+        Tunnel{Multiplexed SSH Session\nvia russh}
         Exec <-->|SSH Exec Channel| Tunnel
         FT <-->|SFTP Subsystem Channel| Tunnel
         
@@ -92,13 +102,13 @@ flowchart TB
 
 | Tool / Dependency | Version | Notes |
 | :--- | :--- | :--- |
-| **Node.js** | >= 18 | Required for the frontend compiler (Tested against Node 24). |
-| **Rust** | Stable | Backend compiler. `cargo` and `rustc` must be accessible on your environment path. |
+| **Node.js** | >= 20.19 (or >= 22.12) | Required by Vite 7 for the frontend build. Tested against Node 24. |
+| **Rust** | Stable | Backend compiler. `cargo` and `rustc` must be on your PATH. |
 | **C++ Build Tools** *(Windows)* | MSVC | Required for linking the Rust binary (`link.exe`). |
-| **Tauri v2 System Deps** | Platform Dep | **Windows:** WebView2 (Preinstalled on Win 10/11).<br>**Linux:** WebKitGTK 4.1, `libssl`, `librsvg`, `build-essential`. |
+| **Tauri v2 System Deps** | Platform Dep | **Windows:** WebView2 (preinstalled on Win 10/11).<br>**Linux:** WebKitGTK 4.1, `libssl`, `librsvg`, `build-essential`. |
 
 ### Quick Setup for Windows C++ Build Tools
-If you do not have Visual Studio installed on Windows, you can quickly provision the required compiler toolchain via `winget`:
+If you don't have Visual Studio installed on Windows, provision the compiler toolchain via `winget`:
 ```bash
 winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 ```
@@ -111,15 +121,14 @@ winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait
 # 1. Install frontend and development dependencies
 npm install
 
-# 2. Synchronize built-in typography assets
-node scripts/fetch-fonts.mjs
-
-# 3. Launch the environment in development mode (Vite HMR + Rust hot reload)
+# 2. Launch the app in development mode (Vite HMR + Rust hot reload)
 npm run tauri dev
 ```
-*Note: The initial `tauri dev` execution compiles the entire Rust backend wrapper and fetches its crate dependency tree. This can take a few minutes. Subsequent executions leverage cache targets and compile instantly.*
+Fira Code is **bundled** (committed under `public/fonts/`); no font fetch is required. To re-sync the font files from source, run `node scripts/fetch-fonts.mjs`.
 
-To compile production-optimized standalone native installers:
+*Note: The first `tauri dev` compiles the entire Rust backend and fetches its crate tree — this takes a few minutes. Subsequent runs use cached targets and start quickly.*
+
+To compile production-optimized native installers:
 ```bash
 npm run tauri build
 ```
@@ -130,12 +139,12 @@ npm run tauri build
 
 | Command | Function |
 | :--- | :--- |
-| `npm run dev` | Runs the isolated Vite development server inside a standard browser context (No native backend). |
-| `npm run typecheck` | Executes an explicit TypeScript compilation verification (`tsc --noEmit`). |
-| `npm run build` | Compiles a production-ready, type-checked static distribution of the React frontend. |
-| `npm run tauri dev` | Boots the full desktop framework equipped with real-time UI and backend hot reloading. |
-| `npm run tauri build` | Evaluates native target specifications and packages production-ready system installers. |
-| `cargo test --manifest-path src-tauri/Cargo.toml` | Triggers Rust unit-testing suites (Parsers for configuration files, git/jj output, permissions, and networking layers). |
+| `npm run dev` | Runs the isolated Vite dev server in a browser context (no native backend). |
+| `npm run typecheck` | TypeScript verification (`tsc --noEmit`). |
+| `npm run build` | Type-checks and builds the production React bundle. |
+| `npm run tauri dev` | Boots the full desktop app with UI + backend hot reload. |
+| `npm run tauri build` | Packages native installers (NSIS + MSI on Windows). |
+| `cargo test --manifest-path src-tauri/Cargo.toml` | Runs the Rust unit tests (config/git/jj parsers, the save-commit script, port parsing, path handling). |
 
 ---
 
@@ -147,25 +156,27 @@ npm run tauri build
 | <kbd>Ctrl</kbd> + <kbd>P</kbd> | Quick-Open Fuzzy File Search |
 | <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> | Global Content Search Across Files |
 | <kbd>Ctrl</kbd> + <kbd>S</kbd> | Save Current File |
-| <kbd>Ctrl</kbd> + <kbd>W</kbd> | Close Active Tab (Pinned items are bypassed) |
-| <kbd>F5</kbd> / <kbd>Ctrl</kbd> + <kbd>R</kbd> | Hard Refresh Workspace States (Keeps dirty tabs intact) |
-| <kbd>Ctrl</kbd> + <kbd>Tab</kbd> | Contextual Overlay Switcher (Toggles editor tabs / terminal groups) |
-| <kbd>Ctrl</kbd> + <kbd>`</kbd> | Toggle Bottom Terminal Panel Visibility |
-| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>`</kbd> | Launch New Terminal on the Currently Focused Host |
-| <kbd>Ctrl</kbd> + <kbd>PageDown</kbd> / <kbd>PageUp</kbd> | Cycle Between Panel Terminals |
-| <kbd>Ctrl</kbd> + <kbd>B</kbd> | Toggle Sidebar Visibility |
+| <kbd>Ctrl</kbd> + <kbd>W</kbd> | Close Active Tab (pinned tabs are spared) |
+| <kbd>F5</kbd> / <kbd>Ctrl</kbd> + <kbd>R</kbd> | Refresh Workspace States (dirty tabs kept intact) |
+| <kbd>Ctrl</kbd> + <kbd>Tab</kbd> | Contextual Switcher (editor tabs / terminal groups) |
+| <kbd>Ctrl</kbd> + <kbd>`</kbd> | Toggle Bottom Terminal Panel |
+| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>`</kbd> | New Terminal on the focused terminal's host (only while a terminal is focused) |
+| <kbd>Ctrl</kbd> + <kbd>PageDown</kbd> / <kbd>PageUp</kbd> | Cycle Panel Terminals |
+| <kbd>Ctrl</kbd> + <kbd>B</kbd> | Toggle Sidebar |
 | <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>E</kbd> | Focus File Explorer |
-| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd> | Hard Reload Target File Tree |
+| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd> | Reload the File Tree |
 | <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> | File Tree Navigation (<kbd>→</kbd> Expand/Enter, <kbd>←</kbd> Collapse/Parent) |
-| <kbd>Enter</kbd> | Open File / Toggle Folder Target |
-| <kbd>Ctrl</kbd> + <kbd>X</kbd> / <kbd>C</kbd> / <kbd>V</kbd> | File Explorer Cut / Copy / Paste Actions |
-| <kbd>F2</kbd> | Inline File/Folder Renaming |
-| <kbd>Del</kbd> | Destructive File/Folder Elimination |
+| <kbd>Enter</kbd> | Open File / Toggle Folder |
+| <kbd>Ctrl</kbd> + <kbd>X</kbd> / <kbd>C</kbd> / <kbd>V</kbd> | Explorer Cut / Copy / Paste |
+| <kbd>F2</kbd> | Inline Rename |
+| <kbd>Del</kbd> | Delete File/Folder |
 
-*Note: While the terminal context has focus, key sequences like <kbd>Ctrl</kbd> + <kbd>C</kbd> are naturally routed to the underling host shell subsystem (e.g., sending `SIGINT`) and are not captured by the application window. Keybindings are fully customizable inside the user settings tab or directly inside `settings.json`.*
+*While a terminal has focus, sequences like <kbd>Ctrl</kbd> + <kbd>C</kbd> are routed to the host shell (e.g. `SIGINT`), not captured by the window. Keybindings are fully customizable in the Settings tab or directly in `settings.json`.*
 
 ---
 
-## Licensing
+## License
 
-Straylight is dual-licensed under the **MIT License** and the **Apache License 2.0**. You may freely choose either license path to govern your usage of this software. See `LICENSE-MIT` and `LICENSE-APACHE` for verbatim legal disclosures.
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT) at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in Straylight by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
