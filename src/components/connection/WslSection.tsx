@@ -22,7 +22,6 @@ import {
   type RemoteWorkspace,
 } from "../../store/appStore";
 import { FolderBrowser } from "../FolderBrowser";
-import { RelativeTime } from "../RelativeTime";
 import { RootTree } from "../filetree/RootTree";
 import {
   IconEye,
@@ -157,7 +156,6 @@ function WslHost({ ws, order }: { ws: RemoteWorkspace; order: number }) {
           <IconFolderPlus />
         </button>
         <span className="host-tools__spacer" />
-        <RelativeTime at={ws.lastRefresh} />
         <button
           className="icon-btn"
           title={`Refresh ${conn.name}`}

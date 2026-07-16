@@ -60,6 +60,14 @@ export interface Settings {
      *  "user@host:port") — also drops them from the chip digits. */
     portsIgnoreHosts?: string[];
   };
+  /** UI reduction switches (also checkboxes in Preferences → Interface).
+   *  `localOnly: true` removes the explorer's L/W/R section toggles and every
+   *  non-local section; honored only while no WSL/remote host is connected
+   *  (flagged and inert otherwise). `disableChat: true` removes the CHAT
+   *  column entirely — the status-bar button, the column, and the
+   *  move-to-CHAT button on terminal entries; honored only while no terminal
+   *  lives in the CHAT panel. */
+  ui?: { localOnly?: boolean; disableChat?: boolean };
   // ---- theme.json sections ----
   colors?: Record<string, string>;
   editor?: Record<string, string>;
@@ -123,6 +131,7 @@ function settingsTemplate(): Settings {
     drafts: { enabled: true },
     restore: { openFiles: "ask" },
     panels: { ...PANEL_DEFAULTS },
+    ui: { localOnly: false, disableChat: false },
   };
 }
 
@@ -198,6 +207,13 @@ export let autoConnectConfig: { wsl: "ask" | "always" | "never"; remote: "ask" |
 };
 /** Hot-exit drafts on/off (settings `drafts.enabled`). */
 export let draftsConfig: { enabled: boolean } = { enabled: true };
+/** UI reduction switches (settings `ui`). Both are the raw wish — consumers
+ *  honor `localOnly` only while nothing non-local is connected, and
+ *  `disableChat` only while no terminal lives in the CHAT panel. */
+export let uiConfig: { localOnly: boolean; disableChat: boolean } = {
+  localOnly: false,
+  disableChat: false,
+};
 /** Whether drafts load back into restored files (settings `restore.openFiles`):
  *  "ask" = per-host decision at startup; "always" = silent restore. */
 export let restoreConfig: { openFiles: "ask" | "always" } = {
@@ -411,6 +427,33 @@ async function loadAndApply(): Promise<void> {
       : [],
   };
 
+  // UI reduction switches. Both gates live at the render sites (uiConfig
+  // keeps the raw wish) — wishing the impossible gets flagged so the no-op
+  // is explained.
+  const ui = s.ui ?? {};
+  if (s.ui !== undefined && (typeof s.ui !== "object" || s.ui === null)) {
+    issues.push(
+      'ui: must be an object like { "localOnly": false, "disableChat": false }',
+    );
+  }
+  uiConfig = {
+    localOnly: ui.localOnly === true,
+    disableChat: ui.disableChat === true,
+  };
+  {
+    const app = useAppStore.getState();
+    if (uiConfig.localOnly && (app.wsls.length > 0 || app.remotes.length > 0)) {
+      issues.push(
+        "ui: localOnly is set but WSL/remote hosts are connected — it takes effect once they disconnect",
+      );
+    }
+    if (uiConfig.disableChat && app.terminals.some((t) => t.inChat)) {
+      issues.push(
+        "ui: disableChat is set but terminals live in the CHAT panel — it takes effect once they're returned (−) or closed",
+      );
+    }
+  }
+
   // Silenced ask-dialogs (non-boolean entries are reported and ignored).
   confirms = {};
   if (s.confirms !== undefined) {
@@ -450,6 +493,9 @@ async function loadAndApply(): Promise<void> {
     }
   }
   onApplied?.();
+
+  // Components render off the module-level configs above — nudge them.
+  useAppStore.getState().bumpSettingsRev();
 
   const prev = useAppStore.getState().settingsIssues;
   useAppStore.getState().setSettingsIssues(issues);

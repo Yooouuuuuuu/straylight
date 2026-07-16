@@ -1,22 +1,13 @@
 /** Confirm before discarding working-tree changes (destructive — reverts files
  *  to HEAD / the jj parent, and deletes new/untracked files). */
-import { useEffect } from "react";
-
+import { useDialogKeys } from "../../hooks/useDialogKeys";
 import { useVcsStore } from "../../store/vcsStore";
 
 export function DiscardDialog() {
   const pending = useVcsStore((s) => s.pendingDiscard);
   const confirmDiscard = useVcsStore((s) => s.confirmDiscard);
   const cancelDiscard = useVcsStore((s) => s.cancelDiscard);
-
-  useEffect(() => {
-    if (!pending) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") cancelDiscard();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [pending, cancelDiscard]);
+  const dlg = useDialogKeys(cancelDiscard, pending);
 
   if (!pending) return null;
   const n = pending.changes.length;
@@ -34,6 +25,8 @@ export function DiscardDialog() {
         style={{ width: "min(440px, 92vw)" }}
         role="dialog"
         aria-modal="true"
+        ref={dlg.ref}
+        onKeyDown={dlg.onKeyDown}
       >
         <div className="modal__header">
           <span className="modal__title">
@@ -59,6 +52,7 @@ export function DiscardDialog() {
           </button>
           <button
             className="btn btn--primary"
+            data-dialog-primary
             style={{ background: "var(--red)", borderColor: "var(--red)", color: "#fff" }}
             onClick={() => void confirmDiscard()}
           >

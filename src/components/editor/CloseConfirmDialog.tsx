@@ -1,6 +1,7 @@
 /** Shown when closing a tab with unsaved changes: Save, Don't save, or Cancel. */
 import { deleteDraftFor } from "../../lib/drafts";
 import { saveTab } from "../../lib/saveFile";
+import { useDialogKeys } from "../../hooks/useDialogKeys";
 import { useAppStore } from "../../store/appStore";
 
 export function CloseConfirmDialog() {
@@ -8,6 +9,7 @@ export function CloseConfirmDialog() {
   const tabs = useAppStore((s) => s.tabs);
   const clearCloseConfirm = useAppStore((s) => s.clearCloseConfirm);
   const forceCloseTab = useAppStore((s) => s.forceCloseTab);
+  const dlg = useDialogKeys(clearCloseConfirm, closeConfirm);
 
   const tab = closeConfirm ? tabs.find((t) => t.id === closeConfirm.tabId) : null;
   if (!closeConfirm || !tab) return null;
@@ -35,6 +37,8 @@ export function CloseConfirmDialog() {
         style={{ width: "min(440px, 92vw)" }}
         role="dialog"
         aria-modal="true"
+        ref={dlg.ref}
+        onKeyDown={dlg.onKeyDown}
       >
         <div className="modal__header">
           <span className="modal__title">Unsaved changes</span>
@@ -60,7 +64,11 @@ export function CloseConfirmDialog() {
           >
             Don’t save
           </button>
-          <button className="btn btn--primary" onClick={() => void saveAndClose()}>
+          <button
+            className="btn btn--primary"
+            data-dialog-primary
+            onClick={() => void saveAndClose()}
+          >
             Save
           </button>
         </div>

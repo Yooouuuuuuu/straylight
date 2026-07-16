@@ -9,6 +9,7 @@ import { basename, dirname } from "../../lib/format";
 import { remoteColor } from "../../lib/hostColors";
 import { sshConfigPath } from "../../lib/ipc";
 import { openFileByPath } from "../../lib/openFile";
+import { uiConfig } from "../../lib/settings";
 import {
   handleExplorerKey,
   registerExplorerFocus,
@@ -22,7 +23,6 @@ import { useSSH } from "../../hooks/useSSH";
 import { ConnectionManager } from "../connection/ConnectionManager";
 import { WslSection } from "../connection/WslSection";
 import { FolderBrowser } from "../FolderBrowser";
-import { RelativeTime } from "../RelativeTime";
 import { RootTree } from "../filetree/RootTree";
 import {
   IconExternal,
@@ -44,7 +44,6 @@ export function Sidebar() {
   const refreshLocal = useAppStore((s) => s.refreshLocal);
   const refreshRemote = useAppStore((s) => s.refreshRemote);
   const refreshTokenLocal = useAppStore((s) => s.refreshTokenLocal);
-  const lastRefreshLocal = useAppStore((s) => s.lastRefreshLocal);
   const localConnId = useAppStore((s) => s.localConnId);
   const pinnedFolders = useAppStore((s) => s.pinnedFolders);
   const addPinnedFolder = useAppStore((s) => s.addPinnedFolder);
@@ -56,6 +55,12 @@ export function Sidebar() {
   const openNewEntry = useAppStore((s) => s.openNewEntry);
   const sections = useAppStore((s) => s.sections);
   const toggleSection = useAppStore((s) => s.toggleSection);
+  useAppStore((s) => s.settingsRev); // re-render when settings.json changes
+  const wsls = useAppStore((s) => s.wsls);
+  // Honored only while nothing non-local is connected — connecting anything
+  // (e.g. via the palette) brings the full explorer back until it's gone.
+  const localOnly =
+    uiConfig.localOnly && wsls.length === 0 && remotes.length === 0;
   const hostColors = useAppStore((s) => s.hostColors);
   const setHostColor = useAppStore((s) => s.setHostColor);
   const { disconnect, reconnect } = useSSH();
@@ -145,27 +150,28 @@ export function Sidebar() {
       <div className="sidebar__header">
         <span className="sidebar__title">Explorer</span>
         <div className="sidebar__actions">
-          {(
-            [
-              ["local", "L", "var(--section-local)"],
-              ["wsl", "W", "var(--section-wsl)"],
-              ["remote", "R", "var(--section-remote)"],
-            ] as const
-          ).map(([key, letter, color]) => (
-            <button
-              key={key}
-              className={`section-toggle ${sections[key] ? "" : "section-toggle--off"}`}
-              style={sections[key] ? { color } : undefined}
-              title={
-                sections[key]
-                  ? `Hide the ${letter === "L" ? "Local" : letter === "W" ? "WSL" : "Remote"} section (connections stay)`
-                  : `Show the ${letter === "L" ? "Local" : letter === "W" ? "WSL" : "Remote"} section`
-              }
-              onClick={() => toggleSection(key)}
-            >
-              {letter}
-            </button>
-          ))}
+          {!localOnly &&
+            (
+              [
+                ["local", "L", "var(--section-local)"],
+                ["wsl", "W", "var(--section-wsl)"],
+                ["remote", "R", "var(--section-remote)"],
+              ] as const
+            ).map(([key, letter, color]) => (
+              <button
+                key={key}
+                className={`section-toggle ${sections[key] ? "" : "section-toggle--off"}`}
+                style={sections[key] ? { color } : undefined}
+                title={
+                  sections[key]
+                    ? `Hide the ${letter === "L" ? "Local" : letter === "W" ? "WSL" : "Remote"} section (connections stay)`
+                    : `Show the ${letter === "L" ? "Local" : letter === "W" ? "WSL" : "Remote"} section`
+                }
+                onClick={() => toggleSection(key)}
+              >
+                {letter}
+              </button>
+            ))}
           <button
             className="icon-btn panel-head__hide"
             title="Minimize the explorer (Ctrl+B, or the status bar, to bring it back)"
@@ -239,7 +245,6 @@ export function Sidebar() {
             <IconFolderPlus />
           </button>
           <span className="host-tools__spacer" />
-          <RelativeTime at={lastRefreshLocal} />
           <button
             className="icon-btn"
             title="Refresh local"
@@ -273,11 +278,11 @@ export function Sidebar() {
         )}
 
         {/* WSL distros (second section — Local, WSL, then Remote) */}
-        {sections.wsl && <WslSection />}
+        {!localOnly && sections.wsl && <WslSection />}
 
         {/* Remote: a permanent section bar; each connection gets a host bar
             under it (the multi-remote shape, currently capped at one). */}
-        {sections.remote && (
+        {!localOnly && sections.remote && (
         <>
         <div className="sidebar__section-head sidebar__section-head--remote">
           <span className="sidebar__section-label">Remote</span>
@@ -412,7 +417,6 @@ export function Sidebar() {
                 <IconFolderPlus />
               </button>
               <span className="host-tools__spacer" />
-              <RelativeTime at={r.lastRefresh} />
               <button
                 className="icon-btn"
                 title={`Refresh ${conn.name}`}

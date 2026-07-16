@@ -115,6 +115,7 @@ function activate(c: Cand) {
   const store = useAppStore.getState();
   if (c.kind === "tab") {
     store.setActiveTab(c.id);
+    store.requestEditorFocus();
   } else if (c.kind === "chat") {
     store.setChatVisible(true);
     store.setChatActive(c.id);

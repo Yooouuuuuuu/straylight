@@ -23,7 +23,8 @@ import { useAppStore, type DockToken } from "./store/appStore";
 import { useVcsStore } from "./store/vcsStore";
 import { initDrafts } from "./lib/drafts";
 import { initFileWatching } from "./lib/fileWatch";
-import { initSettings } from "./lib/settings";
+import { initTreeWatching } from "./lib/treeWatch";
+import { initSettings, uiConfig } from "./lib/settings";
 import { startSaveSweep } from "./lib/stagedSave";
 import { initThemes } from "./lib/themes";
 import { initSessionPersistence, restoreSession } from "./lib/session";
@@ -117,6 +118,10 @@ export default function App() {
   const scmVisible = useVcsStore((s) => s.scmVisible);
   const chatVisible = useAppStore((s) => s.chatVisible);
   const dockOrder = useAppStore((s) => s.dockOrder);
+  useAppStore((s) => s.settingsRev); // re-render when settings.json changes
+  const hasChatResidents = useAppStore((s) =>
+    s.terminals.some((t) => t.inChat),
+  );
   const historyOpen = useVcsStore((s) => s.historyRepo != null);
 
   const terminalPanel = useRef<ImperativePanelHandle>(null);
@@ -179,6 +184,12 @@ export default function App() {
   // Auto-reload clean open files when they change on disk (local: watcher;
   // remote/WSL: mtime poll) — watching a growing log just works.
   useEffect(() => initFileWatching(), []);
+
+  // Local explorer trees auto-refresh: a recursive watcher per pinned folder
+  // (VS Code-style). Needs the local session for the watch calls.
+  useEffect(() => {
+    if (localConnId) initTreeWatching();
+  }, [localConnId]);
 
   // Re-check parked staged-save records on connected hosts (~60 s).
   useEffect(() => startSaveSweep(), []);
@@ -278,8 +289,22 @@ export default function App() {
   // Window refocus = an extra poll tick for MONITORED (◉) remote/WSL repos —
   // ◉ off means "don't touch this repo except for my own in-app actions",
   // and local repos are watcher-live, so both are skipped by the poll.
+  // The explorer trees refresh on the same trigger (throttled): the common
+  // "added a file in Windows Explorer, came back" case — the stand-in until
+  // real tree auto-refresh (future-work) lands.
   useEffect(() => {
-    const onFocus = () => useVcsStore.getState().pollEagerRemotes();
+    let lastTreeRefresh = 0;
+    const onFocus = () => {
+      useVcsStore.getState().pollEagerRemotes();
+      const now = Date.now();
+      if (now - lastTreeRefresh > 3_000) {
+        lastTreeRefresh = now;
+        const s = useAppStore.getState();
+        s.refreshLocal();
+        s.refreshWsl();
+        s.refreshRemote();
+      }
+    };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
@@ -345,7 +370,13 @@ export default function App() {
   // Left→right layout after the pinned explorer. The editor is one of the
   // tokens, so a column can step past it — sitting the editor next to the
   // explorer (both columns right) or at the right edge (both columns left).
-  const full: FullToken[] = ["explorer", ...dockOrder];
+  // ui.disableChat removes the CHAT column entirely — but never while
+  // terminals still live in it (the wish waits until they're returned).
+  const chatEnabled = !uiConfig.disableChat || hasChatResidents;
+  const full: FullToken[] = [
+    "explorer",
+    ...(chatEnabled ? dockOrder : dockOrder.filter((t) => t !== "chat")),
+  ];
   const editorIdx = full.indexOf("editor");
 
   const tokenVisible = (t: FullToken) =>

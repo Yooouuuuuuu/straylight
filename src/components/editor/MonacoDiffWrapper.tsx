@@ -20,6 +20,11 @@ export function MonacoDiffWrapper({ tab }: { tab: EditorTab }) {
       readOnly: true,
       originalEditable: false,
       renderSideBySide: true,
+      // Narrow editors are common with the dockable columns — below the
+      // breakpoint the diff renders unified/inline (VS Code's behavior)
+      // instead of two unreadable slivers.
+      useInlineViewWhenSpaceIsLimited: true,
+      renderSideBySideInlineBreakpoint: 760,
       fontFamily: "'Fira Code', 'Cascadia Code', monospace",
       fontLigatures: true,
       fontSize: 13,

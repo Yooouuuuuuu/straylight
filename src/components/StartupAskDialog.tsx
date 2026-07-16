@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 
 import { autoConnectConfig, updateSettings } from "../lib/settings";
+import { useDialogKeys } from "../hooks/useDialogKeys";
 import { useAppStore } from "../store/appStore";
 
 export function StartupAskDialog() {
@@ -14,33 +15,18 @@ export function StartupAskDialog() {
   // The connect asks' "also restore drafts" rider — default CHECKED.
   const [withDrafts, setWithDrafts] = useState(true);
 
+  const skip = () => {
+    ask?.onSkip?.();
+    shiftConnectAsk();
+  };
+  const dlg = useDialogKeys(skip, ask);
+
   useEffect(() => {
     setAlways(false);
     setWithDrafts(true);
   }, [ask]); // fresh checkboxes per ask
 
-  useEffect(() => {
-    if (!ask) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        confirm();
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        skip();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ask, always]);
-
   if (!ask) return null;
-
-  const skip = () => {
-    ask.onSkip?.();
-    shiftConnectAsk();
-  };
 
   const isDrafts = ask.kind === "drafts";
 
@@ -59,7 +45,12 @@ export function StartupAskDialog() {
 
   return (
     <div className="modal-overlay">
-      <div className="modal exit-ask" role="dialog">
+      <div
+        className="modal exit-ask"
+        role="dialog"
+        ref={dlg.ref}
+        onKeyDown={dlg.onKeyDown}
+      >
         <div className="exit-ask__title">
           {isDrafts
             ? `Restore unsaved changes from your last session — ${ask.label}?`
@@ -102,7 +93,7 @@ export function StartupAskDialog() {
           <button className="btn btn--ghost" onClick={skip}>
             Skip
           </button>
-          <button className="btn btn--primary" onClick={confirm}>
+          <button className="btn btn--primary" data-dialog-primary onClick={confirm}>
             {isDrafts ? "Restore" : "Connect"}
           </button>
         </div>

@@ -491,6 +491,27 @@ export function onVcsFsChange(
   return listen<VcsFsChange>("vcs-fs-change", (event) => handler(event.payload));
 }
 
+/** Watch a pinned **local** folder (recursive) for the explorer tree. */
+export function dirWatch(connId: string, root: string): Promise<void> {
+  return invoke("dir_watch", { connId, root });
+}
+
+export function dirUnwatch(connId: string, root: string): Promise<void> {
+  return invoke("dir_unwatch", { connId, root });
+}
+
+/** Debounced external change somewhere under a watched pinned folder. */
+export interface DirFsChange {
+  connId: string;
+  root: string;
+}
+
+export function onDirFsChange(
+  handler: (change: DirFsChange) => void,
+): Promise<UnlistenFn> {
+  return listen<DirFsChange>("dir-fs-change", (event) => handler(event.payload));
+}
+
 /** Watch one **local** open file for external changes (tab auto-reload). */
 export function fileWatch(connId: string, path: string): Promise<void> {
   return invoke("file_watch", { connId, path });

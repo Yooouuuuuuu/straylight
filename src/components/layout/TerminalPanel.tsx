@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { remoteColor, SECTION_LOCAL, SECTION_WSL } from "../../lib/hostColors";
 import { listTerminalProfiles, type TerminalProfile } from "../../lib/ipc";
-import { panelsConfig } from "../../lib/settings";
+import { panelsConfig, uiConfig } from "../../lib/settings";
 import { remoteHostKey, termDisplayName, useAppStore } from "../../store/appStore";
 import { ForwardingView } from "../PortForwards";
 import { ContainersView } from "../terminal/ContainersView";
@@ -51,6 +51,7 @@ export function TerminalPanel() {
 
   const renameTerminal = useAppStore((s) => s.renameTerminal);
   const belled = useAppStore((s) => s.belled);
+  useAppStore((s) => s.settingsRev); // re-render when settings.json changes
 
   const [profiles, setProfiles] = useState<TerminalProfile[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -418,16 +419,19 @@ export function TerminalPanel() {
                           {termDisplayName(t)}
                         </span>
                       )}
-                      <button
-                        className="terminal-entry__close terminal-entry__move"
-                        title="Move to CHAT (the shell keeps running)"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          moveTerminalToChat(t.id);
-                        }}
-                      >
-                        <IconToChat size={12} />
-                      </button>
+                      {(!uiConfig.disableChat ||
+                        terminals.some((x) => x.inChat)) && (
+                        <button
+                          className="terminal-entry__close terminal-entry__move"
+                          title="Move to CHAT (the shell keeps running)"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            moveTerminalToChat(t.id);
+                          }}
+                        >
+                          <IconToChat size={12} />
+                        </button>
+                      )}
                       <button
                         className="terminal-entry__close terminal-entry__kill"
                         title="Close terminal"

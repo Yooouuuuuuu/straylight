@@ -50,6 +50,9 @@ pub struct AppState {
     pub forwards: Mutex<HashMap<String, forward::ForwardEntry>>,
     /// Filesystem watchers on local repos, keyed by `connId::root`.
     pub repo_watchers: Mutex<HashMap<String, watch::RepoWatcher>>,
+    /// Filesystem watchers on pinned local folders (explorer tree
+    /// auto-refresh), keyed by `connId::root`.
+    pub dir_watchers: Mutex<HashMap<String, watch::RepoWatcher>>,
     /// Filesystem watchers on open local files (tab auto-reload + settings
     /// live-reload), keyed by `connId::path` and refcounted per owner.
     pub file_watchers: Mutex<HashMap<String, watch::FileWatcher>>,
@@ -75,6 +78,7 @@ impl AppState {
             vcs_locks: Mutex::new(HashMap::new()),
             forwards: Mutex::new(HashMap::new()),
             repo_watchers: Mutex::new(HashMap::new()),
+            dir_watchers: Mutex::new(HashMap::new()),
             file_watchers: Mutex::new(HashMap::new()),
             jj_paths: Mutex::new(HashMap::new()),
             vcs_ops: Mutex::new(HashMap::new()),
@@ -118,6 +122,8 @@ pub fn run() {
     .init();
 
     tauri::Builder::default()
+        // Remember window size / position / maximized across launches.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             ssh::config::ssh_list_config_hosts,
@@ -180,6 +186,8 @@ pub fn run() {
             vcs::vcs_remote_cancel,
             watch::vcs_watch,
             watch::vcs_unwatch,
+            watch::dir_watch,
+            watch::dir_unwatch,
             watch::file_watch,
             watch::file_unwatch,
         ])

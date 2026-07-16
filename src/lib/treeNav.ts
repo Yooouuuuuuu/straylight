@@ -170,8 +170,9 @@ export function handleExplorerKey(key: string): boolean {
         if (r.expanded) handle(r)?.collapse(r.path);
         else handle(r)?.expand(r.path);
       } else {
-        // Keyboard opens preview like a single click; edit or pin to keep.
-        void openFileByPath(r.connId, r.path, r.name, { preview: true });
+        // Enter = a double click: keep the file open and hand the editor
+        // the cursor (single click stays the preview-without-focus path).
+        void openFileByPath(r.connId, r.path, r.name, { preview: false });
       }
       return true;
     }

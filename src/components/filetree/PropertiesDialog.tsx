@@ -15,6 +15,7 @@ import {
   type FileEntry,
   type PropertiesInfo,
 } from "../../lib/ipc";
+import { useDialogKeys } from "../../hooks/useDialogKeys";
 import { useAppStore } from "../../store/appStore";
 import { IconClose } from "../icons";
 
@@ -44,15 +45,7 @@ export function PropertiesDialog() {
 
   const single = nodes && nodes.length === 1 ? nodes[0] : null;
   const connId = nodes && nodes.length ? nodes[0].connId : null;
-
-  useEffect(() => {
-    if (!nodes) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [nodes, close]);
+  const dlg = useDialogKeys(close, nodes);
 
   // Single-item detail (fast).
   useEffect(() => {
@@ -113,10 +106,17 @@ export function PropertiesDialog() {
         style={{ width: "min(460px, 92vw)" }}
         role="dialog"
         aria-modal="true"
+        ref={dlg.ref}
+        onKeyDown={dlg.onKeyDown}
       >
         <div className="modal__header">
           <span className="modal__title">Properties</span>
-          <button className="icon-btn" onClick={close} title="Close">
+          <button
+            className="icon-btn"
+            data-dialog-primary
+            onClick={close}
+            title="Close"
+          >
             <IconClose />
           </button>
         </div>

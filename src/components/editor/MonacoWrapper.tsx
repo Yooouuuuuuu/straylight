@@ -119,10 +119,21 @@ export function MonacoWrapper({ groupId }: { groupId: number }) {
     shownTabRef.current = activeTabId;
     const state = viewStatesRef.current.get(activeTabId);
     if (state) editor.restoreViewState(state);
-    editor.focus();
+    // NOTE: no focus here — activating a tab doesn't hand the editor the
+    // cursor by itself (a preview open keeps the explorer's keyboard). Focus
+    // arrives via editorFocusSeq below when the interaction asked for it.
     prevActiveRef.current = activeTabId;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTabId]);
+
+  // Deliberate focus hand-offs (double click, Enter, quick open, tab click).
+  const focusSeq = useAppStore((s) => s.editorFocusSeq);
+  const lastFocusSeq = useRef(focusSeq);
+  useEffect(() => {
+    if (focusSeq === lastFocusSeq.current) return;
+    lastFocusSeq.current = focusSeq;
+    editorRef.current?.focus();
+  }, [focusSeq]);
 
   // Reveal a target line once its file's model is active (from search results).
   const revealTarget = useAppStore((s) => s.revealTarget);

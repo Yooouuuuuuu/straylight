@@ -2,7 +2,7 @@
  *  accent, an appearance menu (themes / settings — non-functional preferences
  *  live here, not in the command palette), and window controls. The center
  *  region is a Tauri drag handle. */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import appIcon from "../../assets/icon.png";
@@ -14,6 +14,7 @@ import {
   settingsFilePath,
 } from "../../lib/settings";
 import { applyTheme, savedThemeNames } from "../../lib/themes";
+import { useDialogKeys } from "../../hooks/useDialogKeys";
 import { useAppStore } from "../../store/appStore";
 import {
   IconClose,
@@ -43,7 +44,6 @@ export function TitleBar() {
   const [exitAsk, setExitAsk] = useState(false);
   const [exitSilence, setExitSilence] = useState(false);
   const [maximized, setMaximized] = useState(false);
-  const exitRef = useRef<HTMLDivElement>(null);
 
   const appWindow = getCurrentWindow();
 
@@ -84,23 +84,9 @@ export function TitleBar() {
     void appWindow.close();
   };
 
-  // The exit dialog answers to the keyboard: Enter closes, Esc stays.
-  useEffect(() => {
-    if (!exitAsk) return;
-    exitRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        void confirmClose();
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        setExitAsk(false);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exitAsk, exitSilence]);
+  // Keyboard contract from the shared hook: Enter closes (primary), Esc
+  // stays, Tab/arrows cycle checkbox + buttons, focus trapped + restored.
+  const dlg = useDialogKeys(() => setExitAsk(false), exitAsk);
   // The window carries its remote's identity color (host bars use the same).
   const accent = remote ? remoteColor(hostColors, remote) : "transparent";
 
@@ -161,7 +147,7 @@ export function TitleBar() {
                   useAppStore.getState().openAppTab("settings");
                 }}
               >
-                Settings
+                Preferences
               </button>
               <button
                 className="terminal-menu__item"
@@ -170,13 +156,34 @@ export function TitleBar() {
                   useAppStore.getState().openAppTab("themes");
                 }}
               >
-                Themes
+                Theme
               </button>
               <button
                 className="terminal-menu__item"
                 onClick={() => openPrefFile(settingsFilePath(), "settings.json")}
               >
                 Open settings.json
+              </button>
+              <div className="terminal-menu__sep" />
+              {/* Inventories the app keeps for you — audit and prune, not knobs. */}
+              <div className="titlebar__menu-label">Storage</div>
+              <button
+                className="terminal-menu__item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  useAppStore.getState().openAppTab("drafts");
+                }}
+              >
+                Drafts
+              </button>
+              <button
+                className="terminal-menu__item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  useAppStore.getState().openAppTab("pins");
+                }}
+              >
+                Pinned files
               </button>
               <div className="terminal-menu__sep" />
               <div className="titlebar__menu-label">Quick theme</div>
@@ -196,14 +203,14 @@ export function TitleBar() {
           </>
         )}
         <button
-          className="titlebar__btn titlebar__btn--winctl"
+          className="titlebar__btn titlebar__btn--winctl titlebar__btn--live"
           title="Minimize"
           onClick={() => void appWindow.minimize()}
         >
           <IconMinimize />
         </button>
         <button
-          className="titlebar__btn"
+          className="titlebar__btn titlebar__btn--live"
           title={maximized ? "Restore" : "Maximize"}
           onClick={() => void appWindow.toggleMaximize()}
         >
@@ -220,11 +227,12 @@ export function TitleBar() {
       {exitAsk && (
         <div className="modal-overlay" onClick={() => setExitAsk(false)}>
           <div
-            ref={exitRef}
+            ref={dlg.ref}
             className="modal exit-ask"
             role="dialog"
             tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
+            onKeyDown={dlg.onKeyDown}
           >
             <div className="exit-ask__title">Close Straylight?</div>
             <div className="exit-ask__hint">
@@ -245,7 +253,11 @@ export function TitleBar() {
               <button className="btn btn--ghost" onClick={() => setExitAsk(false)}>
                 Cancel
               </button>
-              <button className="btn btn--primary" onClick={() => void confirmClose()}>
+              <button
+                className="btn btn--primary"
+                data-dialog-primary
+                onClick={() => void confirmClose()}
+              >
                 Close
               </button>
             </div>

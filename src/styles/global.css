@@ -89,6 +89,17 @@
   min-width: 0;
 }
 
+/* Window management stays alive under every popup/dialog: the drag region and
+ * the minimize / maximize-restore buttons sit ABOVE all backdrops and modal
+ * overlays (highest is the 1200 context menu), so you can always move,
+ * minimize, or restore the window. Deliberately NOT elevated: close and the
+ * two menu buttons — those stay blocked while something is open. */
+.titlebar__drag,
+.titlebar__btn--live {
+  position: relative;
+  z-index: 2000;
+}
+
 .titlebar__brand {
   display: flex;
   align-items: center;
@@ -662,6 +673,13 @@
   padding: var(--space-5) var(--space-6);
 }
 
+/* The IDE settings pattern (VS Code / Windows Terminal): content lives in a
+ * capped column, so a row's label and its control stay within one eye-span
+ * instead of stretching across the whole editor. */
+.app-tab > * {
+  max-width: 620px;
+}
+
 .app-tab__title {
   margin: 0 0 var(--space-2);
   font-size: var(--font-size-lg);
@@ -684,7 +702,9 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-1) 0;
+  padding: var(--space-2) 0;
+  /* A hairline under each row keeps label ↔ control pairs readable. */
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
 }
 
 .settings-row__label {
@@ -876,6 +896,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 40vw;
+  gap: var(--space-2);
+}
+
+/* Host prefix on a non-local file's status-bar path (inline host color). */
+.statusbar__pathhost {
+  font-weight: 600;
 }
 
 /* In-flight transfer indicator in the status bar (global progress). */
@@ -3553,6 +3579,11 @@ select option {
   color: var(--fg-primary);
 }
 
+/* Host chip leading a non-local file's crumbs (inline color = host color). */
+.editor-crumbs__host {
+  font-weight: 600;
+}
+
 /* Per-file action at the breadcrumb's right edge (¶ Preview for Markdown). */
 .editor-crumbs__action {
   margin-left: auto;
@@ -3748,6 +3779,15 @@ select option {
   --rail-color: color-mix(in srgb, var(--fg-secondary) 55%, var(--border));
 }
 
+/* Host identity + pick state live in ONE place: the bottom mark, in the tab's
+ * host color (inline --tab-mark; local = the Local section color). A single
+ * intensity ladder answers both questions on every tab —
+ *   dim (25%)     any unpicked tab        "this file lives on that host"
+ *   medium (60%)  a group's showing tab   "this is what that split shows"
+ *   full (100%)   the picked file         "keys go here"
+ * — layered on the background ladder below. (An earlier design ALSO put host
+ * color as a top stripe on non-local tabs; the two decorations fought — the
+ * color jumped edges as tabs were picked — so the stripe is gone.) */
 .editor-tab {
   height: calc(var(--panel-header-height) - 2px);
   display: flex;
@@ -3764,24 +3804,14 @@ select option {
   cursor: pointer;
   white-space: nowrap;
   flex: 0 0 auto;
+  box-shadow: inset 0 -1.5px 0 color-mix(in srgb, var(--tab-mark, var(--green)) 25%, transparent);
 }
 
-/* WSL/remote tabs carry their host's identity color as a bottom stripe. */
-/* Host identity rides the TOP edge; the bottom line means one thing only —
- * "this tab is picked" (it's host-colored too, so the two were ambiguous). */
-.editor-tab--host {
-  box-shadow: inset 0 2px 0 var(--tab-host-color);
-}
-
-/* A dragged tab would be inserted before this one. */
+/* A dragged tab would be inserted before this one (the mark stays). */
 .editor-tab--drop {
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-
-.editor-tab--host.editor-tab--drop {
   box-shadow:
     inset 2px 0 0 var(--accent),
-    inset 0 2px 0 var(--tab-host-color);
+    inset 0 -1.5px 0 color-mix(in srgb, var(--tab-mark, var(--green)) 25%, transparent);
 }
 
 .editor-tab:hover {
@@ -3790,20 +3820,17 @@ select option {
 
 /* Four background levels: strip (darkest) < unselected tab < opened file
  * (active in an unfocused group) < selected opened file (active in the
- * focused group, brightest) — plus the hairline green mark, the ONLY green
- * in the strip, full strength in the focused group. */
+ * focused group, brightest). */
 .editor-tab--active {
   background: color-mix(in srgb, var(--fg-primary) 22%, var(--bg-secondary));
   color: var(--fg-primary);
-  /* Picked-mark = the tab's HOST color (inline --tab-mark; local = the Local
-   * section color) — one rule for files and terminals alike. */
   box-shadow: inset 0 -1.5px 0 var(--tab-mark, var(--green));
 }
 
-/* An unfocused group's active tab: one level down, mark dimmed. */
+/* An unfocused group's active tab: one level down, mark at the middle step. */
 .editor-group--multi:not(.editor-group--focused) .editor-tab--active {
   background: color-mix(in srgb, var(--fg-primary) 14%, var(--bg-secondary));
-  box-shadow: inset 0 -1.5px 0 color-mix(in srgb, var(--tab-mark, var(--green)) 45%, transparent);
+  box-shadow: inset 0 -1.5px 0 color-mix(in srgb, var(--tab-mark, var(--green)) 60%, transparent);
 }
 
 .editor-tab__icon {

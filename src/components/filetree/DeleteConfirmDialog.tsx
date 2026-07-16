@@ -1,25 +1,15 @@
 /** Confirm before deleting a file or folder (one or many). */
-import { useEffect } from "react";
-
 import { deleteEntries } from "../../lib/fileOps";
+import { useDialogKeys } from "../../hooks/useDialogKeys";
 import { useAppStore } from "../../store/appStore";
 
 export function DeleteConfirmDialog() {
   const confirmDelete = useAppStore((s) => s.confirmDelete);
   const closeConfirmDelete = useAppStore((s) => s.closeConfirmDelete);
-
-  // Esc dismisses the dialog without deleting (same as Cancel).
-  useEffect(() => {
-    if (!confirmDelete) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeConfirmDelete();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [confirmDelete, closeConfirmDelete]);
+  const dlg = useDialogKeys(
+    closeConfirmDelete,
+    confirmDelete && confirmDelete.length > 0 ? confirmDelete : null,
+  );
 
   if (!confirmDelete || confirmDelete.length === 0) return null;
   const items = confirmDelete;
@@ -37,6 +27,8 @@ export function DeleteConfirmDialog() {
         style={{ width: "min(440px, 92vw)" }}
         role="dialog"
         aria-modal="true"
+        ref={dlg.ref}
+        onKeyDown={dlg.onKeyDown}
       >
         <div className="modal__header">
           <span className="modal__title">
@@ -67,6 +59,7 @@ export function DeleteConfirmDialog() {
           </button>
           <button
             className="btn btn--primary"
+            data-dialog-primary
             style={{
               background: "var(--red)",
               borderColor: "var(--red)",

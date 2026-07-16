@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { colorForName } from "../../lib/connectionColor";
+import { useDialogKeys } from "../../hooks/useDialogKeys";
 import { useSSH } from "../../hooks/useSSH";
 import { useAppStore } from "../../store/appStore";
 import { IconClose } from "../icons";
@@ -56,14 +57,9 @@ export function ConnectionDialog() {
     setDialogOpen(false);
   }
 
-  useEffect(() => {
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") close();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // The dialog places its own initial focus (host/user/password above);
+  // the hook still traps keys, handles Esc/Enter, and restores focus.
+  const dlg = useDialogKeys(close, true, { initialFocus: false });
 
   const canConnect = useMemo(
     () => host.trim() !== "" && user.trim() !== "" && password !== "",
@@ -108,7 +104,13 @@ export function ConnectionDialog() {
         if (event.target === event.currentTarget) close();
       }}
     >
-      <div className="modal" role="dialog" aria-modal="true">
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        ref={dlg.ref}
+        onKeyDown={dlg.onKeyDown}
+      >
         <div className="modal__header">
           <span className="modal__title">Connect with a password</span>
           <button className="icon-btn" onClick={close} title="Close">
@@ -169,9 +171,6 @@ export function ConnectionDialog() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void submit();
-                }}
               />
             </div>
             <div className="field">
@@ -194,6 +193,7 @@ export function ConnectionDialog() {
           </button>
           <button
             className="btn btn--primary"
+            data-dialog-primary
             disabled={!canConnect || busy}
             onClick={() => void submit()}
           >

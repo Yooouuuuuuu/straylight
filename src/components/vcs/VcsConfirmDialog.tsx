@@ -5,22 +5,18 @@
 import { useEffect, useState } from "react";
 
 import { disableConfirm } from "../../lib/settings";
+import { useDialogKeys } from "../../hooks/useDialogKeys";
 import { useVcsStore } from "../../store/vcsStore";
 
 export function VcsConfirmDialog() {
   const confirm = useVcsStore((s) => s.vcsConfirm);
   const clearConfirm = useVcsStore((s) => s.clearConfirm);
   const [silence, setSilence] = useState(false);
+  const dlg = useDialogKeys(clearConfirm, confirm);
 
   useEffect(() => {
     setSilence(false); // fresh checkbox per dialog
-    if (!confirm) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") clearConfirm();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [confirm, clearConfirm]);
+  }, [confirm]);
 
   if (!confirm) return null;
 
@@ -36,6 +32,8 @@ export function VcsConfirmDialog() {
         style={{ width: "min(440px, 92vw)" }}
         role="dialog"
         aria-modal="true"
+        ref={dlg.ref}
+        onKeyDown={dlg.onKeyDown}
       >
         <div className="modal__header">
           <span className="modal__title">{confirm.title}</span>
@@ -61,6 +59,7 @@ export function VcsConfirmDialog() {
           </button>
           <button
             className="btn btn--primary"
+            data-dialog-primary
             onClick={() => {
               const { run, id } = confirm;
               if (silence && id) void disableConfirm(id);

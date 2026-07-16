@@ -79,7 +79,16 @@ export interface EditorTab {
   cursor: CursorPosition;
   /** "diff" shows a Monaco diff; "log" shows a repo's commit history;
    *  Default "file". */
-  kind?: "file" | "diff" | "log" | "merge" | "preview" | "settings" | "themes";
+  kind?:
+    | "file"
+    | "diff"
+    | "log"
+    | "merge"
+    | "preview"
+    | "settings"
+    | "themes"
+    | "pins"
+    | "drafts";
   /** Which editor group (split) the tab lives in. Absent = group 0. */
   groupId?: number;
   /** VS Code-style preview tab (italic): the next preview open replaces it.
@@ -605,6 +614,15 @@ interface AppState {
   setPortsOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
   setSettingsIssues: (issues: string[]) => void;
+  /** Bumped after every settings.json (re)apply so components that read the
+   *  module-level configs (uiConfig, panelsConfig…) re-render. */
+  settingsRev: number;
+  bumpSettingsRev: () => void;
+  /** Bumped when an interaction should hand the editor the cursor (double
+   *  click, Enter, quick open, tab click). A preview open never bumps it, so
+   *  the explorer keeps the keyboard — the VS Code model. */
+  editorFocusSeq: number;
+  requestEditorFocus: () => void;
   setRevealTarget: (t: { connId: string; path: string; line: number } | null) => void;
   toggleSidebar: () => void;
   setSidebarVisible: (visible: boolean) => void;
@@ -726,7 +744,7 @@ interface AppState {
    *  the editor or the other column. */
   stepDock: (panel: "scm" | "chat", dir: 1 | -1) => void;
   /** Open (or focus) the Settings / Themes editor tabs. */
-  openAppTab: (kind: "settings" | "themes") => void;
+  openAppTab: (kind: "settings" | "themes" | "pins" | "drafts") => void;
 
   openTab: (tab: NewTab, opts?: { preview?: boolean; pinned?: boolean }) => void;
   /** Promote a preview tab to permanent (double-click, edit, pin). */
@@ -1125,6 +1143,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setPortsOpen: (portsOpen) => set({ portsOpen }),
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   setSettingsIssues: (settingsIssues) => set({ settingsIssues }),
+  settingsRev: 0,
+  bumpSettingsRev: () => set((s) => ({ settingsRev: s.settingsRev + 1 })),
+  editorFocusSeq: 0,
+  requestEditorFocus: () =>
+    set((s) => ({ editorFocusSeq: s.editorFocusSeq + 1 })),
   setRevealTarget: (revealTarget) => set({ revealTarget }),
   toggleSidebar: () => set((s) => ({ sidebarVisible: !s.sidebarVisible })),
   setSidebarVisible: (sidebarVisible) => set({ sidebarVisible }),
@@ -1427,7 +1450,14 @@ export const useAppStore = create<AppState>()((set, get) => ({
         id,
         connId: s.localConnId ?? "",
         path: id,
-        name: kind === "settings" ? "Settings" : "Themes",
+        name:
+          kind === "settings"
+            ? "Preferences"
+            : kind === "themes"
+              ? "Theme"
+              : kind === "pins"
+                ? "Pinned files"
+                : "Drafts",
         content: "",
         language: "plaintext",
         isBinary: false,

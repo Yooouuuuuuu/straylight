@@ -24,9 +24,11 @@ import {
   overwriteConflict,
 } from "../../lib/saveFile";
 import { pruneModels } from "../../lib/editorModels";
+import { tabHostColor } from "../../lib/hostColors";
 import { useVcsStore } from "../../store/vcsStore";
 import { useAppStore } from "../../store/appStore";
 import { SettingsView } from "../settings/SettingsView";
+import { DraftsView, PinsView } from "../settings/StorageViews";
 import { ThemesView } from "../settings/ThemesView";
 import { BinaryFileCard } from "../editor/BinaryFileCard";
 import { EditorTabs } from "../editor/EditorTabs";
@@ -105,6 +107,15 @@ function EditorBreadcrumbs({ tab }: { tab: EditorTab }) {
     if (w) return w.pins;
     return s.remotes.find((r) => r.conn.connId === connId)?.pins ?? [];
   });
+  // Non-local files lead with a host chip (local stays plain, matching the
+  // tab-stripe convention) — two hosts' identical paths stop looking alike.
+  const host = useAppStore((s) => {
+    if (connId === s.localConnId) return null;
+    const w = s.wsls.find((x) => x.conn.connId === connId);
+    if (w) return w.conn.name;
+    return s.remotes.find((r) => r.conn.connId === connId)?.conn.name ?? null;
+  });
+  const hostColor = host ? tabHostColor(connId) : null;
 
   const norm = path.replace(/\\/g, "/").replace(/\/+$/, "");
   let segments: string[] | null = null;
@@ -127,7 +138,20 @@ function EditorBreadcrumbs({ tab }: { tab: EditorTab }) {
     (!tab.kind || tab.kind === "file") && MD_RE.test(tab.name);
 
   return (
-    <div className="editor-crumbs" title={path}>
+    <div className="editor-crumbs" title={host ? `${host}: ${path}` : path}>
+      {host && (
+        <>
+          <span
+            className="editor-crumbs__host"
+            style={hostColor ? { color: hostColor } : undefined}
+          >
+            {host}
+          </span>
+          {/* » — everything after this is relative to the host, not a path
+              parent (those use ›). */}
+          <span className="editor-crumbs__sep">»</span>
+        </>
+      )}
       {segments.map((seg, i) => (
         <Fragment key={i}>
           {i > 0 && <span className="editor-crumbs__sep">›</span>}
@@ -330,6 +354,10 @@ function GroupPane({ gid, splitDrop }: { gid: number; splitDrop: boolean }) {
             <SettingsView />
           ) : active?.kind === "themes" ? (
             <ThemesView />
+          ) : active?.kind === "pins" ? (
+            <PinsView />
+          ) : active?.kind === "drafts" ? (
+            <DraftsView />
           ) : (
             active?.isBinary && <BinaryFileCard file={active} />
           )}

@@ -1,8 +1,9 @@
 /** Prompt to unlock an encrypted SSH key. Opened when a connection fails with
  *  `KEY_NEEDS_PASSPHRASE:` (useSSH); the passphrase is passed straight back to
  *  a retry and held in memory only — never written to disk. */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
+import { useDialogKeys } from "../../hooks/useDialogKeys";
 import { useAppStore } from "../../store/appStore";
 import { basename } from "../../lib/format";
 import { IconClose } from "../icons";
@@ -11,24 +12,13 @@ export function PassphraseDialog() {
   const prompt = useAppStore((s) => s.passphrasePrompt);
   const close = useAppStore((s) => s.closePassphrasePrompt);
   const [passphrase, setPassphrase] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
+  // Unlock is disabled while empty, so initial focus lands on the field;
+  // Enter clicks Unlock once something's typed.
+  const dlg = useDialogKeys(close, prompt);
 
   useEffect(() => {
     setPassphrase("");
-    if (prompt) {
-      const t = window.setTimeout(() => inputRef.current?.focus(), 0);
-      return () => window.clearTimeout(t);
-    }
   }, [prompt]);
-
-  useEffect(() => {
-    if (!prompt) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [prompt, close]);
 
   if (!prompt) return null;
 
@@ -44,7 +34,14 @@ export function PassphraseDialog() {
         if (e.target === e.currentTarget) close();
       }}
     >
-      <div className="modal" style={{ width: "min(440px, 92vw)" }} role="dialog" aria-modal="true">
+      <div
+        className="modal"
+        style={{ width: "min(440px, 92vw)" }}
+        role="dialog"
+        aria-modal="true"
+        ref={dlg.ref}
+        onKeyDown={dlg.onKeyDown}
+      >
         <div className="modal__header">
           <span className="modal__title">Unlock SSH key</span>
           <button className="icon-btn" onClick={close} title="Close">
@@ -61,14 +58,10 @@ export function PassphraseDialog() {
             <div className="field">
               <label className="field__label">Passphrase</label>
               <input
-                ref={inputRef}
                 className="input"
                 type="password"
                 value={passphrase}
                 onChange={(e) => setPassphrase(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") submit();
-                }}
               />
             </div>
           </div>
@@ -77,7 +70,12 @@ export function PassphraseDialog() {
           <button className="btn btn--ghost" onClick={close}>
             Cancel
           </button>
-          <button className="btn btn--primary" disabled={!passphrase} onClick={submit}>
+          <button
+            className="btn btn--primary"
+            data-dialog-primary
+            disabled={!passphrase}
+            onClick={submit}
+          >
             Unlock
           </button>
         </div>

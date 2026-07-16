@@ -5,6 +5,8 @@
 import { useState } from "react";
 
 import { setTabEol } from "../../lib/editorModels";
+import { tabHostColor } from "../../lib/hostColors";
+import { uiConfig } from "../../lib/settings";
 import { useAppStore } from "../../store/appStore";
 import { useVcsStore } from "../../store/vcsStore";
 import {
@@ -34,6 +36,7 @@ export function StatusBar() {
   const activeTabId = useAppStore((s) => s.activeTabId);
   const toggleTerminal = useAppStore((s) => s.toggleTerminal);
   const toggleChat = useAppStore((s) => s.toggleChat);
+  useAppStore((s) => s.settingsRev); // re-render when settings.json changes
   const terminalVisible = useAppStore((s) => s.terminalVisible);
   const chatVisible = useAppStore((s) => s.chatVisible);
   const terminals = useAppStore((s) => s.terminals);
@@ -58,6 +61,17 @@ export function StatusBar() {
   const active = tabs.find((t) => t.id === activeTabId) ?? null;
   const eolSwitchable =
     active && (!active.kind || active.kind === "file") && !active.isBinary;
+
+  // Host label + color for the active file's path (null for Local).
+  const activeHost = active
+    ? active.connId === localConnId
+      ? null
+      : (wsls.find((w) => w.conn.connId === active.connId)?.conn.name ??
+        remotes.find((r) => r.conn.connId === active.connId)?.conn.name ??
+        null)
+    : null;
+  const activeHostColor =
+    activeHost && active ? tabHostColor(active.connId) : null;
 
   const pickEol = (eol: "LF" | "CRLF") => {
     setEolMenu(false);
@@ -116,15 +130,19 @@ export function StatusBar() {
         {bellInPanel && <span className="statusbar__attn" />}
       </span>
 
-      <span className="statusbar__sep" />
-      <span
-        className="statusbar__item statusbar__item--button statusbar__panel-btn"
-        onClick={() => toggleChat()}
-        title="Toggle CHAT — a terminal column for Claude Code or any CLI"
-      >
-        <IconChatBubble size={13} /> CHAT
-        {bellInChat && <span className="statusbar__attn" />}
-      </span>
+      {(!uiConfig.disableChat || terminals.some((t) => t.inChat)) && (
+        <>
+          <span className="statusbar__sep" />
+          <span
+            className="statusbar__item statusbar__item--button statusbar__panel-btn"
+            onClick={() => toggleChat()}
+            title="Toggle CHAT — a terminal column for Claude Code or any CLI"
+          >
+            <IconChatBubble size={13} /> CHAT
+            {bellInChat && <span className="statusbar__attn" />}
+          </span>
+        </>
+      )}
 
       {/* Connection dots, sectioned: WSL first, then remotes — a section only
           exists while something is connected. State spells out on hover. */}
@@ -180,7 +198,20 @@ export function StatusBar() {
 
       {active && (
         <>
-          <span className="statusbar__item statusbar__path" title={active.path}>
+          <span
+            className="statusbar__item statusbar__path"
+            title={activeHost ? `${activeHost}: ${active.path}` : active.path}
+          >
+            {/* Non-local files carry their host up front (local stays plain) —
+                two hosts' identical paths stop looking alike. */}
+            {activeHost && (
+              <span
+                className="statusbar__pathhost"
+                style={activeHostColor ? { color: activeHostColor } : undefined}
+              >
+                {activeHost}:
+              </span>
+            )}
             {active.path}
           </span>
           <span className="statusbar__item">

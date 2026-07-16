@@ -1,7 +1,7 @@
 /** The editor tab bar. Click to switch, middle-click or × to close; a dirty tab
- *  shows a dot (which becomes × on hover). WSL/remote tabs carry a host-color
- *  top stripe so "whose file is this" reads at a glance (local stays plain;
- *  the bottom line is reserved for the picked mark).
+ *  shows a dot (which becomes × on hover). Every tab carries a bottom mark in
+ *  its HOST color; intensity encodes state — dim = unpicked, medium = what an
+ *  unfocused split is showing, full = the picked file (see global.css).
  *  Tabs are draggable: within a strip to reorder, onto another strip to move
  *  groups, or onto the editor's right edge to create a new split. */
 import { useEffect, useRef, useState } from "react";
@@ -73,17 +73,16 @@ export function EditorTabs({ groupId }: { groupId: number }) {
             tab.id === activeTabId ? "editor-tab--active" : "",
             tab.dirty ? "editor-tab--dirty" : "",
             tab.pinned ? "editor-tab--pinned" : "",
-            hostColor ? "editor-tab--host" : "",
             dropTarget === tab.id ? "editor-tab--drop" : "",
           ]
             .filter(Boolean)
             .join(" ")}
           style={
             {
-              // The picked-mark is always the tab's HOST color (local = the
-              // Local section color) — one rule for files and terminals alike.
+              // The bottom mark is always the tab's HOST color (local = the
+              // Local section color); CSS drives its intensity — dim unpicked,
+              // medium for a split's showing tab, full for the picked file.
               "--tab-mark": hostColor ?? "var(--section-local)",
-              ...(hostColor ? { "--tab-host-color": hostColor } : {}),
             } as React.CSSProperties
           }
           draggable
@@ -111,7 +110,11 @@ export function EditorTabs({ groupId }: { groupId: number }) {
               moveTabToPosition(id, groupId, tab.id);
             }
           }}
-          onClick={() => setActiveTab(tab.id)}
+          onClick={() => {
+            setActiveTab(tab.id);
+            // Choosing a tab IS choosing to edit it — hand over the cursor.
+            useAppStore.getState().requestEditorFocus();
+          }}
           onDoubleClick={() => promoteTab(tab.id)}
           onContextMenu={(event) => {
             event.preventDefault();
@@ -170,7 +173,10 @@ export function EditorTabs({ groupId }: { groupId: number }) {
               <span className="editor-tab__diff">⚔</span>
             ) : tab.kind === "preview" ? (
               <span className="editor-tab__diff">¶</span>
-            ) : tab.kind === "settings" || tab.kind === "themes" ? (
+            ) : tab.kind === "settings" ||
+              tab.kind === "themes" ||
+              tab.kind === "pins" ||
+              tab.kind === "drafts" ? (
               <span className="editor-tab__diff">⚙</span>
             ) : (
               <FileIcon name={tab.name} isDir={false} isOpen={false} />

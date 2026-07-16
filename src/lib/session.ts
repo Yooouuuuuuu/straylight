@@ -18,7 +18,7 @@ import {
 import { openFileByPath } from "./openFile";
 import { pinnedTabsFor } from "./pinnedTabs";
 import { reconcilePendingSaves } from "./stagedSave";
-import { autoConnectConfig } from "./settings";
+import { autoConnectConfig, uiConfig } from "./settings";
 import { connectWslDistro, setOnWslConnected } from "./wslSession";
 import {
   remoteHostKey,
@@ -299,7 +299,7 @@ function profileFromRemote(r: PersistedRemote): ConnectProfile {
  *  workspace on this host". Idempotent: already-open files are just focused. */
 async function openPinnedFiles(connId: string, connKey: string): Promise<void> {
   for (const p of pinnedTabsFor(connKey)) {
-    await openFileByPath(connId, p, undefined, { pinned: true });
+    await openFileByPath(connId, p, undefined, { pinned: true, focusEditor: false });
   }
 }
 
@@ -309,7 +309,7 @@ async function openPinnedFiles(connId: string, connKey: string): Promise<void> {
  *  (banner or auto-restore per the host's decision). Idempotent. */
 async function openDraftedFiles(connId: string, connKey: string): Promise<void> {
   for (const p of filesWithDraft(connKey)) {
-    await openFileByPath(connId, p);
+    await openFileByPath(connId, p, undefined, { focusEditor: false });
   }
 }
 
@@ -325,6 +325,7 @@ export async function consumePendingRemoteTabs(
     await openFileByPath(remote.connId, t.path, undefined, {
       preview: t.preview,
       pinned: t.pinned,
+      focusEditor: false,
     });
   }
   await openPinnedFiles(remote.connId, key);
@@ -351,6 +352,7 @@ export async function consumePendingWslTabs(
     await openFileByPath(conn.connId, t.path, undefined, {
       preview: t.preview,
       pinned: t.pinned,
+      focusEditor: false,
     });
   }
   await openPinnedFiles(conn.connId, `wsl:${conn.name}`);
@@ -429,6 +431,7 @@ export async function restoreSession(
       await openFileByPath(localConnId, t.path, undefined, {
         preview: t.preview,
         pinned: t.pinned,
+        focusEditor: false,
       });
     }
     await openPinnedFiles(localConnId, "local");
@@ -449,8 +452,10 @@ export async function restoreSession(
     // WSL first (matching the sidebar order), then the remotes. Policy per
     // kind from settings: "always" connects silently, "ask" queues a startup
     // dialog (its checkbox flips the setting to "always"), "never" skips.
+    // Under ui.localOnly nothing non-local restores — the sections it would
+    // land in aren't rendered.
     const auto = autoConnectConfig;
-    const savedWsls = s.wsls ?? (s.wsl ? [s.wsl] : []);
+    const savedWsls = uiConfig.localOnly ? [] : (s.wsls ?? (s.wsl ? [s.wsl] : []));
     for (const distro of savedWsls) {
       // Queue the distro's tabs regardless of policy, so a later manual
       // connect still restores them (mirrors the remote pending sets).
@@ -495,7 +500,7 @@ export async function restoreSession(
     }
 
     let dialogShown = false;
-    for (const r of s.remotes) {
+    for (const r of uiConfig.localOnly ? [] : s.remotes) {
       const key = persistedKey(r);
       const remoteTabs = s.tabs.filter(
         (t) => t.scope === "remote" && t.host === key,

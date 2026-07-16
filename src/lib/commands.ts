@@ -112,12 +112,12 @@ export function allCommands(): Command[] {
     { id: "file.save", title: "File: Save", run: () => saveActiveFile() },
     {
       id: "preferences.settings",
-      title: "Preferences: Settings",
+      title: "Preferences: Open",
       run: () => app().openAppTab("settings"),
     },
     {
       id: "preferences.themes",
-      title: "Preferences: Themes",
+      title: "Preferences: Theme",
       run: () => app().openAppTab("themes"),
     },
     {
@@ -128,6 +128,16 @@ export function allCommands(): Command[] {
         const path = settingsFilePath();
         if (path && s.localConnId) void openFileByPath(s.localConnId, path, "settings.json");
       },
+    },
+    {
+      id: "storage.drafts",
+      title: "Storage: Drafts",
+      run: () => app().openAppTab("drafts"),
+    },
+    {
+      id: "storage.pins",
+      title: "Storage: Pinned files",
+      run: () => app().openAppTab("pins"),
     },
     { id: "search.inFiles", title: "Search: In Files…", run: () => app().setSearchOpen(true) },
     {

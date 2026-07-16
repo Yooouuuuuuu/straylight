@@ -3,23 +3,14 @@
  *  trust and record it), `changed` when the server's key no longer matches
  *  `~/.ssh/known_hosts` (refuse loudly — no one-click override; the user must
  *  remove the stale line by hand if the change is legitimate). */
-import { useEffect } from "react";
-
+import { useDialogKeys } from "../../hooks/useDialogKeys";
 import { useAppStore } from "../../store/appStore";
 import { IconClose } from "../icons";
 
 export function HostKeyDialog() {
   const prompt = useAppStore((s) => s.hostKeyPrompt);
   const close = useAppStore((s) => s.closeHostKeyPrompt);
-
-  useEffect(() => {
-    if (!prompt) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [prompt, close]);
+  const dlg = useDialogKeys(close, prompt);
 
   if (!prompt) return null;
 
@@ -33,7 +24,14 @@ export function HostKeyDialog() {
         if (e.target === e.currentTarget) close();
       }}
     >
-      <div className="modal" style={{ width: "min(460px, 92vw)" }} role="dialog" aria-modal="true">
+      <div
+        className="modal"
+        style={{ width: "min(460px, 92vw)" }}
+        role="dialog"
+        aria-modal="true"
+        ref={dlg.ref}
+        onKeyDown={dlg.onKeyDown}
+      >
         <div className="modal__header">
           <span className="modal__title">
             {changed ? "Host key changed" : "Unknown host key"}
@@ -72,7 +70,13 @@ export function HostKeyDialog() {
           </div>
         </div>
         <div className="modal__footer">
-          <button className="btn btn--ghost" onClick={close}>
+          <button
+            className="btn btn--ghost"
+            // The SAFE action is the pre-focused default on a security prompt:
+            // bare Enter dismisses; trusting takes a deliberate Tab / click.
+            data-dialog-primary
+            onClick={close}
+          >
             {changed ? "Close" : "Cancel"}
           </button>
           {!changed && (

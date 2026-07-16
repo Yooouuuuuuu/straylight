@@ -32,6 +32,61 @@ history of design changes — lives in the docs: the decision ledger in
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 
+## [0.9.9] - 2026-07-16
+
+A keyboard-and-focus UX round: every dialog answers to the keyboard, the
+explorer finally updates itself, and the app's chrome reorganized around
+Preferences / Theme / Storage.
+
+### Added
+
+- **Local explorer auto-refresh.** Every pinned local folder gets a recursive
+  filesystem watcher (the same debounced machinery Source Control uses), so
+  external creates/deletes/renames appear in the tree by themselves — no F5.
+  WSL/remote trees refresh on window refocus (throttled) plus the manual
+  buttons, as before. The explorer's "N ago" refresh stamps are gone — the
+  trees are expected to be current now.
+- **Keyboard-first dialogs.** Every popup traps focus (keys can't leak to the
+  app underneath — deleting a file no longer moves the tree selection behind
+  the dialog), pre-focuses its primary button, and answers to Enter (confirm),
+  Esc (cancel), Tab/←→ (cycle buttons + checkboxes, wrapping), Space (toggle
+  a checkbox). Focus returns where it was on close. One deliberate exception:
+  the host-key prompt pre-focuses Cancel — trusting a fingerprint takes a
+  deliberate Tab.
+- **Window state persists** — size, position, and maximized survive a restart
+  (tauri-plugin-window-state).
+- **Host in the path.** Non-local files lead with a host-colored name in the
+  breadcrumb (`ubuntu » src › main.rs` — » marks the host boundary) and a
+  `host:` prefix on the status-bar path. Local stays plain.
+- **Preferences / Theme / Storage.** The Settings tab is now **Preferences**
+  (knobs only) with a new **Interface** section: *Local only* (hides the
+  L/W/R toggles and non-local sections; locked while any WSL/remote host is
+  connected) and *Disable CHAT* (removes the CHAT column; locked while
+  terminals live in it) — locked checkboxes explain themselves with a toast.
+  The pinned-files and drafts inventories moved to their own tabs under a
+  new **Storage** menu section (Drafts · Pinned files). The theme tab is
+  simply **Theme**. settings.json keeps its name; hand-edits still mix
+  freely (`ui.localOnly`, `ui.disableChat`).
+
+### Changed
+
+- **Explorer clicks, VS Code-style.** Single click opens a preview and the
+  explorer keeps the keyboard; double click or Enter keeps the file open and
+  hands the editor the cursor. Tab clicks and Ctrl+Tab still focus the
+  editor; session restore never steals focus.
+- **Tab marks: one ladder.** Every editor tab carries a bottom mark in its
+  host color; intensity encodes state — dim = unpicked, medium = what an
+  unfocused split shows, full = the picked file. The old host top stripe is
+  gone (the color no longer jumps edges when picking tabs).
+- **Diffs stop squeezing** — the compare view switches to the unified inline
+  diff when the editor is narrower than ~760px, back to side-by-side with
+  room (VS Code behavior).
+- **Settings pages read like settings** — content capped to a column instead
+  of stretching across the editor, with a hairline under each row.
+- **The title bar stays alive under popups** — moving, minimize, and
+  maximize/restore work with any menu or dialog open; close and the menu
+  buttons stay blocked.
+
 ## [0.9.8] - 2026-07-16
 
 The CHAT column: a straight terminal docked beside Source Control, built for

@@ -13,11 +13,16 @@ const LIGHTWEIGHT_BYTES = 50 * 1024 * 1024;
 export async function openRemoteFile(
   connId: string,
   entry: FileEntry,
-  opts?: { preview?: boolean; pinned?: boolean },
+  opts?: { preview?: boolean; pinned?: boolean; focusEditor?: boolean },
 ): Promise<void> {
   if (entry.isDir) return;
 
   const store = useAppStore.getState();
+
+  // VS Code model: a preview open (explorer single click) leaves focus where
+  // it is — the tree keeps the keyboard; a permanent open (double click,
+  // Enter, quick open) hands the editor the cursor.
+  const wantFocus = opts?.focusEditor ?? !opts?.preview;
 
   // Already open → focus its tab (a permanent open promotes a preview).
   const existing = store.tabs.find(
@@ -26,6 +31,7 @@ export async function openRemoteFile(
   if (existing) {
     store.setActiveTab(existing.id);
     if (!opts?.preview && existing.previewTab) store.promoteTab(existing.id);
+    if (wantFocus) store.requestEditorFocus();
     return;
   }
 
@@ -51,6 +57,7 @@ export async function openRemoteFile(
       lineEnding,
     };
     store.openTab(tab, opts);
+    if (wantFocus) useAppStore.getState().requestEditorFocus();
 
     if (!file.isBinary) {
       // Hot exit: remember where this tab last saw the file, and surface (or
@@ -102,7 +109,7 @@ export async function openFileByPath(
   connId: string,
   path: string,
   name?: string,
-  opts?: { preview?: boolean; pinned?: boolean },
+  opts?: { preview?: boolean; pinned?: boolean; focusEditor?: boolean },
 ): Promise<void> {
   const entry: FileEntry = {
     name: name ?? basename(path),

@@ -91,6 +91,75 @@ pub async fn vcs_watch(
     Ok(())
 }
 
+/// Start watching a pinned **local** folder (recursive) for the explorer tree,
+/// so external creates/deletes/renames show up without a manual refresh —
+/// VS Code keeps a workspace watcher for exactly this. Same debounce shape as
+/// `vcs_watch`; emits one `dir-fs-change` per burst. Idempotent per root.
+#[tauri::command]
+pub async fn dir_watch(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+) -> Result<(), String> {
+    let key = key_for(&conn_id, &root);
+    let mut watchers = state.dir_watchers.lock().await;
+    if watchers.contains_key(&key) {
+        return Ok(());
+    }
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    let mut watcher = notify::recommended_watcher(
+        move |res: Result<notify::Event, notify::Error>| {
+            if let Ok(event) = res {
+                if matches!(
+                    event.kind,
+                    EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+                ) {
+                    let _ = tx.send(());
+                }
+            }
+        },
+    )
+    .map_err(|e| format!("could not create watcher: {e}"))?;
+    watcher
+        .watch(Path::new(&root), RecursiveMode::Recursive)
+        .map_err(|e| format!("could not watch {root}: {e}"))?;
+
+    tauri::async_runtime::spawn(async move {
+        while rx.recv().await.is_some() {
+            loop {
+                match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+                    Ok(Some(())) => continue,
+                    _ => break,
+                }
+            }
+            let _ = app.emit(
+                "dir-fs-change",
+                json!({ "connId": conn_id, "root": root }),
+            );
+        }
+    });
+
+    watchers.insert(key, RepoWatcher { _watcher: watcher });
+    Ok(())
+}
+
+/// Stop watching a pinned folder (no-op if it wasn't watched).
+#[tauri::command]
+pub async fn dir_unwatch(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+) -> Result<(), String> {
+    state
+        .dir_watchers
+        .lock()
+        .await
+        .remove(&key_for(&conn_id, &root));
+    Ok(())
+}
+
 /// Stop watching a repo (no-op if it wasn't watched).
 #[tauri::command]
 pub async fn vcs_unwatch(

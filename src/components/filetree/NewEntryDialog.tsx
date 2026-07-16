@@ -1,22 +1,21 @@
 /** Prompt for the name of a new file or folder (created in a target directory). */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { createEntry } from "../../lib/fileOps";
 import { basename } from "../../lib/format";
+import { useDialogKeys } from "../../hooks/useDialogKeys";
 import { useAppStore } from "../../store/appStore";
 
 export function NewEntryDialog() {
   const newEntry = useAppStore((s) => s.newEntry);
   const closeNewEntry = useAppStore((s) => s.closeNewEntry);
   const [name, setName] = useState("");
-  const ref = useRef<HTMLInputElement>(null);
+  // The Create button is disabled while the name is empty, so the hook's
+  // initial focus lands on the input; Enter clicks Create once it's enabled.
+  const dlg = useDialogKeys(closeNewEntry, newEntry);
 
   useEffect(() => {
-    if (newEntry) {
-      setName("");
-      const timer = window.setTimeout(() => ref.current?.focus(), 0);
-      return () => window.clearTimeout(timer);
-    }
+    if (newEntry) setName("");
   }, [newEntry]);
 
   if (!newEntry) return null;
@@ -38,6 +37,8 @@ export function NewEntryDialog() {
         style={{ width: "min(420px, 92vw)" }}
         role="dialog"
         aria-modal="true"
+        ref={dlg.ref}
+        onKeyDown={dlg.onKeyDown}
       >
         <div className="modal__header">
           <span className="modal__title">
@@ -50,15 +51,10 @@ export function NewEntryDialog() {
               In <span className="mono">{basename(entry.parent) || entry.parent}</span>
             </label>
             <input
-              ref={ref}
               className="input input--mono"
               value={name}
               placeholder={entry.isDir ? "folder name" : "file name"}
               onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submit();
-                else if (e.key === "Escape") closeNewEntry();
-              }}
             />
           </div>
         </div>
@@ -68,6 +64,7 @@ export function NewEntryDialog() {
           </button>
           <button
             className="btn btn--primary"
+            data-dialog-primary
             disabled={!name.trim()}
             onClick={submit}
           >
