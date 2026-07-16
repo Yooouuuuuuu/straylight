@@ -32,6 +32,59 @@ history of design changes — lives in the docs: the decision ledger in
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
 
+## [0.9.8] - 2026-07-16
+
+The CHAT column: a straight terminal docked beside Source Control, built for
+pairing with Claude Code (or any CLI) — plus the dockable-column layout and an
+icon system to carry it.
+
+### Added
+
+- **CHAT column.** A bare terminal column, one shell on screen at a time.
+  Residents are ordinary terminals: send one over from the panel (its entry's
+  move button), open a fresh one on any connected host (＋), return it with −,
+  or kill it with ×. Hiding the column never evicts — shells keep running at
+  zero width. The bottom panel's host chips count both homes (`x+y`).
+- **Resident dots.** 12px host-color-outlined dots switch residents; the fill
+  is a lifecycle machine, active while a tool (Claude Code, vim…) has announced
+  itself via the terminal title: green = your turn, yellow = producing output,
+  blank = bare shell or exited (dimmed). The on-screen resident fills white.
+- **Terminal names.** Terminals follow the shell's OSC title when it's a real
+  name (Claude Code's status, vim's file) and keep their clean default label
+  ("Local", the host name) when it's shell noise (`…pwsh.exe`, `user@host:`
+  prompts). Double-click an entry (or the CHAT name line) to rename; renaming
+  to nothing reverts to auto.
+- **Dockable columns.** SC and CHAT step left/right around the editor (⇤ ⇥),
+  swapping past it — the editor can sit against the explorer or at the right
+  edge; only the explorer is pinned. Each column keeps its own persisted width;
+  the editor flexes, so hiding a column widens the editor, never a neighbor.
+- **Notification bell.** Every toast lands in a status-bar bell (right edge,
+  unread badge) after it fades — toast history only, deliberately-silent
+  things stay silent.
+- **CHAT status-bar button** beside EXPLORER · SC · TERMINAL, with separators
+  between the four and one before the bell. Ctrl+Tab and Ctrl+PageUp/Down
+  cycle within whichever zone has focus (editor tabs / panel terminals / chat
+  residents); Ctrl+` is unchanged.
+
+### Changed
+
+- **Icon sweep.** The font-dependent text glyphs are drawn SVGs now: branch
+  (⑂), copy/check on toasts, the SC card's commit/push/fetch/menu/discard
+  glyphs, undo for keybinding reset, chevrons, closes. Connect/disconnect are
+  a matched plug pair (seated ↔ pulled with spark gap) on every host surface.
+  Window controls: minimize sits at the baseline, and the maximize button
+  swaps to a restore glyph while maximized.
+- **Three minus glyphs, three meanings** — app minimize (low dash), panel
+  hide (solid slab, same button on all four bottom-left panels, set apart
+  from its neighbors), and chat return (thin round dash, the ＋'s twin).
+- Close buttons in terminal entries and the CHAT name line sit a deliberate
+  gap away from the button before them.
+
+### Removed
+
+- **Terminal-in-editor.** The ⇱ "move to the editor area" tab is gone — the
+  CHAT column is where a terminal goes to live beside your work.
+
 ## [0.9.7] - 2026-07-15
 
 ### Added

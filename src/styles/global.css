@@ -16,6 +16,31 @@
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
+  overflow: hidden;
+}
+
+/* Horizontal layout: explorer + movable columns are fixed-width flex items;
+   the editor is flex:1 and absorbs whatever the others leave, so hiding a
+   column widens the editor and never the other column. */
+.hcol {
+  flex: 0 0 auto;
+  height: 100%;
+  overflow: hidden;
+}
+.hcol--editor {
+  flex: 1 1 0;
+  min-width: 140px;
+}
+/* A manual drag handle between two columns (the editor flexes to compensate). */
+.hdrag {
+  flex: 0 0 6px;
+  align-self: stretch;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 120ms ease;
+}
+.hdrag:hover {
+  background: var(--border-focus);
 }
 
 /* react-resizable-panels handles. They render as bare divs we style here. */
@@ -212,7 +237,6 @@
 
 .termgroup__collapse {
   font-size: 14px;
-  transform: rotate(90deg); /* » pointing down */
 }
 
 .terminal-panel__split {
@@ -4055,15 +4079,6 @@ select option {
   height: 100%;
 }
 
-/* A terminal hosted in an editor pane (the inner div is moved here). */
-.terminal-editor-host {
-  position: absolute;
-  inset: 0;
-  padding: var(--space-3) 0 var(--space-3) var(--space-5);
-  overflow: hidden;
-  background: var(--bg-primary);
-}
-
 .terminal-message {
   position: absolute;
   inset: 0;
@@ -4210,6 +4225,17 @@ select option {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.terminal-entry__rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  color: var(--fg-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-focus);
+  border-radius: 4px;
+  padding: 0 4px;
+  outline: none;
+}
 .terminal-entry__close {
   display: flex;
   padding: 2px;
@@ -4227,6 +4253,263 @@ select option {
 .terminal-entry__close:hover {
   opacity: 1;
   background: var(--bg-selected);
+}
+
+/* ——— Attention (terminal BEL) + the status-bar notification bell ——— */
+/* A rang-while-you-weren't-looking terminal: green marks, cleared on focus. */
+.terminal-entry--bell .terminal-entry__icon {
+  color: var(--green);
+}
+.termgroup__bell {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green);
+  margin-left: 4px;
+  vertical-align: 1px;
+}
+/* Badge on a status-bar button whose (hidden) panel holds a rang terminal —
+ * and on the bell itself while there are unread notices. */
+.statusbar__attn {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  flex: 0 0 auto;
+}
+.statusbar__bell .statusbar__attn {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+}
+.statusbar__branch {
+  gap: var(--space-2);
+}
+
+.statusbar__bell {
+  position: relative;
+}
+.bell-pop {
+  position: fixed;
+  right: var(--space-4);
+  bottom: calc(var(--statusbar-height) + var(--space-3));
+  z-index: 1150;
+  width: 340px;
+  max-height: 46vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+.bell-pop__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 12px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--fg-primary);
+  border-bottom: 1px solid var(--border);
+}
+.bell-pop__spacer {
+  flex: 1;
+}
+.bell-pop__clear {
+  border: none;
+  background: transparent;
+  color: var(--fg-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.bell-pop__clear:hover {
+  color: var(--fg-primary);
+  background: var(--bg-selected);
+}
+.bell-pop__empty {
+  padding: 18px 12px;
+  text-align: center;
+  color: var(--fg-secondary);
+  font-size: var(--font-size-xs);
+}
+.bell-pop__list {
+  overflow-y: auto;
+}
+.bell-pop__item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: var(--font-size-xs);
+  color: var(--fg-primary);
+  border-left: 3px solid transparent;
+}
+.bell-pop__item + .bell-pop__item {
+  border-top: 1px solid var(--border);
+}
+.bell-pop__item--info {
+  border-left-color: var(--info);
+}
+.bell-pop__item--warn {
+  border-left-color: var(--yellow);
+}
+.bell-pop__item--error {
+  border-left-color: var(--red);
+}
+.bell-pop__text {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.bell-pop__time {
+  flex: 0 0 auto;
+  color: var(--fg-secondary);
+  white-space: nowrap;
+}
+
+/* ——— CHAT column: a bare terminal docked beside Source Control ——— */
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-secondary);
+}
+.chat-panel__head {
+  border-bottom: 1px solid var(--border);
+  padding: 4px 8px 6px;
+  background: var(--bg-secondary);
+}
+.chat-panel__dots {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 24px;
+}
+.chat-panel__spacer {
+  flex: 1;
+}
+.chat-panel__newwrap {
+  position: relative;
+  display: flex;
+}
+.chat-panel__menu {
+  top: 24px;
+  right: 0;
+}
+/* The hide (minimize-to-status-bar) chevron is set apart from the other header
+ * controls so it's not a mis-click target — identical on every bottom-left
+ * panel (explorer, terminal, SC, CHAT). */
+.panel-head__hide {
+  margin-left: var(--space-3);
+}
+/* Keep the close (×) a deliberate reach from the button before it. */
+.terminal-entry__kill,
+.chat-panel__kill {
+  margin-left: var(--space-3);
+}
+/* A resident dot: 12px visual inside a 22px hit area; the host color carries
+ * identity: the host color is always the outline; the FILL is the lifecycle,
+ * active only while a tool (Claude Code, vim…) has announced itself via the
+ * terminal title — ready (your turn) = green, running (producing output) =
+ * yellow; a bare shell stays blank, a dead shell is blank + dimmed. Picked
+ * (on screen) fills white, covering whatever the state is. */
+.chat-dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.chat-dot:hover {
+  background: var(--bg-selected);
+}
+.chat-dot__mark {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid var(--dot-color, var(--fg-secondary));
+  box-sizing: border-box;
+}
+.chat-dot--ready .chat-dot__mark {
+  background: var(--green);
+}
+.chat-dot--running .chat-dot__mark {
+  background: var(--yellow);
+}
+.chat-dot--dead .chat-dot__mark {
+  opacity: 0.55; /* blank fill; the outline dims with the dead shell */
+}
+/* Picked wins last: a white fill covering the state (the state is visible on
+ * the terminal itself while you're looking at it). */
+.chat-dot--picked .chat-dot__mark {
+  background: var(--fg-primary);
+}
+.chat-panel__name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--fg-primary);
+}
+.chat-panel__title {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-panel__rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  color: var(--fg-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-focus);
+  border-radius: 4px;
+  padding: 0 4px;
+  outline: none;
+}
+/* Same hosting contract as .terminal-host: a padded box the reparented
+ * terminal-host__inner fills at 100%×100%. */
+.chat-panel__body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  padding: var(--space-3) 0 var(--space-3) var(--space-3);
+  background: var(--bg-primary);
+}
+.chat-panel__empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 18px;
+  text-align: center;
+  color: var(--fg-secondary);
+  font-size: var(--font-size-xs);
+}
+.chat-panel__empty p {
+  margin: 0;
+  max-width: 26ch;
+}
+.chat-panel__empty-icon {
+  opacity: 0.5;
+  margin-bottom: 4px;
+}
+.chat-panel__empty-hint {
+  opacity: 0.75;
 }
 
 /* Shell-profile dropdown */

@@ -4,7 +4,7 @@
  *  A window always has a local session (opened at startup) and can attach a
  *  WSL distro plus up to three SSH remotes at once; trees, terminals, and
  *  tracked repos are all per-host. */
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   Panel,
   PanelGroup,
@@ -19,7 +19,7 @@ import {
   onTransferProgress,
   onVcsFsChange,
 } from "./lib/ipc";
-import { useAppStore } from "./store/appStore";
+import { useAppStore, type DockToken } from "./store/appStore";
 import { useVcsStore } from "./store/vcsStore";
 import { initDrafts } from "./lib/drafts";
 import { initFileWatching } from "./lib/fileWatch";
@@ -35,6 +35,7 @@ import { EditorArea } from "./components/layout/EditorArea";
 import { TerminalPanel } from "./components/layout/TerminalPanel";
 import { StatusBar } from "./components/layout/StatusBar";
 import { ScmPanel } from "./components/vcs/ScmPanel";
+import { ChatPanel } from "./components/chat/ChatPanel";
 import { HistoryPanel } from "./components/vcs/HistoryPanel";
 import { ConnectionDialog } from "./components/connection/ConnectionDialog";
 import { PassphraseDialog } from "./components/connection/PassphraseDialog";
@@ -54,6 +55,48 @@ import { Finder } from "./components/Finder";
 import { SearchInFiles } from "./components/SearchInFiles";
 import { ToastStack } from "./components/Toast";
 
+/** The full left→right layout tokens; "explorer" is pinned first, the rest are
+ *  the reorderable dock tokens. */
+type FullToken = "explorer" | DockToken;
+
+interface HWidths {
+  sidebar: number;
+  scm: number;
+  chat: number;
+}
+const HW_KEY = "straylight.hwidths";
+const HW_DEFAULT: HWidths = { sidebar: 260, scm: 300, chat: 340 };
+/** Per-column drag bounds (px). */
+const HW_BOUNDS: Record<keyof HWidths, { min: number; max: number }> = {
+  sidebar: { min: 160, max: 520 },
+  scm: { min: 200, max: 620 },
+  chat: { min: 220, max: 680 },
+};
+
+function loadHWidths(): HWidths {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(HW_KEY) ?? "");
+    if (parsed && typeof parsed === "object") {
+      const pick = (k: keyof HWidths) =>
+        typeof parsed[k] === "number"
+          ? Math.min(HW_BOUNDS[k].max, Math.max(HW_BOUNDS[k].min, parsed[k]))
+          : HW_DEFAULT[k];
+      return { sidebar: pick("sidebar"), scm: pick("scm"), chat: pick("chat") };
+    }
+  } catch {
+    /* default below */
+  }
+  return { ...HW_DEFAULT };
+}
+
+function saveHWidths(w: HWidths): void {
+  try {
+    localStorage.setItem(HW_KEY, JSON.stringify(w));
+  } catch {
+    /* prefs only */
+  }
+}
+
 export default function App() {
   const dialogOpen = useAppStore((s) => s.dialogOpen);
   const sidebarVisible = useAppStore((s) => s.sidebarVisible);
@@ -72,13 +115,41 @@ export default function App() {
     s.wsls.map((w) => w.conn.connId).join(","),
   );
   const scmVisible = useVcsStore((s) => s.scmVisible);
-  const setScmVisible = useVcsStore((s) => s.setScmVisible);
+  const chatVisible = useAppStore((s) => s.chatVisible);
+  const dockOrder = useAppStore((s) => s.dockOrder);
   const historyOpen = useVcsStore((s) => s.historyRepo != null);
 
-  const sidebarPanel = useRef<ImperativePanelHandle>(null);
   const terminalPanel = useRef<ImperativePanelHandle>(null);
-  const scmPanel = useRef<ImperativePanelHandle>(null);
   const restored = useRef(false);
+
+  // Horizontal widths (px) for the fixed-width columns. The editor is flex:1
+  // and absorbs everything else, so hiding a column gives its space to the
+  // editor — never to the other column, and each column keeps its own width.
+  const [hw, setHw] = useState(loadHWidths);
+  const setColWidth = (key: keyof HWidths, w: number) => {
+    const next = { ...hw, [key]: w };
+    setHw(next);
+    saveHWidths(next);
+  };
+  const dragWidth =
+    (key: keyof HWidths, dir: 1 | -1, min: number, max: number) =>
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const start = hw[key];
+      const onMove = (ev: MouseEvent) => {
+        const w = Math.min(max, Math.max(min, start + dir * (ev.clientX - startX)));
+        setColWidth(key, w);
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        document.body.style.cursor = "";
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+      document.body.style.cursor = "col-resize";
+    };
 
   const { connect } = useSSH();
 
@@ -247,30 +318,12 @@ export default function App() {
     return () => window.removeEventListener("contextmenu", onContextMenu);
   }, []);
 
-  // Drive the Source Control panel's collapse from the store.
-  useEffect(() => {
-    const panel = scmPanel.current;
-    if (!panel) return;
-    if (scmVisible && panel.isCollapsed()) panel.expand();
-    else if (!scmVisible && !panel.isCollapsed()) panel.collapse();
-  }, [scmVisible]);
-
   // The history panel sits on top of the explorer in the sidebar column (the
   // explorer is usually idle while browsing history, and this keeps the editor
-  // free for comparing). It's mounted only while open — driving it through
-  // collapse/expand instead caused spurious onCollapse events that closed it
-  // right after opening. Opening also reveals the sidebar if it's hidden.
+  // free for comparing). Opening it reveals the sidebar if it's hidden.
   useEffect(() => {
     if (historyOpen) setSidebarVisible(true);
   }, [historyOpen, setSidebarVisible]);
-
-  // Drive the sidebar panel's collapse state from the store.
-  useEffect(() => {
-    const panel = sidebarPanel.current;
-    if (!panel) return;
-    if (sidebarVisible && panel.isCollapsed()) panel.expand();
-    else if (!sidebarVisible && !panel.isCollapsed()) panel.collapse();
-  }, [sidebarVisible]);
 
   // Drive the terminal panel's collapse state; blur it when hidden. Resizes
   // flow through useTerminal, which debounces them so ConPTY isn't repainted
@@ -289,78 +342,117 @@ export default function App() {
     }
   }, [terminalVisible, localConnId]);
 
+  // Left→right layout after the pinned explorer. The editor is one of the
+  // tokens, so a column can step past it — sitting the editor next to the
+  // explorer (both columns right) or at the right edge (both columns left).
+  const full: FullToken[] = ["explorer", ...dockOrder];
+  const editorIdx = full.indexOf("editor");
+
+  const tokenVisible = (t: FullToken) =>
+    t === "explorer"
+      ? sidebarVisible
+      : t === "editor"
+        ? true
+        : t === "scm"
+          ? scmVisible
+          : chatVisible;
+  const widthKeyOf = (t: FullToken): keyof HWidths =>
+    t === "explorer" ? "sidebar" : (t as "scm" | "chat");
+
+  const renderElement = (t: FullToken) => {
+    if (t === "editor") {
+      return (
+        <div className="hcol hcol--editor" key="editor">
+          <PanelGroup
+            key={localConnId ? "with-terminal" : "no-terminal"}
+            autoSaveId="straylight.layout.v"
+            direction="vertical"
+          >
+            <Panel id="editor" order={1} minSize={0}>
+              <EditorArea />
+            </Panel>
+            {localConnId && (
+              <>
+                <PanelResizeHandle className="resize-handle" />
+                <Panel
+                  id="terminal"
+                  order={2}
+                  ref={terminalPanel}
+                  collapsible
+                  collapsedSize={0}
+                  defaultSize={30}
+                  minSize={10}
+                  onCollapse={() => setTerminalVisible(false)}
+                  onExpand={() => setTerminalVisible(true)}
+                >
+                  <TerminalPanel />
+                </Panel>
+              </>
+            )}
+          </PanelGroup>
+        </div>
+      );
+    }
+    if (t === "explorer") {
+      return (
+        <div
+          className="hcol hcol--sidebar"
+          key="explorer"
+          style={{ width: sidebarVisible ? hw.sidebar : 0 }}
+        >
+          {/* History takes the whole column while open; the explorer stays
+              mounted underneath (hidden) so its state survives. */}
+          <div style={{ display: historyOpen ? "block" : "none", height: "100%" }}>
+            {historyOpen && <HistoryPanel />}
+          </div>
+          <div style={{ display: historyOpen ? "none" : "block", height: "100%" }}>
+            <Sidebar />
+          </div>
+        </div>
+      );
+    }
+    // A movable column (SC / CHAT): fixed width, its own persisted size.
+    // Hidden = width 0 but still mounted, so CHAT residents keep running.
+    const visible = t === "scm" ? scmVisible : chatVisible;
+    const width = t === "scm" ? hw.scm : hw.chat;
+    return (
+      <div className="hcol" key={t} style={{ width: visible ? width : 0 }}>
+        {t === "scm" ? <ScmPanel /> : <ChatPanel />}
+      </div>
+    );
+  };
+
+  // A handle for the gap between full[g] and full[g+1]. It resizes the fixed
+  // element on the editor-facing side (never the editor — that flexes); a
+  // handle whose target is hidden isn't rendered.
+  const renderHandle = (g: number) => {
+    const leftSide = g + 1 <= editorIdx;
+    const target: FullToken = leftSide ? full[g] : full[g + 1];
+    if (target === "editor" || !tokenVisible(target)) return null;
+    const key = widthKeyOf(target);
+    return (
+      <div
+        className="hdrag"
+        onMouseDown={dragWidth(
+          key,
+          leftSide ? 1 : -1,
+          HW_BOUNDS[key].min,
+          HW_BOUNDS[key].max,
+        )}
+      />
+    );
+  };
+
   return (
     <div className="app">
       <TitleBar />
       <div className="app-body">
-        <PanelGroup direction="horizontal" autoSaveId="straylight.layout.h">
-          <Panel
-            id="sidebar"
-            order={1}
-            ref={sidebarPanel}
-            collapsible
-            collapsedSize={0}
-            defaultSize={24}
-            minSize={14}
-            maxSize={50}
-            onCollapse={() => setSidebarVisible(false)}
-            onExpand={() => setSidebarVisible(true)}
-          >
-            {/* History takes the whole column while open; the explorer stays
-                mounted underneath (hidden) so its state survives. */}
-            <div style={{ display: historyOpen ? "block" : "none", height: "100%" }}>
-              {historyOpen && <HistoryPanel />}
-            </div>
-            <div style={{ display: historyOpen ? "none" : "block", height: "100%" }}>
-              <Sidebar />
-            </div>
-          </Panel>
-          <PanelResizeHandle className="resize-handle" />
-          <Panel id="main" order={2} minSize={30}>
-            <PanelGroup
-              key={localConnId ? "with-terminal" : "no-terminal"}
-              autoSaveId="straylight.layout.v"
-              direction="vertical"
-            >
-              <Panel id="editor" order={1} minSize={0}>
-                <EditorArea />
-              </Panel>
-              {localConnId && (
-                <>
-                  <PanelResizeHandle className="resize-handle" />
-                  <Panel
-                    id="terminal"
-                    order={2}
-                    ref={terminalPanel}
-                    collapsible
-                    collapsedSize={0}
-                    defaultSize={30}
-                    minSize={10}
-                    onCollapse={() => setTerminalVisible(false)}
-                    onExpand={() => setTerminalVisible(true)}
-                  >
-                    <TerminalPanel />
-                  </Panel>
-                </>
-              )}
-            </PanelGroup>
-          </Panel>
-          <PanelResizeHandle className="resize-handle" />
-          <Panel
-            id="scm"
-            order={3}
-            ref={scmPanel}
-            collapsible
-            collapsedSize={0}
-            defaultSize={22}
-            minSize={14}
-            maxSize={40}
-            onCollapse={() => setScmVisible(false)}
-            onExpand={() => setScmVisible(true)}
-          >
-            <ScmPanel />
-          </Panel>
-        </PanelGroup>
+        {full.map((t, k) => (
+          <Fragment key={t}>
+            {k > 0 && renderHandle(k - 1)}
+            {renderElement(t)}
+          </Fragment>
+        ))}
       </div>
       <StatusBar />
       {dialogOpen && <ConnectionDialog />}

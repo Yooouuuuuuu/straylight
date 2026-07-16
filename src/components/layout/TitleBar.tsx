@@ -15,7 +15,12 @@ import {
 } from "../../lib/settings";
 import { applyTheme, savedThemeNames } from "../../lib/themes";
 import { useAppStore } from "../../store/appStore";
-import { IconClose, IconMaximize, IconMinimize } from "../icons";
+import {
+  IconClose,
+  IconMaximize,
+  IconMinimize,
+  IconRestore,
+} from "../icons";
 
 function Logo({ size = 16 }: { size?: number }) {
   return (
@@ -37,9 +42,27 @@ export function TitleBar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [exitAsk, setExitAsk] = useState(false);
   const [exitSilence, setExitSilence] = useState(false);
+  const [maximized, setMaximized] = useState(false);
   const exitRef = useRef<HTMLDivElement>(null);
 
   const appWindow = getCurrentWindow();
+
+  // Track maximize state so the button shows restore-down while maximized
+  // (and its tooltip matches). Resizing is the only thing that changes it.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    appWindow.isMaximized().then(setMaximized).catch(() => {});
+    appWindow
+      .onResized(() => {
+        appWindow.isMaximized().then(setMaximized).catch(() => {});
+      })
+      .then((un) => {
+        unlisten = un;
+      })
+      .catch(() => {});
+    return () => unlisten?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const requestClose = () => {
     if (confirmEnabled("exit")) {
@@ -181,10 +204,10 @@ export function TitleBar() {
         </button>
         <button
           className="titlebar__btn"
-          title="Maximize"
+          title={maximized ? "Restore" : "Maximize"}
           onClick={() => void appWindow.toggleMaximize()}
         >
-          <IconMaximize />
+          {maximized ? <IconRestore /> : <IconMaximize />}
         </button>
         <button
           className="titlebar__btn titlebar__btn--close"

@@ -74,7 +74,6 @@ export function EditorTabs({ groupId }: { groupId: number }) {
             tab.dirty ? "editor-tab--dirty" : "",
             tab.pinned ? "editor-tab--pinned" : "",
             hostColor ? "editor-tab--host" : "",
-            tab.kind === "terminal" ? "editor-tab--term" : "",
             dropTarget === tab.id ? "editor-tab--drop" : "",
           ]
             .filter(Boolean)
@@ -129,9 +128,7 @@ export function EditorTabs({ groupId }: { groupId: number }) {
               ? `${tab.path} (changes)`
               : tab.kind === "merge"
                 ? `${tab.path} (merge)`
-                : tab.kind === "terminal"
-                  ? `${tab.name} — terminal (closing returns it to the panel)`
-                  : tab.path
+                : tab.path
           }
         >
           <span
@@ -173,8 +170,6 @@ export function EditorTabs({ groupId }: { groupId: number }) {
               <span className="editor-tab__diff">⚔</span>
             ) : tab.kind === "preview" ? (
               <span className="editor-tab__diff">¶</span>
-            ) : tab.kind === "terminal" ? (
-              <span className="editor-tab__diff">{">_"}</span>
             ) : tab.kind === "settings" || tab.kind === "themes" ? (
               <span className="editor-tab__diff">⚙</span>
             ) : (

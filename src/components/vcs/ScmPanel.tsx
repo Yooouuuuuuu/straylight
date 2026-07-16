@@ -19,12 +19,19 @@ import { FolderBrowser } from "../FolderBrowser";
 import { RelativeTime, formatAgo } from "../RelativeTime";
 import { Tip } from "../Tooltip";
 import {
+  IconArrowDown,
+  IconArrowUp,
+  IconChevron,
   IconClose,
-  IconPanelCollapse,
+  IconMore,
+  IconPanelHide,
+  IconPencil,
   IconPlus,
   IconPulse,
+  IconToBar,
   IconPulseOff,
   IconRefresh,
+  IconUndo,
 } from "../icons";
 
 interface ConnChoice {
@@ -37,6 +44,9 @@ export function ScmPanel() {
   const repos = useVcsStore((s) => s.repos);
   const setScmVisible = useVcsStore((s) => s.setScmVisible);
   const openRepo = useVcsStore((s) => s.openRepo);
+  const dockOrder = useAppStore((s) => s.dockOrder);
+  const stepDock = useAppStore((s) => s.stepDock);
+  const scmPos = dockOrder.indexOf("scm");
   const localConnId = useAppStore((s) => s.localConnId);
   const remotes = useAppStore((s) => s.remotes);
   const wsls = useAppStore((s) => s.wsls);
@@ -87,9 +97,30 @@ export function ScmPanel() {
             <IconRefresh />
           </button>
         </Tip>
+        <Tip label="Move left (past the editor)">
+          <button
+            className="icon-btn"
+            disabled={scmPos <= 0}
+            onClick={() => stepDock("scm", -1)}
+          >
+            <IconToBar size={13} dir="left" />
+          </button>
+        </Tip>
+        <Tip label="Move right (past the editor)">
+          <button
+            className="icon-btn"
+            disabled={scmPos === dockOrder.length - 1}
+            onClick={() => stepDock("scm", 1)}
+          >
+            <IconToBar size={13} dir="right" />
+          </button>
+        </Tip>
         <Tip label="Minimize Source Control (status bar to bring it back)">
-          <button className="icon-btn" onClick={() => setScmVisible(false)}>
-            <IconPanelCollapse size={14} dir="right" />
+          <button
+            className="icon-btn panel-head__hide"
+            onClick={() => setScmVisible(false)}
+          >
+            <IconPanelHide size={14} />
           </button>
         </Tip>
       </div>
@@ -262,7 +293,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
           requestDiscard(repo.connKey, repo.root, [c]);
         }}
       >
-        ↩
+        <IconUndo size={13} />
       </button>
       {action}
     </div>
@@ -400,7 +431,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                 setBranchOpen((o) => !o);
               }}
             >
-              {st.ref || "—"} ▾
+              {st.ref || "—"} <IconChevron size={11} dir="down" />
             </span>
             {(st.ahead || st.behind) && (
               <span className="repo-card__ab">
@@ -427,7 +458,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                       toggleCommitOpen(repo.connKey, repo.root);
                     }}
                   >
-                    ✎
+                    <IconPencil size={13} />
                   </button>
                 </Tip>
               )}
@@ -453,12 +484,13 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                   >
                     {repo.remoteBusy === "push" ? (
                       <span className="spinner spinner--sm" />
-                    ) : st.ahead ? (
-                      <>
-                        ↑<sup className="sup-count">{st.ahead}</sup>
-                      </>
                     ) : (
-                      "↑"
+                      <>
+                        <IconArrowUp size={13} />
+                        {st.ahead ? (
+                          <sup className="sup-count">{st.ahead}</sup>
+                        ) : null}
+                      </>
                     )}
                   </button>
                 </Tip>
@@ -476,7 +508,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                   {repo.remoteBusy === "fetch" || repo.remoteBusy === "pull" ? (
                     <span className="spinner spinner--sm" />
                   ) : (
-                    "⇣"
+                    <IconArrowDown size={13} />
                   )}
                 </button>
               </Tip>
@@ -492,7 +524,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                     {repo.remoteBusy === "update" ? (
                       <span className="spinner spinner--sm" />
                     ) : (
-                      "⋯"
+                      <IconMore size={13} />
                     )}
                   </button>
                 </Tip>

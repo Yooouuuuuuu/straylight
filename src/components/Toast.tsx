@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { useAppStore, type Notice } from "../store/appStore";
-import { IconClose } from "./icons";
+import { IconCheck, IconClose, IconCopy } from "./icons";
 
 function ToastItem({
   notice,
@@ -46,7 +46,7 @@ function ToastItem({
         onClick={copy}
         title={copied ? "Copied" : "Copy message"}
       >
-        {copied ? "✓" : "⧉"}
+        {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
       </button>
       <button
         className="toast__close"

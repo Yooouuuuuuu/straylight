@@ -3,6 +3,7 @@
  *  after the panel is closed. Renders nothing when idle. */
 import { formatSize } from "../../lib/format";
 import { useAppStore } from "../../store/appStore";
+import { IconClose } from "../icons";
 
 export function TransferProgressBar({ variant }: { variant: "panel" | "status" }) {
   const t = useAppStore((s) => s.activeTransfer);
@@ -42,7 +43,7 @@ export function TransferProgressBar({ variant }: { variant: "panel" | "status" }
           onClick={cancel}
           title="Cancel transfer"
         >
-          ✕
+          <IconClose size={12} />
         </button>
       </span>
     );

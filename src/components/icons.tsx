@@ -16,13 +16,256 @@ function svgProps(size: number) {
   };
 }
 
-export function IconChevron({ size = 16, className }: IconProps) {
+/** Notification bell (status bar, right edge) — toast history lives behind it. */
+export function IconBell({ size = 16, className }: IconProps) {
   return (
     <svg {...svgProps(size)} className={className}>
+      <path
+        d="M8 2.6c-2.3 0-3.8 1.7-3.8 3.9v2.4L3 10.8h10l-1.2-1.9V6.5c0-2.2-1.5-3.9-3.8-3.9Z"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6.7 12.8a1.35 1.35 0 0 0 2.6 0"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** Chat bubble — the CHAT column's identity (status bar button, empty state). */
+export function IconChatBubble({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M3 3h10a1.3 1.3 0 0 1 1.3 1.3v5.4A1.3 1.3 0 0 1 13 11H8.2L5 13.6V11H3a1.3 1.3 0 0 1-1.3-1.3V4.3A1.3 1.3 0 0 1 3 3Z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** "Move this terminal into the CHAT column" — arrow driving into the bubble. */
+export function IconToChat({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M5.6 4.6V4a1.2 1.2 0 0 1 1.2-1.2h6.6A1.2 1.2 0 0 1 14.6 4v5.4a1.2 1.2 0 0 1-1.2 1.2h-2.6L8 13v-2.4h-1.2a1.2 1.2 0 0 1-1.2-1.2v-.6"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M1 7h7M5.6 4.6 8 7l-2.4 2.4"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Dock-move: step a column toward the left/right slot (arrow to bar). */
+export function IconToBar({
+  size = 16,
+  className,
+  dir = "right",
+}: IconProps & { dir?: "left" | "right" }) {
+  return (
+    <svg
+      {...svgProps(size)}
+      className={className}
+      style={dir === "left" ? { transform: "scaleX(-1)" } : undefined}
+    >
+      <path
+        d="M2 8h8.2M7 4.8 10.2 8 7 11.2"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M13 3.6v8.8"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** Remove-from-here (the ＋'s twin): a chat resident returns to the panel.
+ *  One of three distinct minus glyphs — this is the round-cap "chats" minus,
+ *  paired with the ＋. (App minimize = the low IconMinimize; panel hide = the
+ *  solid IconPanelHide bar.) */
+export function IconMinus({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M3.6 8h8.8"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** Panel-hide minus — a solid centered SLAB, unmistakably heavier than the
+ *  thin round-cap chat minus and the low app-minimize dash. Used by all four
+ *  bottom-left panels (explorer, terminal, SC, CHAT). */
+export function IconPanelHide({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <rect
+        x="3.4"
+        y="6.8"
+        width="9.2"
+        height="2.4"
+        rx="0.7"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+export function IconChevron({
+  size = 16,
+  className,
+  dir = "right",
+}: IconProps & { dir?: "right" | "down" }) {
+  return (
+    <svg
+      {...svgProps(size)}
+      className={className}
+      style={dir === "down" ? { transform: "rotate(90deg)" } : undefined}
+    >
       <path
         d="M6 4l4 4-4 4"
         stroke="currentColor"
         strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Pencil — commit/amend box toggle, renames. */
+export function IconPencil({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="m3 13 .7-2.8 6.9-6.9a1.3 1.3 0 0 1 1.8 0l.3.3a1.3 1.3 0 0 1 0 1.8l-6.9 6.9L3 13Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+      <path d="m9.7 4.2 2.1 2.1" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
+/** Push (up). */
+export function IconArrowUp({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M8 12.6V3.4M4.4 7 8 3.4 11.6 7"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Fetch (down). */
+export function IconArrowDown({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M8 3.4v9.2M4.4 9 8 12.6 11.6 9"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Overflow menu (⋯). */
+export function IconMore({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="3.6" cy="8" r="1.15" fill="currentColor" />
+      <circle cx="8" cy="8" r="1.15" fill="currentColor" />
+      <circle cx="12.4" cy="8" r="1.15" fill="currentColor" />
+    </svg>
+  );
+}
+
+/** Undo-arrow — discard changes, reset a keybinding to its default. */
+export function IconUndo({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M6.3 3.8 3 7l3.3 3.2"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M3 7h6.4a3.4 3.4 0 0 1 3.4 3.4v1.4"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** Copy to clipboard (toast messages). */
+export function IconCopy({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M6 3.2h6a.8.8 0 0 1 .8.8v6"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+      <rect
+        x="3.2"
+        y="5.6"
+        width="7.4"
+        height="7.4"
+        rx="1"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+    </svg>
+  );
+}
+
+/** Checkmark (copied!). */
+export function IconCheck({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M3.5 8.5 6.8 11.5 12.5 4.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -153,31 +396,6 @@ export function IconTerminalGlyph({ size = 16, className }: IconProps) {
         strokeLinecap="round"
         strokeLinejoin="round"
         fill="none"
-      />
-    </svg>
-  );
-}
-
-/** Double chevron for collapsing a side panel ("minimize"). `dir` points the
- *  way the panel slides away — left for the explorer, right for Source
- *  Control. Both panels use this instead of an ×. */
-export function IconPanelCollapse({
-  size = 16,
-  className,
-  dir = "left",
-}: IconProps & { dir?: "left" | "right" }) {
-  return (
-    <svg
-      {...svgProps(size)}
-      className={className}
-      style={dir === "right" ? { transform: "scaleX(-1)" } : undefined}
-    >
-      <path
-        d="M8 4L4 8l4 4M12 4L8 8l4 4"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
       />
     </svg>
   );
@@ -379,10 +597,12 @@ export function IconClose({ size = 16, className }: IconProps) {
   );
 }
 
+/** Minimize sits at the BASELINE (Windows convention) so it can't be mistaken
+ *  for the maximize square's midline at titlebar size. */
 export function IconMinimize({ size = 16, className }: IconProps) {
   return (
     <svg {...svgProps(size)} className={className}>
-      <path d="M4 8.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M4 11h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
     </svg>
   );
 }
@@ -391,6 +611,29 @@ export function IconMaximize({ size = 16, className }: IconProps) {
   return (
     <svg {...svgProps(size)} className={className}>
       <rect x="4" y="4" width="8" height="8" rx="1" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
+/** Restore-down: shown on the maximize button while the window IS maximized. */
+export function IconRestore({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M6.2 3.8h5.2a.8.8 0 0 1 .8.8v5.2"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+      <rect
+        x="3.8"
+        y="6.2"
+        width="6.4"
+        height="6.4"
+        rx="1"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
     </svg>
   );
 }
@@ -409,36 +652,67 @@ export function IconTerminal({ size = 16, className }: IconProps) {
   );
 }
 
+/** Connect: the plug seated flush on the wall — prongs hidden inside (contact
+ *  made), one unbroken run of wall · body · cable. Pairs with IconUnplug. */
 export function IconPlug({ size = 16, className }: IconProps) {
   return (
     <svg {...svgProps(size)} className={className}>
       <path
-        d="M9.5 2.5L7 5m4.5-.5L9.5 6.5M6.5 6.5L4 9l3 3 2.5-2.5M2.5 13.5L5 11"
+        d="M4.2 2.8v10.4"
         stroke="currentColor"
-        strokeWidth="1.2"
+        strokeWidth="1.4"
         strokeLinecap="round"
+      />
+      <path
+        d="M4.4 4.9h4.2a1.4 1.4 0 0 1 1.4 1.4v3.4a1.4 1.4 0 0 1-1.4 1.4H4.4"
+        stroke="currentColor"
+        strokeWidth="1.3"
         strokeLinejoin="round"
+      />
+      <path
+        d="M10 8h3.4"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
       />
     </svg>
   );
 }
 
-export function IconLogout({ size = 16, className }: IconProps) {
+/** Disconnect: the same plug pulled out — now the prongs show, plus the gap
+ *  and two spark ticks. The host keeps running; only your cable comes out. */
+export function IconUnplug({ size = 16, className }: IconProps) {
   return (
     <svg {...svgProps(size)} className={className}>
       <path
-        d="M9.5 3.5H4.5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h5"
+        d="M2.6 2.8v10.4"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+      <path
+        d="M5 5.5 4 4.5M5 10.5l-1 1"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M6.6 6.3h2M6.6 9.7h2"
         stroke="currentColor"
         strokeWidth="1.3"
         strokeLinecap="round"
+      />
+      <path
+        d="M8.6 4.9h3.2a1.4 1.4 0 0 1 1.4 1.4v3.4a1.4 1.4 0 0 1-1.4 1.4H8.6z"
+        stroke="currentColor"
+        strokeWidth="1.3"
         strokeLinejoin="round"
       />
       <path
-        d="M7.5 8h6M11 5.5L13.5 8 11 10.5"
+        d="M13.2 8h1.8"
         stroke="currentColor"
         strokeWidth="1.3"
         strokeLinecap="round"
-        strokeLinejoin="round"
       />
     </svg>
   );

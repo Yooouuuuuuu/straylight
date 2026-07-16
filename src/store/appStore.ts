@@ -78,12 +78,10 @@ export interface EditorTab {
   dirty: boolean;
   cursor: CursorPosition;
   /** "diff" shows a Monaco diff; "log" shows a repo's commit history;
-   *  "terminal" hosts a terminal session in the editor area. Default "file". */
-  kind?: "file" | "diff" | "log" | "merge" | "preview" | "terminal" | "settings" | "themes";
+   *  Default "file". */
+  kind?: "file" | "diff" | "log" | "merge" | "preview" | "settings" | "themes";
   /** Which editor group (split) the tab lives in. Absent = group 0. */
   groupId?: number;
-  /** The terminal session a kind:"terminal" tab hosts. */
-  terminalId?: string;
   /** VS Code-style preview tab (italic): the next preview open replaces it.
    *  Editing, double-click, or pinning promotes it to a permanent tab. */
   previewTab?: boolean;
@@ -181,22 +179,101 @@ export interface TerminalSession {
   id: string;
   /** The session this terminal runs on (local or remote). */
   connId: string;
+  /** The clean default label ("pwsh", "myserver 2"), set at open and never
+   *  overwritten — it's the fallback name. */
   title: string;
+  /** The shell's latest raw OSC 0/2 title. Shown only when it's a meaningful
+   *  name (a tool like Claude Code set it), not shell path noise — see
+   *  {@link cleanOscTitle}. */
+  oscTitle?: string;
+  /** User rename (double-click the entry). Wins over everything until cleared. */
+  customName?: string;
   /** Shell command for a local profile (e.g. ["wsl.exe","-d","Ubuntu"]); null
    *  uses the session's default shell. Ignored for remote (login shell). */
   command: string[] | null;
   /** Typed into the shell once it opens (e.g. `podman exec -it … /bin/sh`). */
   initialInput?: string | null;
   epoch: number;
-  /** Shown as an editor tab instead of in the panel (the shell survives the
+  /** Lives in the CHAT column instead of the panel (the shell survives the
    *  move — its DOM is reparented, never remounted). */
-  inEditor?: boolean;
+  inChat?: boolean;
+}
+
+/** An OSC title worth showing, or undefined to fall back to the default label.
+ *  Shells set their window title to path/prompt noise ("Administrator:
+ *  C:\…\pwsh.exe", "user@host:~/dir"); tools like Claude Code, vim, or gh set
+ *  a real name. We keep the latter and reject the former, so the default label
+ *  survives shell chrome but a tool can still name the terminal. */
+export function cleanOscTitle(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const t = raw.trim();
+  if (!t) return undefined;
+  if (/[/\\]/.test(t)) return undefined; // any path separator
+  if (/\.exe\b/i.test(t)) return undefined; // pwsh.exe, cmd.exe
+  if (/^administrator:/i.test(t)) return undefined; // elevated console prefix
+  if (/^\S+@\S+:/.test(t)) return undefined; // user@host: shell prompt
+  return t;
+}
+
+/** What a terminal is called everywhere (entries, switcher, chat panel):
+ *  the user's rename, else a meaningful OSC title, else the default label. */
+export function termDisplayName(t: TerminalSession): string {
+  return t.customName ?? cleanOscTitle(t.oscTitle) ?? t.title;
 }
 
 export interface Notice {
   id: number;
   kind: "info" | "warn" | "error";
   text: string;
+}
+
+/** A toast that already faded, kept for the status-bar bell. */
+export interface NoticeLogEntry {
+  id: number;
+  kind: Notice["kind"];
+  text: string;
+  time: number;
+}
+
+const NOTICE_LOG_CAP = 100;
+
+/** Column slots for the two movable panels (SC, CHAT), left-to-right around
+ *  the editor: [explorer] l [editor] r1 r2. Explorer is pinned leftmost and
+ *  never moves. The editor itself is one of the tokens, so the columns can
+ *  step PAST it — putting the editor next to the explorer (both columns right)
+ *  or at the right edge (both columns left). */
+export type DockToken = "editor" | "scm" | "chat";
+
+/** Default left→right order after the pinned explorer:
+ *  explorer | editor | chat | sc. */
+export const DEFAULT_DOCK_ORDER: DockToken[] = ["editor", "chat", "scm"];
+
+const DOCK_KEY = "straylight.dockOrder";
+
+function loadDockOrder(): DockToken[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(DOCK_KEY) ?? "");
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === 3 &&
+      (["editor", "scm", "chat"] as DockToken[]).every((t) => parsed.includes(t))
+    ) {
+      return parsed as DockToken[];
+    }
+  } catch {
+    /* default below */
+  }
+  return [...DEFAULT_DOCK_ORDER];
+}
+
+const CHAT_VIS_KEY = "straylight.chatVisible";
+
+function persistChatVisible(v: boolean): void {
+  try {
+    localStorage.setItem(CHAT_VIS_KEY, v ? "1" : "0");
+  } catch {
+    /* prefs only */
+  }
 }
 
 const PINNED_KEY = "straylight.pinnedFolders";
@@ -598,6 +675,10 @@ interface AppState {
     onSkip?: () => void;
   }) => void;
   shiftConnectAsk: () => void;
+  /** OSC title from the shell — updates the auto name, never the rename. */
+  setTerminalTitle: (id: string, title: string) => void;
+  /** User rename; empty/whitespace clears it (back to the auto name). */
+  renameTerminal: (id: string, name: string) => void;
   /** Reorder terminals in the list (drag). */
   moveTerminal: (fromId: string, toId: string) => void;
   cycleTerminal: (direction: 1 | -1) => void;
@@ -623,8 +704,27 @@ interface AppState {
   moveTabToPosition: (tabId: string, gid: number, beforeId: string | null) => void;
   /** Session restore: reassign tabs to groups in one pass. */
   setTabGroups: (byTabId: Record<string, number>) => void;
-  /** Pull a terminal session out of the panel into an editor tab. */
-  moveTerminalToEditor: (terminalId: string) => void;
+  // CHAT column (the straight terminal docked beside SC) --------------------
+  /** Residents are terminals with `inChat`; one shows at a time (the dots
+   *  switch). Hiding the column never evicts residents. */
+  chatVisible: boolean;
+  setChatVisible: (v: boolean) => void;
+  toggleChat: () => void;
+  /** The resident currently on screen. */
+  chatActiveId: string | null;
+  setChatActive: (id: string) => void;
+  /** Send an existing panel terminal to the chat column (shell keeps running). */
+  moveTerminalToChat: (terminalId: string) => void;
+  /** − on the name line: the resident goes back to the bottom panel. */
+  returnTerminalFromChat: (terminalId: string) => void;
+  /** ＋ in the chat header: open a fresh shell directly as a resident. */
+  openTerminalInChat: (connId: string, label: string) => void;
+  /** Left→right arrangement of the editor + the two movable columns, after the
+   *  pinned explorer. Persisted. */
+  dockOrder: DockToken[];
+  /** Step a column one place left/right, swapping with whatever is there —
+   *  the editor or the other column. */
+  stepDock: (panel: "scm" | "chat", dir: 1 | -1) => void;
   /** Open (or focus) the Settings / Themes editor tabs. */
   openAppTab: (kind: "settings" | "themes") => void;
 
@@ -748,6 +848,28 @@ interface AppState {
 
   pushNotice: (kind: Notice["kind"], text: string) => void;
   dismissNotice: (id: number) => void;
+
+  // Notification bell: every toast lands here too (nothing else does — what
+  // was deliberately silent stays silent). ------------------------------------
+  noticeLog: NoticeLogEntry[];
+  /** Unread count since the bell was last opened. */
+  noticeUnread: number;
+  bellOpen: boolean;
+  setBellOpen: (open: boolean) => void;
+  clearNoticeLog: () => void;
+
+  // Terminal attention: BEL from an unfocused shell lights its dot/entry. ----
+  belled: Record<string, true>;
+  markBell: (terminalId: string) => void;
+  clearBell: (terminalId: string) => void;
+  /** Terminals producing output right now ("running" — e.g. Claude Code
+   *  working). Set on PTY output, cleared after a short idle. */
+  busy: Record<string, true>;
+  setBusy: (terminalId: string, on: boolean) => void;
+  /** Terminals whose PTY has exited (the backend sends an empty output chunk
+   *  when the shell dies). Cleared when a fresh PTY opens (epoch restart). */
+  ptyDead: Record<string, true>;
+  setPtyDead: (terminalId: string, on: boolean) => void;
 }
 
 let noticeId = 0;
@@ -1140,27 +1262,70 @@ export const useAppStore = create<AppState>()((set, get) => ({
       };
     }),
 
+  openTerminalInChat: (connId, label) =>
+    set((s) => {
+      const id = `term-${(terminalCounter += 1)}`;
+      let title = label;
+      let n = 1;
+      while (s.terminals.some((t) => t.connId === connId && t.title === title)) {
+        n += 1;
+        title = `${label} ${n}`;
+      }
+      const term: TerminalSession = {
+        id,
+        connId,
+        title,
+        command: null,
+        initialInput: null,
+        epoch: 0,
+        inChat: true,
+      };
+      // Born a resident: the panel's active terminal is untouched.
+      persistChatVisible(true);
+      return {
+        terminals: [...s.terminals, term],
+        chatActiveId: id,
+        chatVisible: true,
+      };
+    }),
+
   closeTerminal: (id) =>
     set((s) => {
-      const idx = s.terminals.findIndex((t) => t.id === id);
-      if (idx < 0) return {};
+      const sess = s.terminals.find((t) => t.id === id);
+      if (!sess) return {};
       const terminals = s.terminals.filter((t) => t.id !== id);
+      // Each home picks its own successor: the panel from the panel ring, the
+      // chat column from its residents — position-preserving like forceCloseTab.
       let activeTerminalId = s.activeTerminalId;
-      if (s.activeTerminalId === id) {
-        // `idx` is the closed terminal's original position; after filtering, the
-        // terminal that slid into it is terminals[idx]. Prefer the previous one,
-        // else the next, else none. (Same pattern as forceCloseTab.)
-        activeTerminalId = terminals[idx - 1]?.id ?? terminals[idx]?.id ?? null;
+      if (!sess.inChat && s.activeTerminalId === id) {
+        const ring = s.terminals.filter((t) => !t.inChat);
+        const rIdx = ring.findIndex((t) => t.id === id);
+        const rest = ring.filter((t) => t.id !== id);
+        activeTerminalId = rest[rIdx - 1]?.id ?? rest[rIdx]?.id ?? null;
       }
-      // A killed session also closes its editor-area tab, if it had one.
-      const tabId = `term::${id}`;
-      const hadTab = s.tabs.some((t) => t.id === tabId);
-      const tabs = hadTab ? s.tabs.filter((t) => t.id !== tabId) : s.tabs;
-      return {
-        terminals,
-        activeTerminalId,
-        ...(hadTab ? groupsPatch(s, tabs) : {}),
-      };
+      let chatActiveId = s.chatActiveId;
+      if (sess.inChat && s.chatActiveId === id) {
+        const residents = s.terminals.filter((t) => t.inChat);
+        const cIdx = residents.findIndex((t) => t.id === id);
+        const rest = residents.filter((t) => t.id !== id);
+        chatActiveId = rest[cIdx - 1]?.id ?? rest[cIdx]?.id ?? null;
+      }
+      let belled = s.belled;
+      if (belled[id]) {
+        belled = { ...belled };
+        delete belled[id];
+      }
+      let busy = s.busy;
+      if (busy[id]) {
+        busy = { ...busy };
+        delete busy[id];
+      }
+      let ptyDead = s.ptyDead;
+      if (ptyDead[id]) {
+        ptyDead = { ...ptyDead };
+        delete ptyDead[id];
+      }
+      return { terminals, activeTerminalId, chatActiveId, belled, busy, ptyDead };
     }),
 
   setActiveTerminal: (activeTerminalId) =>
@@ -1183,6 +1348,34 @@ export const useAppStore = create<AppState>()((set, get) => ({
   connectAsks: [],
   pushConnectAsk: (a) => set((s) => ({ connectAsks: [...s.connectAsks, a] })),
   shiftConnectAsk: () => set((s) => ({ connectAsks: s.connectAsks.slice(1) })),
+  setTerminalTitle: (id, oscTitle) =>
+    set((s) => {
+      // Store the raw OSC title; whether it's shown is decided at display time
+      // (cleanOscTitle), so a shell dropping back to path noise reverts the
+      // name to its default label instead of freezing on the last tool name.
+      const sess = s.terminals.find((t) => t.id === id);
+      if (!sess || sess.oscTitle === oscTitle) return {};
+      return {
+        terminals: s.terminals.map((t) =>
+          t.id === id ? { ...t, oscTitle } : t,
+        ),
+      };
+    }),
+
+  renameTerminal: (id, name) =>
+    set((s) => {
+      const clean = name.trim();
+      return {
+        terminals: s.terminals.map((t) => {
+          if (t.id !== id) return t;
+          // Renaming to the current auto name (or to nothing) clears the
+          // override, so the name keeps following the shell again.
+          const auto = cleanOscTitle(t.oscTitle) ?? t.title;
+          return { ...t, customName: clean && clean !== auto ? clean : undefined };
+        }),
+      };
+    }),
+
   moveTerminal: (fromId, toId) =>
     set((s) => {
       const from = s.terminals.findIndex((t) => t.id === fromId);
@@ -1196,8 +1389,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   cycleTerminal: (direction) =>
     set((s) => {
-      // Editor-hosted terminals aren't part of the panel's ring.
-      const ring = s.terminals.filter((t) => !t.inEditor);
+      // Chat residents aren't part of the panel's ring.
+      const ring = s.terminals.filter((t) => !t.inChat);
       if (ring.length === 0) return {};
       const idx = ring.findIndex((t) => t.id === s.activeTerminalId);
       const next = ring[(idx + direction + ring.length) % ring.length];
@@ -1213,19 +1406,17 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   closeConnTerminals: (connId) =>
     set((s) => {
-      const gone = new Set(
-        s.terminals.filter((t) => t.connId === connId).map((t) => `term::${t.id}`),
-      );
       const terminals = s.terminals.filter((t) => t.connId !== connId);
+      const panel = terminals.filter((t) => !t.inChat);
       const activeTerminalId = terminals.some((t) => t.id === s.activeTerminalId)
         ? s.activeTerminalId
-        : (terminals[terminals.length - 1]?.id ?? null);
-      const tabs = s.tabs.filter((t) => !gone.has(t.id));
-      return {
-        terminals,
-        activeTerminalId,
-        ...(tabs.length !== s.tabs.length ? groupsPatch(s, tabs) : {}),
-      };
+        : (panel[panel.length - 1]?.id ?? null);
+      const chatActiveId = terminals.some(
+        (t) => t.id === s.chatActiveId && t.inChat,
+      )
+        ? s.chatActiveId
+        : (terminals.find((t) => t.inChat)?.id ?? null);
+      return { terminals, activeTerminalId, chatActiveId };
     }),
 
   openAppTab: (kind) =>
@@ -1256,7 +1447,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   openTab: (tab, opts = {}) =>
     set((s) => {
       const existing = s.tabs.find(
-        (t) => t.connId === tab.connId && t.path === tab.path && t.kind !== "terminal",
+        (t) => t.connId === tab.connId && t.path === tab.path,
       );
       if (existing) {
         // A permanent open (double-click) promotes an existing preview.
@@ -1362,46 +1553,80 @@ export const useAppStore = create<AppState>()((set, get) => ({
       );
     }),
 
-  moveTerminalToEditor: (terminalId) =>
+  chatVisible: localStorage.getItem(CHAT_VIS_KEY) === "1",
+  setChatVisible: (chatVisible) => {
+    persistChatVisible(chatVisible);
+    set({ chatVisible });
+  },
+  toggleChat: () =>
+    set((s) => {
+      persistChatVisible(!s.chatVisible);
+      return { chatVisible: !s.chatVisible };
+    }),
+  chatActiveId: null,
+  setChatActive: (chatActiveId) => set({ chatActiveId }),
+
+  moveTerminalToChat: (terminalId) =>
     set((s) => {
       const sess = s.terminals.find((t) => t.id === terminalId);
-      if (!sess) return {};
-      const id = `term::${terminalId}`;
+      if (!sess || sess.inChat) return {};
       const terminals = s.terminals.map((t) =>
-        t.id === terminalId ? { ...t, inEditor: true } : t,
+        t.id === terminalId ? { ...t, inChat: true } : t,
       );
-      const panelLeft = terminals.filter((t) => !t.inEditor);
+      // The panel's active slot moves on to a remaining panel terminal.
+      const panelLeft = terminals.filter((t) => !t.inChat);
       const activeTerminalId =
         s.activeTerminalId === terminalId
           ? (panelLeft[0]?.id ?? null)
           : s.activeTerminalId;
-      if (s.tabs.some((t) => t.id === id)) {
-        return { terminals, activeTerminalId, ...groupsPatch(s, s.tabs, id) };
-      }
-      const tab: EditorTab = {
-        id,
-        connId: sess.connId,
-        path: sess.title,
-        name: sess.title,
-        content: "",
-        language: "plaintext",
-        isBinary: false,
-        encoding: "utf-8",
-        size: 0,
-        modified: 0,
-        truncated: false,
-        lineEnding: "LF",
-        dirty: false,
-        cursor: { line: 1, column: 1 },
-        kind: "terminal",
-        terminalId,
-        groupId: s.activeGroupId,
-      };
+      persistChatVisible(true);
       return {
         terminals,
         activeTerminalId,
-        ...groupsPatch(s, [...s.tabs, tab], id),
+        chatActiveId: terminalId,
+        chatVisible: true,
       };
+    }),
+
+  returnTerminalFromChat: (terminalId) =>
+    set((s) => {
+      const sess = s.terminals.find((t) => t.id === terminalId);
+      if (!sess?.inChat) return {};
+      const terminals = s.terminals.map((t) =>
+        t.id === terminalId ? { ...t, inChat: false } : t,
+      );
+      let chatActiveId = s.chatActiveId;
+      if (chatActiveId === terminalId) {
+        const before = s.terminals.filter((t) => t.inChat);
+        const cIdx = before.findIndex((t) => t.id === terminalId);
+        const rest = before.filter((t) => t.id !== terminalId);
+        chatActiveId = rest[cIdx - 1]?.id ?? rest[cIdx]?.id ?? null;
+      }
+      // The returned shell becomes the panel's active terminal so it lands
+      // somewhere visible instead of vanishing into the list.
+      return {
+        terminals,
+        chatActiveId,
+        activeTerminalId: terminalId,
+        terminalView: "terminals" as const,
+      };
+    }),
+
+  dockOrder: loadDockOrder(),
+  stepDock: (panel, dir) =>
+    set((s) => {
+      const order = [...s.dockOrder];
+      const i = order.indexOf(panel);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= order.length) return {};
+      // Swap with the neighbor — the editor or the other column.
+      [order[i], order[j]] = [order[j], order[i]];
+      try {
+        localStorage.setItem(DOCK_KEY, JSON.stringify(order));
+      } catch {
+        /* prefs only */
+      }
+      return { dockOrder: order };
     }),
 
   promoteTab: (id) =>
@@ -1588,14 +1813,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set((s) => {
       const tab = s.tabs.find((t) => t.id === id);
       if (!tab) return {};
-      // Closing a terminal tab returns the shell to the panel (never kills it —
-      // explicit kill lives on the panel's × after it's back).
-      const terminals =
-        tab.kind === "terminal" && tab.terminalId
-          ? s.terminals.map((t) =>
-              t.id === tab.terminalId ? { ...t, inEditor: false } : t,
-            )
-          : s.terminals;
       const tabs = s.tabs.filter((t) => t.id !== id);
       let focus: string | null | undefined;
       if (s.activeTabId === id) {
@@ -1607,7 +1824,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
       }
       return {
         ...groupsPatch(s, tabs, focus),
-        terminals,
         closeConfirm: s.closeConfirm?.tabId === id ? null : s.closeConfirm,
       };
     }),
@@ -1827,7 +2043,65 @@ export const useAppStore = create<AppState>()((set, get) => ({
   clearClipboard: () => set({ clipboard: null }),
 
   pushNotice: (kind, text) =>
-    set((s) => ({ notices: [...s.notices, { id: (noticeId += 1), kind, text }] })),
+    set((s) => {
+      const id = (noticeId += 1);
+      return {
+        notices: [...s.notices, { id, kind, text }],
+        noticeLog: [
+          { id, kind, text, time: Date.now() },
+          ...s.noticeLog,
+        ].slice(0, NOTICE_LOG_CAP),
+        noticeUnread: s.bellOpen ? 0 : s.noticeUnread + 1,
+      };
+    }),
   dismissNotice: (id) =>
     set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
+
+  noticeLog: [],
+  noticeUnread: 0,
+  bellOpen: false,
+  setBellOpen: (bellOpen) =>
+    set((s) => ({ bellOpen, noticeUnread: bellOpen ? 0 : s.noticeUnread })),
+  clearNoticeLog: () => set({ noticeLog: [], noticeUnread: 0 }),
+
+  belled: {},
+  markBell: (terminalId) =>
+    set((s) =>
+      s.belled[terminalId] ? {} : { belled: { ...s.belled, [terminalId]: true } },
+    ),
+  clearBell: (terminalId) =>
+    set((s) => {
+      if (!s.belled[terminalId]) return {};
+      const belled = { ...s.belled };
+      delete belled[terminalId];
+      return { belled };
+    }),
+
+  busy: {},
+  setBusy: (terminalId, on) =>
+    set((s) => {
+      if (on) {
+        return s.busy[terminalId]
+          ? {}
+          : { busy: { ...s.busy, [terminalId]: true } };
+      }
+      if (!s.busy[terminalId]) return {};
+      const busy = { ...s.busy };
+      delete busy[terminalId];
+      return { busy };
+    }),
+
+  ptyDead: {},
+  setPtyDead: (terminalId, on) =>
+    set((s) => {
+      if (on) {
+        return s.ptyDead[terminalId]
+          ? {}
+          : { ptyDead: { ...s.ptyDead, [terminalId]: true } };
+      }
+      if (!s.ptyDead[terminalId]) return {};
+      const ptyDead = { ...s.ptyDead };
+      delete ptyDead[terminalId];
+      return { ptyDead };
+    }),
 }));

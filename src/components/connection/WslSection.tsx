@@ -29,10 +29,10 @@ import {
   IconEyeOff,
   IconFilePlus,
   IconFolderPlus,
-  IconLogout,
   IconPlug,
   IconPlus,
   IconRefresh,
+  IconUnplug,
 } from "../icons";
 
 const WSL_COLOR = "var(--section-wsl)";
@@ -121,7 +121,7 @@ function WslHost({ ws, order }: { ws: RemoteWorkspace; order: number }) {
           title={`Disconnect ${conn.name}`}
           onClick={() => void disconnect()}
         >
-          <IconLogout />
+          <IconUnplug />
         </button>
       </div>
       <div

@@ -7,7 +7,15 @@ import { useState } from "react";
 import { setTabEol } from "../../lib/editorModels";
 import { useAppStore } from "../../store/appStore";
 import { useVcsStore } from "../../store/vcsStore";
-import { IconBranch, IconFolder, IconTerminalGlyph } from "../icons";
+import {
+  IconBell,
+  IconBranch,
+  IconChatBubble,
+  IconClose,
+  IconFolder,
+  IconTerminalGlyph,
+} from "../icons";
+import { RelativeTime } from "../RelativeTime";
 import { Tip } from "../Tooltip";
 import { TransferProgressBar } from "../transfer/TransferProgressBar";
 
@@ -25,6 +33,23 @@ export function StatusBar() {
   const tabs = useAppStore((s) => s.tabs);
   const activeTabId = useAppStore((s) => s.activeTabId);
   const toggleTerminal = useAppStore((s) => s.toggleTerminal);
+  const toggleChat = useAppStore((s) => s.toggleChat);
+  const terminalVisible = useAppStore((s) => s.terminalVisible);
+  const chatVisible = useAppStore((s) => s.chatVisible);
+  const terminals = useAppStore((s) => s.terminals);
+  const belled = useAppStore((s) => s.belled);
+  const noticeLog = useAppStore((s) => s.noticeLog);
+  const noticeUnread = useAppStore((s) => s.noticeUnread);
+  const bellOpen = useAppStore((s) => s.bellOpen);
+  const setBellOpen = useAppStore((s) => s.setBellOpen);
+  const clearNoticeLog = useAppStore((s) => s.clearNoticeLog);
+
+  // A bell in a HIDDEN home badges that home's button — visible homes show it
+  // on the entry/dot itself.
+  const bellInPanel =
+    !terminalVisible && terminals.some((t) => !t.inChat && belled[t.id]);
+  const bellInChat =
+    !chatVisible && terminals.some((t) => t.inChat && belled[t.id]);
   const vcsRepos = useVcsStore((s) => s.repos);
   const toggleScm = useVcsStore((s) => s.toggleScm);
   const setTabLineEnding = useAppStore((s) => s.setTabLineEnding);
@@ -69,21 +94,36 @@ export function StatusBar() {
       </span>
 
       {(vcsRepos.length > 0 || localConnId) && (
-        <span
-          className="statusbar__item statusbar__item--button statusbar__panel-btn"
-          onClick={() => toggleScm()}
-          title="Toggle Source Control"
-        >
-          <IconBranch size={13} /> SC
-        </span>
+        <>
+          <span className="statusbar__sep" />
+          <span
+            className="statusbar__item statusbar__item--button statusbar__panel-btn"
+            onClick={() => toggleScm()}
+            title="Toggle Source Control"
+          >
+            <IconBranch size={13} /> SC
+          </span>
+        </>
       )}
 
+      <span className="statusbar__sep" />
       <span
         className="statusbar__item statusbar__item--button statusbar__panel-btn"
         onClick={() => toggleTerminal()}
         title="Toggle the terminal panel (Ctrl+`) — Ports/Containers/Forwarding live on its top bar"
       >
         <IconTerminalGlyph size={13} /> TERMINAL
+        {bellInPanel && <span className="statusbar__attn" />}
+      </span>
+
+      <span className="statusbar__sep" />
+      <span
+        className="statusbar__item statusbar__item--button statusbar__panel-btn"
+        onClick={() => toggleChat()}
+        title="Toggle CHAT — a terminal column for Claude Code or any CLI"
+      >
+        <IconChatBubble size={13} /> CHAT
+        {bellInChat && <span className="statusbar__attn" />}
       </span>
 
       {/* Connection dots, sectioned: WSL first, then remotes — a section only
@@ -129,10 +169,10 @@ export function StatusBar() {
 
       {activeRepo?.status && (
         <span
-          className="statusbar__item"
+          className="statusbar__item statusbar__branch"
           title={`${activeRepo.label} · ${activeRepo.status.ref}`}
         >
-          ⑂ {activeRepo.status.ref}
+          <IconBranch size={12} /> {activeRepo.status.ref}
           {activeRepo.status.ahead ? ` ↑${activeRepo.status.ahead}` : ""}
           {activeRepo.status.behind ? ` ↓${activeRepo.status.behind}` : ""}
         </span>
@@ -178,6 +218,58 @@ export function StatusBar() {
           <span className="statusbar__item">
             {active.isBinary ? "Binary" : prettyLanguage(active.language)}
           </span>
+        </>
+      )}
+
+      <span className="statusbar__sep" />
+      <span
+        className="statusbar__item statusbar__item--button statusbar__bell"
+        onClick={() => setBellOpen(!bellOpen)}
+        title="Notifications — every toast lands here after it fades"
+      >
+        <IconBell size={13} />
+        {noticeUnread > 0 && <span className="statusbar__attn" />}
+      </span>
+      {bellOpen && (
+        <>
+          <div className="menu-backdrop" onClick={() => setBellOpen(false)} />
+          <div className="bell-pop">
+            <div className="bell-pop__head">
+              <span>Notifications</span>
+              <span className="bell-pop__spacer" />
+              {noticeLog.length > 0 && (
+                <button
+                  className="bell-pop__clear"
+                  onClick={() => clearNoticeLog()}
+                >
+                  Clear all
+                </button>
+              )}
+              <button
+                className="icon-btn"
+                title="Close"
+                onClick={() => setBellOpen(false)}
+              >
+                <IconClose size={11} />
+              </button>
+            </div>
+            {noticeLog.length === 0 ? (
+              <div className="bell-pop__empty">
+                Nothing yet — toasts land here after they fade.
+              </div>
+            ) : (
+              <div className="bell-pop__list">
+                {noticeLog.map((n) => (
+                  <div key={n.id} className={`bell-pop__item bell-pop__item--${n.kind}`}>
+                    <span className="bell-pop__text">{n.text}</span>
+                    <span className="bell-pop__time">
+                      <RelativeTime at={n.time} title={null} />
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </>
       )}
     </footer>

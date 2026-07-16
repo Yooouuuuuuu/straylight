@@ -2,7 +2,7 @@
  *  group per connection (Local, WSL, remotes — host colors); each group owns
  *  its terminals, and + opens a terminal on the active group (a shell menu
  *  only for Local). The RIGHT side of the bar holds the tool groups (Ports ·
- *  Containers · Forwarding) and the »-down collapse. The right-side terminal
+ *  Containers · Forwarding) and the collapse chevron. The right-side terminal
  *  list shows the active group's terminals — draggable to reorder,
  *  collapsible to an icon-only rail. */
 import { useEffect, useMemo, useState } from "react";
@@ -10,17 +10,20 @@ import { useEffect, useMemo, useState } from "react";
 import { remoteColor, SECTION_LOCAL, SECTION_WSL } from "../../lib/hostColors";
 import { listTerminalProfiles, type TerminalProfile } from "../../lib/ipc";
 import { panelsConfig } from "../../lib/settings";
-import { remoteHostKey, useAppStore } from "../../store/appStore";
+import { remoteHostKey, termDisplayName, useAppStore } from "../../store/appStore";
 import { ForwardingView } from "../PortForwards";
 import { ContainersView } from "../terminal/ContainersView";
 import { PortsView } from "../terminal/PortsView";
 import { Terminal } from "../terminal/Terminal";
 import { TransfersView } from "../transfer/TransfersView";
 import {
+  IconChevron,
   IconClose,
   IconCube,
   IconEthernet,
+  IconPanelHide,
   IconPlus,
+  IconToChat,
   IconTransfer,
   IconTunnel,
 } from "../icons";
@@ -41,14 +44,21 @@ export function TerminalPanel() {
   const setTerminalVisible = useAppStore((s) => s.setTerminalVisible);
   const terminalView = useAppStore((s) => s.terminalView);
   const setTerminalView = useAppStore((s) => s.setTerminalView);
-  const moveTerminalToEditor = useAppStore((s) => s.moveTerminalToEditor);
+  const moveTerminalToChat = useAppStore((s) => s.moveTerminalToChat);
   const moveTerminal = useAppStore((s) => s.moveTerminal);
   const termGroupOrder = useAppStore((s) => s.termGroupOrder);
   const setTermGroupOrder = useAppStore((s) => s.setTermGroupOrder);
 
+  const renameTerminal = useAppStore((s) => s.renameTerminal);
+  const belled = useAppStore((s) => s.belled);
+
   const [profiles, setProfiles] = useState<TerminalProfile[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [selGroup, setSelGroup] = useState<string | null>(null);
+  /** Inline rename on an entry (double-click its label). */
+  const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(
+    null,
+  );
   /** Terminal-list width, drag-resizable; narrow enough = icon-only. */
   const [listWidth, setListWidth] = useState(168);
   const listMini = listWidth <= 56;
@@ -116,13 +126,13 @@ export function TerminalPanel() {
     activeConn ||
     localConnId;
   const groupTerminals = terminals.filter(
-    (t) => !t.inEditor && t.connId === activeGroup,
+    (t) => !t.inChat && t.connId === activeGroup,
   );
 
   const pickGroup = (connId: string) => {
     setSelGroup(connId);
     setTerminalView("terminals");
-    const first = terminals.find((t) => !t.inEditor && t.connId === connId);
+    const first = terminals.find((t) => !t.inChat && t.connId === connId);
     if (first) setActiveTerminal(first.id);
   };
 
@@ -206,10 +216,18 @@ export function TerminalPanel() {
             </span>
             {g.label}
             {(() => {
-              const n = terminals.filter(
-                (t) => !t.inEditor && t.connId === g.connId,
-              ).length;
-              return n > 0 ? <span className="termgroup__count">{n}</span> : null;
+              // "x+y" — x shells here, y living in the CHAT column.
+              const mine = terminals.filter((t) => t.connId === g.connId);
+              const n = mine.filter((t) => !t.inChat).length;
+              const y = mine.length - n;
+              const rang = mine.some((t) => belled[t.id]);
+              if (n === 0 && y === 0) return null;
+              return (
+                <span className="termgroup__count">
+                  {y > 0 ? `${n}+${y}` : n}
+                  {rang && <span className="termgroup__bell" />}
+                </span>
+              );
             })()}
           </button>
         ))}
@@ -228,11 +246,11 @@ export function TerminalPanel() {
         {panelsConfig.transfers &&
           tool("transfers", <IconTransfer size={13} />, "Transfers", null)}
         <button
-          className="icon-btn termgroup__collapse"
+          className="icon-btn termgroup__collapse panel-head__hide"
           title="Hide terminal (Ctrl+`)"
           onClick={() => setTerminalVisible(false)}
         >
-          »
+          <IconPanelHide size={14} />
         </button>
       </div>
 
@@ -259,7 +277,7 @@ export function TerminalPanel() {
                 display:
                   terminalView === "terminals" &&
                   t.id === activeTerminalId &&
-                  !t.inEditor
+                  !t.inChat
                     ? "block"
                     : "none",
               }}
@@ -309,7 +327,7 @@ export function TerminalPanel() {
                   title="Select a shell…"
                   onClick={() => setMenuOpen((v) => !v)}
                 >
-                  ▾
+                  <IconChevron size={12} dir="down" />
                 </button>
               )}
               {menuOpen && (
@@ -341,9 +359,9 @@ export function TerminalPanel() {
                   key={t.id}
                   role="tab"
                   aria-selected={t.id === activeTerminalId}
-                  className={`terminal-entry${t.id === activeTerminalId ? " terminal-entry--active" : ""}`}
-                  title={t.title}
-                  draggable
+                  className={`terminal-entry${t.id === activeTerminalId ? " terminal-entry--active" : ""}${belled[t.id] ? " terminal-entry--bell" : ""}`}
+                  title={termDisplayName(t)}
+                  draggable={renaming?.id !== t.id}
                   onDragStart={(e) => e.dataTransfer.setData(TERM_MIME, t.id)}
                   onDragOver={(e) => {
                     if (e.dataTransfer.types.includes(TERM_MIME)) e.preventDefault();
@@ -363,19 +381,55 @@ export function TerminalPanel() {
                   <span className="terminal-entry__icon">{">_"}</span>
                   {!listMini && (
                     <>
-                      <span className="terminal-entry__label">{t.title}</span>
+                      {renaming?.id === t.id ? (
+                        <input
+                          className="terminal-entry__rename"
+                          value={renaming.value}
+                          autoFocus
+                          spellCheck={false}
+                          onFocus={(e) => e.target.select()}
+                          onChange={(e) =>
+                            setRenaming({ id: t.id, value: e.target.value })
+                          }
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === "Enter") {
+                              renameTerminal(t.id, renaming.value);
+                              setRenaming(null);
+                            } else if (e.key === "Escape") {
+                              setRenaming(null);
+                            }
+                          }}
+                          onBlur={() => {
+                            renameTerminal(t.id, renaming.value);
+                            setRenaming(null);
+                          }}
+                        />
+                      ) : (
+                        <span
+                          className="terminal-entry__label"
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            setRenaming({ id: t.id, value: termDisplayName(t) });
+                          }}
+                        >
+                          {termDisplayName(t)}
+                        </span>
+                      )}
                       <button
                         className="terminal-entry__close terminal-entry__move"
-                        title="Move to the editor area (the shell keeps running)"
+                        title="Move to CHAT (the shell keeps running)"
                         onClick={(e) => {
                           e.stopPropagation();
-                          moveTerminalToEditor(t.id);
+                          moveTerminalToChat(t.id);
                         }}
                       >
-                        ⇱
+                        <IconToChat size={12} />
                       </button>
                       <button
-                        className="terminal-entry__close"
+                        className="terminal-entry__close terminal-entry__kill"
                         title="Close terminal"
                         onClick={(e) => {
                           e.stopPropagation();

@@ -190,17 +190,30 @@ export function useKeyboard() {
           break;
         }
         case "nextTerminal":
-          if (store.terminals.length > 1) {
-            store.cycleTerminal(1);
+        case "prevTerminal": {
+          // Focus in the CHAT column cycles its residents (the dots); in the
+          // panel it cycles the panel ring, as ever.
+          const dir = action === "nextTerminal" ? 1 : -1;
+          if (target?.closest(".chat-panel")) {
+            const residents = store.terminals.filter((t) => t.inChat);
+            if (residents.length > 1) {
+              const cur = residents.findIndex(
+                (t) => t.id === store.chatActiveId,
+              );
+              const next =
+                residents[
+                  (Math.max(cur, 0) + dir + residents.length) %
+                    residents.length
+                ];
+              store.setChatActive(next.id);
+              event.preventDefault();
+            }
+          } else if (store.terminals.some((t) => !t.inChat)) {
+            store.cycleTerminal(dir as 1 | -1);
             event.preventDefault();
           }
           break;
-        case "prevTerminal":
-          if (store.terminals.length > 1) {
-            store.cycleTerminal(-1);
-            event.preventDefault();
-          }
-          break;
+        }
         case "toggleSidebar":
           store.toggleSidebar();
           event.preventDefault();

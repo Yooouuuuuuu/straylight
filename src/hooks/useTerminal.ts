@@ -131,8 +131,9 @@ export function useTerminal(
       // the whole buffer into it, wiping the scrollback. (An editor-hosted
       // terminal ignores the panel's visibility — it lives elsewhere.)
       const state = useAppStore.getState();
-      const inEditor = !!state.terminals.find((t) => t.id === id)?.inEditor;
-      if (!inEditor && !state.terminalVisible) return;
+      const inChat = !!state.terminals.find((t) => t.id === id)?.inChat;
+      // A resident's visibility is the chat column's, not the panel's.
+      if (inChat ? !state.chatVisible : !state.terminalVisible) return;
       if (!host.clientWidth || !host.clientHeight) return;
       try {
         fit.fit();
@@ -142,11 +143,35 @@ export function useTerminal(
     };
     safeFit();
 
-    // Forward backend PTY output to the terminal.
+    // "Running" indicator: a shell producing output is busy (Claude Code
+    // updating its status counts). Cleared after a short idle so the dot goes
+    // back to blank/done. Coalesced to transitions to avoid per-chunk writes.
+    // NOTE: output must NOT clear a pending "your turn" bell — the BEL arrives
+    // mid-burst (Claude rings, then keeps rendering the response and prompt
+    // box), so trailing chunks would wipe the green milliseconds after it lit.
+    // The bell clears when the user types instead (onData below).
+    let busyTimer: ReturnType<typeof setTimeout> | undefined;
+    const markBusy = () => {
+      if (!id) return;
+      const st = useAppStore.getState();
+      if (!st.busy[id]) st.setBusy(id, true);
+      clearTimeout(busyTimer);
+      busyTimer = setTimeout(() => {
+        useAppStore.getState().setBusy(id, false);
+      }, 1200);
+    };
+
+    // Forward backend PTY output to the terminal. An EMPTY chunk is the
+    // backend's "this PTY closed" signal — the shell exited.
     void onPtyOutput((output) => {
       if (disposed || output.ptyId !== ptyId) return;
       if (output.data.length > 0) {
         term.write(new Uint8Array(output.data));
+        markBusy();
+      } else if (id) {
+        clearTimeout(busyTimer);
+        useAppStore.getState().setBusy(id, false);
+        useAppStore.getState().setPtyDead(id, true);
       }
     }).then((un) => {
       if (disposed) un();
@@ -155,28 +180,52 @@ export function useTerminal(
 
     // Open the PTY sized to the current terminal.
     void ptyOpen(connId, term.cols, term.rows, command)
-      .then((id) => {
+      .then((openedId) => {
         if (disposed) {
-          void ptyClose(id);
+          void ptyClose(openedId);
           return;
         }
-        ptyId = id;
+        ptyId = openedId;
+        // A fresh PTY (first open or an epoch restart) is alive again.
+        if (id) useAppStore.getState().setPtyDead(id, false);
         term.focus();
         // Type the requested command into the fresh shell (e.g. a container
         // exec from the Containers tab) — visible and cancelable like any input.
         if (initialInput) {
-          void ptyWrite(id, encoder.encode(`${initialInput}\r`));
+          void ptyWrite(openedId, encoder.encode(`${initialInput}\r`));
         }
       })
       .catch((error) => {
         term.writeln(`\r\n\x1b[31mFailed to open terminal: ${error}\x1b[0m`);
+        if (id) useAppStore.getState().setPtyDead(id, true);
       });
 
     const dataSub = term.onData((data) => {
+      // Typing into the shell takes your turn — the "done" green clears here
+      // (and only here), not on focus and not on the shell's own output.
+      if (id && useAppStore.getState().belled[id]) {
+        useAppStore.getState().clearBell(id);
+      }
       if (ptyId) void ptyWrite(ptyId, encoder.encode(data));
     });
     const resizeSub = term.onResize(({ cols, rows }) => {
       if (ptyId) void ptyResize(ptyId, cols, rows);
+    });
+    // OSC 0/2 titles (pwsh's cwd, claude's status, vim's file…) feed the
+    // terminal's auto name; a user rename (customName) keeps winning over it.
+    const titleSub = term.onTitleChange((title) => {
+      if (id) useAppStore.getState().setTerminalTitle(id, title);
+    });
+    // BEL = "done / your turn" (Claude Code rings when it finishes or needs
+    // input). Show it even while you're watching the terminal — the whole
+    // point is to know it's your turn — and clear "running" so the dot goes
+    // straight to green. It stays green until you type (onData above).
+    const bellSub = term.onBell(() => {
+      if (!id) return;
+      const st = useAppStore.getState();
+      clearTimeout(busyTimer);
+      st.setBusy(id, false);
+      st.markBell(id);
     });
 
     // Right-click: copy the selection if there is one, otherwise paste.
@@ -211,10 +260,14 @@ export function useTerminal(
     return () => {
       disposed = true;
       clearTimeout(fitTimer);
+      clearTimeout(busyTimer);
+      if (id) useAppStore.getState().setBusy(id, false);
       observer.disconnect();
       host.removeEventListener("contextmenu", onContextMenu);
       dataSub.dispose();
       resizeSub.dispose();
+      titleSub.dispose();
+      bellSub.dispose();
       if (unlisten) unlisten();
       if (ptyId) void ptyClose(ptyId);
       if (id) unregisterTerminalFocus(id);

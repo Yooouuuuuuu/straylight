@@ -21,6 +21,7 @@ import {
   TERMINAL_DEFAULTS,
 } from "../../lib/themes";
 import { useAppStore } from "../../store/appStore";
+import { IconChevron, IconClose } from "../icons";
 
 const SECTIONS: {
   key: "colors" | "editor" | "terminalLocal" | "terminalWsl" | "terminalRemote";
@@ -82,7 +83,7 @@ export function ThemesView() {
             title={`Delete "${name}"`}
             onClick={() => void deleteTheme(name)}
           >
-            ×
+            <IconClose size={12} />
           </button>
         </div>
       ))}
@@ -100,7 +101,7 @@ export function ThemesView() {
               className="theme-cards__head"
               onClick={() => setOpen(isOpen ? "" : sec.key)}
             >
-              {isOpen ? "▾" : "▸"} {sec.title}
+              <IconChevron size={12} dir={isOpen ? "down" : "right"} /> {sec.title}
             </button>
             {isOpen && (
               <div className="theme-cards">

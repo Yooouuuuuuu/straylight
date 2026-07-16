@@ -10,10 +10,10 @@ import { useEffect, useRef, useState } from "react";
 import { tabHostColor, hostColorForConnKey } from "../lib/hostColors";
 import { matchShortcut } from "../lib/shortcuts";
 import { focusTerminal } from "../lib/terminalFocus";
-import { remoteHostKey, useAppStore } from "../store/appStore";
+import { remoteHostKey, termDisplayName, useAppStore } from "../store/appStore";
 
 interface Cand {
-  kind: "tab" | "terminal";
+  kind: "tab" | "terminal" | "chat";
   id: string;
   name: string;
   /** Right-side context: "split 2" for tabs, the host name for terminals. */
@@ -22,7 +22,7 @@ interface Cand {
 }
 
 interface SwitcherState {
-  mode: "tabs" | "terminals";
+  mode: "tabs" | "terminals" | "chat";
   list: Cand[];
   index: number;
 }
@@ -69,13 +69,13 @@ function buildTerminals(): { list: Cand[]; currentId: string | null } {
   hosts.sort((a, b) => rank(a) - rank(b));
   const list = hosts.flatMap((h) =>
     s.terminals
-      .filter((t) => !t.inEditor && t.connId === h)
+      .filter((t) => !t.inChat && t.connId === h)
       .map((t) => {
         const host = hostOf(t.connId);
         return {
           kind: "terminal" as const,
           id: t.id,
-          name: t.title,
+          name: termDisplayName(t),
           detail: host.label,
           color: hostColorForConnKey(s.hostColors, host.key),
         };
@@ -84,10 +84,41 @@ function buildTerminals(): { list: Cand[]; currentId: string | null } {
   return { list, currentId: s.activeTerminalId };
 }
 
+/** Focus in the CHAT column: the switcher walks its residents (the dots). */
+function buildChat(): { list: Cand[]; currentId: string | null } {
+  const s = useAppStore.getState();
+  const hostOf = (connId: string): { label: string; key: string } => {
+    if (connId === s.localConnId) return { label: "Local", key: "local" };
+    const w = s.wsls.find((x) => x.conn.connId === connId);
+    if (w) return { label: w.conn.name, key: `wsl:${w.conn.name}` };
+    const r = s.remotes.find((r) => r.conn.connId === connId);
+    return r
+      ? { label: r.conn.name, key: remoteHostKey(r.conn) }
+      : { label: "?", key: "local" };
+  };
+  const list = s.terminals
+    .filter((t) => t.inChat)
+    .map((t) => {
+      const host = hostOf(t.connId);
+      return {
+        kind: "chat" as const,
+        id: t.id,
+        name: termDisplayName(t),
+        detail: host.label,
+        color: hostColorForConnKey(s.hostColors, host.key),
+      };
+    });
+  return { list, currentId: s.chatActiveId };
+}
+
 function activate(c: Cand) {
   const store = useAppStore.getState();
   if (c.kind === "tab") {
     store.setActiveTab(c.id);
+  } else if (c.kind === "chat") {
+    store.setChatVisible(true);
+    store.setChatActive(c.id);
+    requestAnimationFrame(() => focusTerminal(c.id));
   } else {
     store.setTerminalView("terminals");
     store.setTerminalVisible(true);
@@ -123,12 +154,20 @@ export function TabSwitcher() {
       );
 
     const open = (dir: 1 | -1) => {
-      const inTerminal = !!(
-        document.activeElement as HTMLElement | null
-      )?.closest(".terminal-host");
-      let built = inTerminal ? buildTerminals() : buildTabs();
-      let mode: SwitcherState["mode"] = inTerminal ? "terminals" : "tabs";
-      if (mode === "terminals" && built.list.length === 0) {
+      const el = document.activeElement as HTMLElement | null;
+      const inChat = !!el?.closest(".chat-panel");
+      const inTerminal = !inChat && !!el?.closest(".terminal-host");
+      let built = inChat
+        ? buildChat()
+        : inTerminal
+          ? buildTerminals()
+          : buildTabs();
+      let mode: SwitcherState["mode"] = inChat
+        ? "chat"
+        : inTerminal
+          ? "terminals"
+          : "tabs";
+      if (mode !== "tabs" && built.list.length === 0) {
         built = buildTabs();
         mode = "tabs";
       }
@@ -191,7 +230,11 @@ export function TabSwitcher() {
     <div className="switcher">
       <div className="switcher__box">
         <div className="switcher__title">
-          {state.mode === "tabs" ? "Editor tabs" : "Terminals"}
+          {state.mode === "tabs"
+            ? "Editor tabs"
+            : state.mode === "chat"
+              ? "CHAT"
+              : "Terminals"}
         </div>
         <div className="switcher__list">
           {state.list.map((c, i) => (

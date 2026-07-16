@@ -30,11 +30,11 @@ import {
   IconEyeOff,
   IconFilePlus,
   IconFolderPlus,
-  IconLogout,
-  IconPanelCollapse,
+  IconPanelHide,
   IconPlug,
   IconPlus,
   IconRefresh,
+  IconUnplug,
 } from "../icons";
 
 export function Sidebar() {
@@ -167,11 +167,11 @@ export function Sidebar() {
             </button>
           ))}
           <button
-            className="icon-btn"
+            className="icon-btn panel-head__hide"
             title="Minimize the explorer (Ctrl+B, or the status bar, to bring it back)"
             onClick={() => useAppStore.getState().setSidebarVisible(false)}
           >
-            <IconPanelCollapse size={14} />
+            <IconPanelHide size={14} />
           </button>
         </div>
       </div>
@@ -370,7 +370,7 @@ export function Sidebar() {
                 title={`Disconnect ${conn.name}`}
                 onClick={() => void disconnect(conn.connId)}
               >
-                <IconLogout />
+                <IconUnplug />
               </button>
             </div>
             <div

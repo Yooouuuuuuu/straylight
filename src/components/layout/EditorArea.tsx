@@ -3,7 +3,7 @@
  *  editor, a Markdown preview, a repo history, a terminal, or a binary card.
  *  Tab models are global (lib/editorModels), so moving a tab between groups
  *  keeps its content, undo history, and dirty state. */
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 
 import appIcon from "../../assets/icon.png";
@@ -24,9 +24,7 @@ import {
   overwriteConflict,
 } from "../../lib/saveFile";
 import { pruneModels } from "../../lib/editorModels";
-import { focusTerminal } from "../../lib/terminalFocus";
 import { useVcsStore } from "../../store/vcsStore";
-import { mountTerminalIn, parkTerminal } from "../../lib/terminalSlots";
 import { useAppStore } from "../../store/appStore";
 import { SettingsView } from "../settings/SettingsView";
 import { ThemesView } from "../settings/ThemesView";
@@ -89,18 +87,6 @@ function EmptyState() {
       </div>
     </div>
   );
-}
-
-/** Hosts a terminal session inside an editor pane by reparenting its live
- *  xterm DOM (see lib/terminalSlots) — the shell never restarts. */
-function TerminalTabHost({ terminalId }: { terminalId: string }) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (ref.current) mountTerminalIn(terminalId, ref.current);
-    focusTerminal(terminalId);
-    return () => parkTerminal(terminalId);
-  }, [terminalId]);
-  return <div className="terminal-editor-host" ref={ref} />;
 }
 
 /** VS Code-style breadcrumb: the file's path relative to its pinned folder
@@ -340,8 +326,6 @@ function GroupPane({ gid, splitDrop }: { gid: number; splitDrop: boolean }) {
                 />
               </div>
             </div>
-          ) : active?.kind === "terminal" && active.terminalId ? (
-            <TerminalTabHost terminalId={active.terminalId} />
           ) : active?.kind === "settings" ? (
             <SettingsView />
           ) : active?.kind === "themes" ? (

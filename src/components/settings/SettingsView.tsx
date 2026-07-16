@@ -24,6 +24,7 @@ import {
 } from "../../lib/settings";
 import { remoteHostKey, useAppStore } from "../../store/appStore";
 import { useVcsStore } from "../../store/vcsStore";
+import { IconClose, IconUndo } from "../icons";
 
 function fmtBytes(b: number): string {
   if (b < 1024) return `${b} B`;
@@ -154,7 +155,7 @@ export function SettingsView() {
                 title={`Unpin ${p}`}
                 onClick={() => unpinEverywhere(host, p)}
               >
-                ✕
+                <IconClose size={12} />
               </button>
             </div>
           ))}
@@ -318,8 +319,8 @@ export function SettingsView() {
 
       <h3 className="app-tab__section">Keybindings</h3>
       <div className="app-tab__hint">
-        Click a key, then press the new combination (Esc cancels). ↩ resets to
-        the default.
+        Click a key, then press the new combination (Esc cancels). The undo
+        button resets an override to its default.
       </div>
       {allCommands().map((c) => (
         <div key={c.id} className="settings-row">
@@ -342,7 +343,7 @@ export function SettingsView() {
               title="Reset to default"
               onClick={() => setKeybinding(c.id, null)}
             >
-              ↩
+              <IconUndo size={13} />
             </button>
           )}
         </div>

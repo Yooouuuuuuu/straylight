@@ -61,7 +61,7 @@ function saveCollapsed(key: string, collapsed: boolean): void {
   }
 }
 import { FileNode } from "./FileNode";
-import { IconChevron, IconClose } from "../icons";
+import { IconBranch, IconChevron, IconClose } from "../icons";
 
 interface DirState {
   entries: FileEntry[] | null;
@@ -405,7 +405,7 @@ export function RootTree({
             openRepoFromExplorer(connId, rootPath);
           }}
         >
-          ⑂
+          <IconBranch size={13} />
         </button>
         {removable && (
           <button
