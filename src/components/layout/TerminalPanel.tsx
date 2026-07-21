@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import { remoteColor, SECTION_LOCAL, SECTION_WSL } from "../../lib/hostColors";
 import { listTerminalProfiles, type TerminalProfile } from "../../lib/ipc";
 import { panelsConfig, uiConfig } from "../../lib/settings";
+import { keyLabelFor } from "../../lib/shortcuts";
 import { remoteHostKey, termDisplayName, useAppStore } from "../../store/appStore";
 import { ForwardingView } from "../PortForwards";
 import { ContainersView } from "../terminal/ContainersView";
@@ -17,6 +18,7 @@ import { PortsView } from "../terminal/PortsView";
 import { Terminal } from "../terminal/Terminal";
 import { TransfersView } from "../transfer/TransfersView";
 import {
+  IconBell,
   IconChevron,
   IconClose,
   IconCube,
@@ -55,7 +57,10 @@ export function TerminalPanel() {
 
   const [profiles, setProfiles] = useState<TerminalProfile[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [selGroup, setSelGroup] = useState<string | null>(null);
+  // In the store (not component state) so Ctrl+Shift+` can target the
+  // selected group even when no terminal is focused (empty group).
+  const selGroup = useAppStore((s) => s.termGroup);
+  const setSelGroup = useAppStore((s) => s.setTermGroup);
   /** Inline rename on an entry (double-click its label). */
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(
     null,
@@ -134,7 +139,9 @@ export function TerminalPanel() {
     setSelGroup(connId);
     setTerminalView("terminals");
     const first = terminals.find((t) => !t.inChat && t.connId === connId);
-    if (first) setActiveTerminal(first.id);
+    // No terminal here → clear the active slot, so another group's terminal
+    // can't keep showing (and Ctrl+` falls through to plain hide).
+    setActiveTerminal(first?.id ?? null);
   };
 
   const newTerminal = (command?: string[] | null, label?: string) => {
@@ -215,18 +222,19 @@ export function TerminalPanel() {
                   ? "W"
                   : "R"}
             </span>
+            {terminals.some((t) => t.connId === g.connId && belled[t.id]) && (
+              <IconBell size={10} className="termgroup__bellicon" />
+            )}
             {g.label}
             {(() => {
               // "x+y" — x shells here, y living in the CHAT column.
               const mine = terminals.filter((t) => t.connId === g.connId);
               const n = mine.filter((t) => !t.inChat).length;
               const y = mine.length - n;
-              const rang = mine.some((t) => belled[t.id]);
               if (n === 0 && y === 0) return null;
               return (
                 <span className="termgroup__count">
                   {y > 0 ? `${n}+${y}` : n}
-                  {rang && <span className="termgroup__bell" />}
                 </span>
               );
             })()}
@@ -267,7 +275,23 @@ export function TerminalPanel() {
           )}
           {terminalView === "terminals" && groupTerminals.length === 0 && (
             <div className="terminal-message">
-              No terminals in this group — click + to start one.
+              {(() => {
+                const r = remotes.find((x) => x.conn.connId === activeGroup);
+                const w = wsls.find((x) => x.conn.connId === activeGroup);
+                const ident = r
+                  ? `${r.conn.user}@${r.conn.host}`
+                  : (w?.conn.name ?? "local");
+                const inChat = terminals.filter(
+                  (t) => t.inChat && t.connId === activeGroup,
+                ).length;
+                return inChat > 0
+                  ? `No terminals here — ${ident} has ${inChat} in CHAT.`
+                  : `No terminals on ${ident} yet.`;
+              })()}
+              <button className="btn btn--ghost" onClick={() => newTerminal()}>
+                New terminal
+              </button>
+              <kbd>{keyLabelFor("terminal.new") ?? "Ctrl+Shift+`"}</kbd>
             </div>
           )}
           {terminals.map((t) => (
@@ -275,9 +299,14 @@ export function TerminalPanel() {
               key={t.id}
               className="terminal-instance"
               style={{
+                // The group filter matters: picking a group with no panel
+                // terminals leaves activeTerminalId on the previous group —
+                // without it the stale terminal would keep showing over the
+                // empty-state message.
                 display:
                   terminalView === "terminals" &&
                   t.id === activeTerminalId &&
+                  t.connId === activeGroup &&
                   !t.inChat
                     ? "block"
                     : "none",

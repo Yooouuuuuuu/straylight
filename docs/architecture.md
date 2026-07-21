@@ -219,5 +219,5 @@ terminal chips, and the title-bar tint all follow it.
 
 Windows 10/11 first (WebView2; ConPTY; WSL integration). The Unix code paths
 (PTY via `$SHELL`, local transport, `#[cfg]`-gated WSL module) exist but Linux
-is untested/unpackaged — see [release-plan.md](release-plan.md). macOS/iOS:
-parked (release-plan "Platform notes").
+is untested/unpackaged — a Linux version is parked in
+[future-work.md](future-work.md), ahead of macOS/iOS.

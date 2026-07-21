@@ -61,6 +61,11 @@ function saveCollapsed(key: string, collapsed: boolean): void {
   }
 }
 import { FileNode } from "./FileNode";
+import {
+  EXPLORER_EXPANSION,
+  loadExpanded,
+  saveExpanded,
+} from "../../lib/treeExpansion";
 import { IconBranch, IconChevron, IconClose } from "../icons";
 
 interface DirState {
@@ -121,7 +126,12 @@ export function RootTree({
     [connId, rootPath],
   );
   const [dirs, setDirs] = useState<Record<string, DirState>>({});
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Expansion persists per host+root and is reloaded (dirs re-listed) on
+  // mount — remembered folders come back open across restarts/reconnects.
+  const [expanded, setExpanded] = useState<Set<string>>(
+    () => new Set(loadExpanded(EXPLORER_EXPANSION, stableRootKey(connId, rootPath))),
+  );
+  const restoredExpansion = useRef(false);
 
   const openRepoFromExplorer = useVcsStore((s) => s.openRepoFromExplorer);
   const askConfirm = useVcsStore((s) => s.askConfirm);
@@ -167,9 +177,26 @@ export function RootTree({
 
   useEffect(() => {
     setDirs({});
-    setExpanded(new Set());
+    setExpanded(
+      new Set(loadExpanded(EXPLORER_EXPANSION, stableRootKey(connId, rootPath))),
+    );
+    restoredExpansion.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootPath, connId]);
+
+  // Persist expansion as it changes (cheap: a small array per root).
+  useEffect(() => {
+    saveExpanded(EXPLORER_EXPANSION, stableRootKey(connId, rootPath), expanded);
+  }, [expanded, connId, rootPath]);
+
+  // Load the remembered-open dirs once the root is visible (all levels — the
+  // set holds absolute paths, so nested dirs list in the same sweep).
+  useEffect(() => {
+    if (collapsed || restoredExpansion.current) return;
+    restoredExpansion.current = true;
+    expanded.forEach((p) => void loadDir(p));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapsed]);
 
   // Lazily load the root's children the first time it's expanded. A collapsed
   // root does no I/O until you open it — which matters for slow roots (network

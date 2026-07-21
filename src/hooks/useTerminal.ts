@@ -16,6 +16,7 @@ import {
   ptyOpen,
   ptyResize,
   ptyWrite,
+  windowsBuildNumber,
 } from "../lib/ipc";
 import { isPassthroughShortcut } from "../lib/shortcuts";
 import {
@@ -26,6 +27,7 @@ import {
   registerTerminalSlot,
   unregisterTerminalSlot,
 } from "../lib/terminalSlots";
+import { refreshTreesOnIdle } from "../lib/treeWatch";
 import {
   currentTermFont,
   currentTermTheme,
@@ -33,6 +35,21 @@ import {
   unregisterTerminal,
 } from "../lib/themes";
 import { useAppStore } from "../store/appStore";
+
+// The real Windows build, for xterm's ConPTY heuristics — modern Win11 ConPTY
+// reflows natively on resize; older builds need xterm's compensation. Fetched
+// once; until (or unless) it lands, the safe Win10 build is assumed.
+let winBuild = 19045;
+void windowsBuildNumber()
+  .then((b) => {
+    if (b > 0) winBuild = b;
+    // Verifiable in DevTools (Ctrl+Shift+I) — cross-check against
+    // `[Environment]::OSVersion.Version.Build` in pwsh.
+    console.info(
+      `[straylight] windows build ${b || "unknown"} → conpty buildNumber ${winBuild}`,
+    );
+  })
+  .catch(() => {});
 
 export function useTerminal(
   connId: string | null,
@@ -64,15 +81,14 @@ export function useTerminal(
 
     // ConPTY (Windows local & WSL terminals) needs xterm's windows-pty
     // heuristics, or resize reflow drops/duplicates scrollback lines. SSH
-    // terminals are real remote PTYs and must NOT use it. buildNumber is
-    // hardcoded below 21376 to force the always-safe heuristic on both Win10
-    // and Win11. FUTURE WORK: detect the real Windows build for native reflow
-    // on Win11 (and verify behavior on Linux), once the feature set settles.
+    // terminals are real remote PTYs and must NOT use it. The REAL build
+    // number is passed (fetched above): modern Win11 ConPTY gets native
+    // reflow, older builds get the safe compensation.
     const appState = useAppStore.getState();
     const isWindowsConpty =
       navigator.userAgent.includes("Windows") && connId === appState.localConnId;
     const windowsPty = isWindowsConpty
-      ? ({ backend: "conpty", buildNumber: 19045 } as const)
+      ? ({ backend: "conpty", buildNumber: winBuild } as const)
       : undefined;
     // Each shell kind has its own settings section (terminalLocal /
     // terminalWsl / terminalRemote).
@@ -158,6 +174,10 @@ export function useTerminal(
       clearTimeout(busyTimer);
       busyTimer = setTimeout(() => {
         useAppStore.getState().setBusy(id, false);
+        // Output just stopped — the command that ran likely changed files.
+        // WSL/remote trees have no watcher, so freshen them here (throttled;
+        // local is covered by the real watcher).
+        refreshTreesOnIdle(connId);
       }, 1200);
     };
 
@@ -188,7 +208,10 @@ export function useTerminal(
         ptyId = openedId;
         // A fresh PTY (first open or an epoch restart) is alive again.
         if (id) useAppStore.getState().setPtyDead(id, false);
-        term.focus();
+        // Take focus for an interactively opened shell — but never yank it
+        // out of an open dialog (session restore opens WSL/remote terminals
+        // while the user may be typing a password).
+        if (!document.querySelector(".modal-overlay")) term.focus();
         // Type the requested command into the fresh shell (e.g. a container
         // exec from the Containers tab) — visible and cancelable like any input.
         if (initialInput) {
@@ -226,6 +249,9 @@ export function useTerminal(
       clearTimeout(busyTimer);
       st.setBusy(id, false);
       st.markBell(id);
+      // A bell is also a completion signal (Claude finishing a task that
+      // edited files) — same tree freshen as the idle transition.
+      refreshTreesOnIdle(connId);
     });
 
     // Right-click: copy the selection if there is one, otherwise paste.

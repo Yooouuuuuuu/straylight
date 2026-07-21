@@ -176,7 +176,8 @@ export function EditorTabs({ groupId }: { groupId: number }) {
             ) : tab.kind === "settings" ||
               tab.kind === "themes" ||
               tab.kind === "pins" ||
-              tab.kind === "drafts" ? (
+              tab.kind === "drafts" ||
+              tab.kind === "autoconnect" ? (
               <span className="editor-tab__diff">⚙</span>
             ) : (
               <FileIcon name={tab.name} isDir={false} isOpen={false} />

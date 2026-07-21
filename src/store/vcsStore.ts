@@ -301,6 +301,18 @@ const mapRepo = (
   fn: (r: TrackedRepo) => TrackedRepo,
 ) => repos.map((r) => (r.connKey === connKey && r.root === root ? fn(r) : r));
 
+/** A remote op against a repo that simply has no remote configured — kept to
+ *  the phrases that mean exactly that (a missing UPSTREAM or a bad remote URL
+ *  are different problems and keep their raw errors). */
+function isNoRemoteError(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return (
+    m.includes("no remote repository specified") || // git fetch/pull
+    m.includes("no configured push destination") || // git push
+    m.includes("no git remotes") // jj git fetch/push
+  );
+}
+
 // Per-repo monotonic token: a refresh whose token is superseded (newer refresh,
 // or a cancel) discards its result. This is the frontend-side "cancel".
 const tokens = new Map<string, number>();
@@ -549,6 +561,15 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       const msg = String(e);
       if (msg.includes("cancelled")) {
         useAppStore.getState().pushNotice("info", `${op} cancelled.`);
+      } else if (isNoRemoteError(msg)) {
+        // A repo with no remote is a normal state, not a fatal — say what to
+        // do instead of relaying git/jj's error-speak.
+        useAppStore
+          .getState()
+          .pushNotice(
+            "info",
+            `This repository has no remote — add one first (git remote add origin <url>) to ${op}.`,
+          );
       } else {
         useAppStore.getState().pushNotice("error", `${op} failed: ${msg}`);
       }

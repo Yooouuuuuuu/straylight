@@ -139,6 +139,11 @@ export function allCommands(): Command[] {
       title: "Storage: Pinned files",
       run: () => app().openAppTab("pins"),
     },
+    {
+      id: "storage.autoconnect",
+      title: "Storage: Auto-connect hosts",
+      run: () => app().openAppTab("autoconnect"),
+    },
     { id: "search.inFiles", title: "Search: In Files…", run: () => app().setSearchOpen(true) },
     {
       id: "terminal.new",

@@ -41,8 +41,12 @@ function ToastItem({
       onMouseLeave={() => setHovered(false)}
     >
       <span className="toast__text">{notice.text}</span>
+      {/* tabIndex -1: a toast must never take keyboard focus — it's transient
+          chrome, and stealing focus mid-typing (e.g. a password) is the worst
+          possible moment. Mouse-only controls. */}
       <button
         className="toast__close"
+        tabIndex={-1}
         onClick={copy}
         title={copied ? "Copied" : "Copy message"}
       >
@@ -50,6 +54,7 @@ function ToastItem({
       </button>
       <button
         className="toast__close"
+        tabIndex={-1}
         onClick={() => onClose(notice.id)}
         title="Dismiss"
       >

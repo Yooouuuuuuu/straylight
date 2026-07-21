@@ -11,7 +11,7 @@ use russh::Channel;
 use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::{Mutex, MutexGuard, RwLock};
+use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 use uuid::Uuid;
 
 use crate::AppState;
@@ -87,9 +87,11 @@ pub struct Connection {
     /// supervisor can swap it in place — the connection id, and every tab,
     /// terminal, and tree root that references it, survives a reconnect.
     live: RwLock<Live>,
-    /// Lazily-opened SFTP session, reused across file operations. Guarded by an
-    /// async mutex because SFTP requests are serialized over a single channel.
-    pub sftp: Mutex<Option<SftpSession>>,
+    /// Lazily-opened SFTP session, reused across file operations, behind a
+    /// swappable holder: a reconnect installs a FRESH holder (`reset_sftp`) so a
+    /// hung op stranded on the dead handle can't block new file ops. The inner
+    /// mutex still serializes requests over the one channel.
+    pub sftp: RwLock<Arc<Mutex<Option<SftpSession>>>>,
     /// Current coarse state.
     pub state: Mutex<ConnectionState>,
     /// Retained so the supervisor can re-authenticate silently after a drop:
@@ -104,12 +106,14 @@ pub struct Connection {
 }
 
 impl Connection {
-    /// Borrow the SFTP session, opening it on first use.
-    ///
-    /// The returned guard serializes SFTP operations for this connection, which
-    /// is acceptable for an interactive file browser.
-    pub async fn sftp(&self) -> Result<MutexGuard<'_, Option<SftpSession>>, String> {
-        let mut guard = self.sftp.lock().await;
+    /// Lock the SFTP session, opening it on first use. Returns an OWNED guard
+    /// (it carries the holder Arc) that serializes SFTP operations for this
+    /// connection — acceptable for an interactive file browser.
+    pub async fn sftp(&self) -> Result<OwnedMutexGuard<Option<SftpSession>>, String> {
+        // Clone the current holder (the read-lock is released at once) so a
+        // reconnect can swap a fresh holder in without waiting on our op.
+        let holder = self.sftp.read().await.clone();
+        let mut guard = holder.lock_owned().await;
         if guard.is_none() {
             let channel = self.open_channel().await?;
             channel
@@ -152,10 +156,13 @@ impl Connection {
             .map_err(|e| format!("could not open tunnel to {host}:{port}: {e}"))
     }
 
-    /// Drop the cached SFTP session so the next operation re-opens it. Used when
-    /// an SFTP call fails (e.g. the channel died) and after a reconnect.
+    /// Swap in a fresh, empty SFTP holder so the next `sftp()` opens a new
+    /// session on the live handle. Non-blocking by design: a hung op is stuck on
+    /// the OLD holder's mutex, but we only take the (uncontended) outer swap
+    /// lock, so a reconnect never waits on it — the old session dies with its
+    /// handle and drops once that op finally errors out.
     pub async fn reset_sftp(&self) {
-        *self.sftp.lock().await = None;
+        *self.sftp.write().await = Arc::new(Mutex::new(None));
     }
 
     fn mark_stopped(&self) {
@@ -584,7 +591,7 @@ pub async fn ssh_connect(
         id: conn_id.clone(),
         info: ConnectionInfo { host, port, user },
         live: RwLock::new(Live { handle: Arc::new(handle), _jump: jump }),
-        sftp: Mutex::new(None),
+        sftp: RwLock::new(Arc::new(Mutex::new(None))),
         state: Mutex::new(ConnectionState::Connected),
         auth,
         proxy_jump,

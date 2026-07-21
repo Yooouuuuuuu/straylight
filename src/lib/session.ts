@@ -4,21 +4,17 @@
  * restarts, and restore them on launch.
  *
  * Storage is `localStorage` (consistent with pinned folders). On startup each
- * key-based remote is auto-reconnected and its tabs reopened; password remotes
+ * saved host is offered back via a startup ask — hosts marked in settings
+ * `autoConnect` (per-host keys) reconnect silently instead. Password remotes
  * get the connect dialog pre-filled (first one) — their tabs reopen once the
  * user connects. Files are reloaded from disk by path — unsaved buffers are
  * not cached.
  */
-import {
-  draftAskCount,
-  filesWithDraft,
-  resolveHostDrafts,
-  whenDraftsReady,
-} from "./drafts";
+import { filesWithDraft, whenDraftsReady } from "./drafts";
 import { openFileByPath } from "./openFile";
 import { pinnedTabsFor } from "./pinnedTabs";
 import { reconcilePendingSaves } from "./stagedSave";
-import { autoConnectConfig, uiConfig } from "./settings";
+import { autoConnectHosts, uiConfig } from "./settings";
 import { connectWslDistro, setOnWslConnected } from "./wslSession";
 import {
   remoteHostKey,
@@ -118,46 +114,12 @@ const pendingWslRestore = new Map<string, PersistedTab[]>();
 // snapshot can't be written mid-restore (e.g. before a slow reconnect lands).
 let restoring = false;
 
-// The remotes we intend to persist/restore, kept separate from the live
-// connections so a transient drop or a failed launch-time reconnect doesn't
-// forget a server. An entry is cleared only on an explicit disconnect.
-const desiredRemotes = new Map<string, PersistedRemote>(
-  (savedAtStartup?.remotes ?? []).map((r) => [persistedKey(r), r]),
-);
-
-// The WSL distros to restore, kept like desiredRemotes (survive transient
-// disconnects; an entry is cleared only by an explicit disconnect).
-const desiredWsls = new Set<string>(
-  savedAtStartup?.wsls ?? (savedAtStartup?.wsl ? [savedAtStartup.wsl] : []),
-);
-
-/** Forget one saved WSL distro (on its explicit disconnect). */
-export function clearDesiredWsl(distro: string): void {
-  desiredWsls.delete(distro);
-  pendingWslRestore.delete(distro);
-}
-
-/** Remember a connected remote as one to restore next launch. */
-export function setDesiredRemote(remote: RemoteConnection): void {
-  desiredRemotes.set(remoteHostKey(remote), {
-    name: remote.name,
-    host: remote.host,
-    user: remote.user,
-    port: remote.port,
-    color: remote.color,
-    authType: remote.authType,
-    identityFile: remote.identityFile,
-    proxyJump: remote.proxyJump,
-  });
-}
-
-/** Forget one saved remote (on its explicit disconnect). */
-export function clearDesiredRemote(hostKey: string): void {
-  desiredRemotes.delete(hostKey);
-  pendingRemoteRestore.delete(hostKey);
-}
-
 // --- Writing ---------------------------------------------------------------
+// Persistence is deliberately simple (2026-07-20): the snapshot records the
+// hosts CONNECTED at write time — "what was up when the app closed". A host
+// whose startup ask was skipped, or whose password dialog was cancelled, was
+// never connected, so it just isn't in the next snapshot: cancel once, not
+// asked again. No union bookkeeping, nothing to clear on disconnect.
 
 function writeSnapshot(): void {
   const s = useAppStore.getState();
@@ -186,43 +148,6 @@ function writeSnapshot(): void {
     .filter((t) => t.connId === s.localConnId)
     .map((t) => persistTab(t, "local"));
 
-  // Remote tabs: per connected host, the open ones; for hosts still waiting to
-  // (re)connect, the pending set — so an unconnected or failed-to-reconnect
-  // remote keeps its tab list for the next launch.
-  const remoteTabs: PersistedTab[] = [];
-  const connectedKeys = new Set<string>();
-  for (const r of s.remotes) {
-    const key = remoteHostKey(r.conn);
-    connectedKeys.add(key);
-    remoteTabs.push(
-      ...fileTabs
-        .filter((t) => t.connId === r.conn.connId)
-        .map((t) => persistTab(t, "remote", key)),
-    );
-  }
-  for (const [key, tabs] of pendingRemoteRestore) {
-    if (!connectedKeys.has(key)) {
-      remoteTabs.push(...tabs.map((t) => ({ ...t, scope: "remote" as const, host: key })));
-    }
-  }
-
-  // WSL tabs, mirroring the remote handling (host = the distro name).
-  const wslTabs: PersistedTab[] = [];
-  const connectedWsls = new Set<string>();
-  for (const w of s.wsls) {
-    connectedWsls.add(w.conn.name);
-    wslTabs.push(
-      ...fileTabs
-        .filter((t) => t.connId === w.conn.connId)
-        .map((t) => persistTab(t, "wsl", w.conn.name)),
-    );
-  }
-  for (const [name, tabs] of pendingWslRestore) {
-    if (!connectedWsls.has(name)) {
-      wslTabs.push(...tabs.map((t) => ({ ...t, scope: "wsl" as const, host: name })));
-    }
-  }
-
   const activeTab = fileTabs.find((t) => t.id === s.activeTabId);
   let active: PersistedTab | null = null;
   if (activeTab) {
@@ -243,15 +168,22 @@ function writeSnapshot(): void {
     }
   }
 
-  for (const w of s.wsls) desiredWsls.add(w.conn.name);
-
   const session: PersistedSession = {
     version: VERSION,
     sidebarVisible: s.sidebarVisible,
     terminalVisible: s.terminalVisible,
-    remotes: [...desiredRemotes.values()],
-    wsls: [...desiredWsls],
-    tabs: [...localTabs, ...wslTabs, ...remoteTabs],
+    remotes: s.remotes.map((r) => ({
+      name: r.conn.name,
+      host: r.conn.host,
+      user: r.conn.user,
+      port: r.conn.port,
+      color: r.conn.color,
+      authType: r.conn.authType,
+      identityFile: r.conn.identityFile,
+      proxyJump: r.conn.proxyJump,
+    })),
+    wsls: s.wsls.map((w) => w.conn.name),
+    tabs: [...localTabs],
     active,
   };
 
@@ -305,8 +237,8 @@ async function openPinnedFiles(connId: string, connKey: string): Promise<void> {
 
 /** Open a host's files that have an unresolved draft (Issue 1) — on every
  *  connect, so unsaved work always comes back with its host instead of only
- *  surfacing if you happen to reopen the file. Opening runs maybeAttachDraft
- *  (banner or auto-restore per the host's decision). Idempotent. */
+ *  surfacing if you happen to reopen the file. Opening runs maybeAttachDraft,
+ *  which auto-restores the draft into the tab (dirty). Idempotent. */
 async function openDraftedFiles(connId: string, connKey: string): Promise<void> {
   for (const p of filesWithDraft(connKey)) {
     await openFileByPath(connId, p, undefined, { focusEditor: false });
@@ -438,111 +370,55 @@ export async function restoreSession(
     await openDraftedFiles(localConnId, "local");
     applyPersistedGroups();
 
-    // Local is "connected" from the start — its drafts ask goes first.
-    const localDrafts = draftAskCount("local");
-    if (localDrafts > 0) {
-      store.pushConnectAsk({
-        kind: "drafts",
-        label: `Local — ${localDrafts} file${localDrafts === 1 ? "" : "s"}`,
-        run: () => resolveHostDrafts("local", true),
-        onSkip: () => resolveHostDrafts("local", false),
-      });
-    }
-
-    // WSL first (matching the sidebar order), then the remotes. Policy per
-    // kind from settings: "always" connects silently, "ask" queues a startup
-    // dialog (its checkbox flips the setting to "always"), "never" skips.
-    // Under ui.localOnly nothing non-local restores — the sections it would
-    // land in aren't rendered.
-    const auto = autoConnectConfig;
+    // WSL first (matching the sidebar order), then the remotes. Every host
+    // asks by default; hosts marked in settings `autoConnect` (per-host keys,
+    // written by the ask dialog's "don't ask again" checkbox) connect
+    // silently. Under ui.localOnly nothing non-local restores — the sections
+    // it would land in aren't rendered.
     const savedWsls = uiConfig.localOnly ? [] : (s.wsls ?? (s.wsl ? [s.wsl] : []));
     for (const distro of savedWsls) {
-      // Queue the distro's tabs regardless of policy, so a later manual
-      // connect still restores them (mirrors the remote pending sets).
-      const wslTabs = s.tabs.filter((t) => t.scope === "wsl" && t.host === distro);
-      if (wslTabs.length) pendingWslRestore.set(distro, wslTabs);
-      if (auto.wsl === "never") continue;
-      const wslKey = `wsl:${distro}`;
-      const wslDrafts = draftAskCount(wslKey);
       const doConnect = () =>
         connectWslDistro(distro).catch((e) =>
           useAppStore
             .getState()
             .pushNotice("error", `WSL reconnect failed: ${String(e)}`),
         );
-      if (auto.wsl === "always") {
+      if (autoConnectHosts.includes(`wsl:${distro}`)) {
         await doConnect();
-        // Silent connect → the drafts question stands alone, after the host
-        // is up (its tabs opened with banners; approval sweeps them).
-        if (wslDrafts > 0) {
-          store.pushConnectAsk({
-            kind: "drafts",
-            label: `${distro} — ${wslDrafts} file${wslDrafts === 1 ? "" : "s"}`,
-            run: () => resolveHostDrafts(wslKey, true),
-            onSkip: () => resolveHostDrafts(wslKey, false),
-          });
-        }
       } else {
         store.pushConnectAsk({
           kind: "wsl",
           label: distro,
-          // The connect ask carries the drafts question as a checkbox
-          // (default checked); the decision lands before the connect runs.
-          draftsCount: wslDrafts,
-          run: (restoreDrafts) => {
-            if (wslDrafts > 0) resolveHostDrafts(wslKey, restoreDrafts !== false);
-            void doConnect();
-          },
-          // Declining forgets the distro — no ghost ask on the next launch.
-          onSkip: () => clearDesiredWsl(distro),
+          hostKey: `wsl:${distro}`,
+          run: () => void doConnect(),
+          // Declining needs no bookkeeping: an unconnected distro simply
+          // isn't in the next snapshot.
         });
       }
     }
 
     let dialogShown = false;
     for (const r of uiConfig.localOnly ? [] : s.remotes) {
-      const key = persistedKey(r);
-      const remoteTabs = s.tabs.filter(
-        (t) => t.scope === "remote" && t.host === key,
-      );
-      pendingRemoteRestore.set(key, remoteTabs);
-      if (auto.remote === "never") continue;
+      const hostKey = remoteHostKey(r);
+      const marked = autoConnectHosts.includes(hostKey);
 
-      const remoteDrafts = draftAskCount(key);
-      const pushRemoteDraftsAsk = () => {
-        if (remoteDrafts > 0) {
-          store.pushConnectAsk({
-            kind: "drafts",
-            label: `${r.name} — ${remoteDrafts} file${remoteDrafts === 1 ? "" : "s"}`,
-            run: () => resolveHostDrafts(key, true),
-            onSkip: () => resolveHostDrafts(key, false),
-          });
-        }
-      };
       if (r.authType === "auto") {
         const doConnect = () =>
           connect(profileFromRemote(r)).catch(() => {
-            /* failure surfaced as a toast by connect(); the pending set is
-               kept so a later reconnect to the same host still restores tabs */
+            /* failure surfaced as a toast by connect() */
           });
-        if (auto.remote === "always") {
+        if (marked) {
           await doConnect();
-          pushRemoteDraftsAsk();
         } else
           store.pushConnectAsk({
             kind: "remote",
             label: r.name,
-            draftsCount: remoteDrafts,
-            run: (restoreDrafts) => {
-              if (remoteDrafts > 0)
-                resolveHostDrafts(key, restoreDrafts !== false);
-              void doConnect();
-            },
-            onSkip: () => clearDesiredRemote(key),
+            hostKey,
+            run: () => void doConnect(),
           });
       } else {
-        // Password host: we never stored the password. The best we can do is
-        // pre-fill the dialog; under "ask" that too goes through the queue.
+        // Password host: we never stored the password. Pre-fill the dialog so
+        // the user connects — pinned + drafted files reopen once they do.
         const openPrefilled = () => {
           useAppStore.getState().openDialog({
             name: r.name,
@@ -552,16 +428,11 @@ export async function restoreSession(
             identityFile: null,
             proxyJump: r.proxyJump,
           });
-          if (remoteTabs.length) {
-            useAppStore
-              .getState()
-              .pushNotice(
-                "info",
-                `Reconnect to ${r.name} to restore ${remoteTabs.length} tab(s).`,
-              );
-          }
         };
-        if (auto.remote === "always") {
+        // A marked password host can't silently connect (no stored password)
+        // — "don't ask again" skips the ask and goes straight to the
+        // pre-filled dialog. Only one dialog can open; later ones get a note.
+        if (marked) {
           if (!dialogShown) {
             dialogShown = true;
             openPrefilled();
@@ -571,20 +442,12 @@ export async function restoreSession(
               `Reconnect to ${r.name} (password host) to restore it.`,
             );
           }
-          // The decision is recorded now; it applies once the password
-          // connect completes and the host's tabs reopen.
-          pushRemoteDraftsAsk();
         } else {
           store.pushConnectAsk({
             kind: "remote",
             label: r.name,
-            draftsCount: remoteDrafts,
-            run: (restoreDrafts) => {
-              if (remoteDrafts > 0)
-                resolveHostDrafts(key, restoreDrafts !== false);
-              openPrefilled();
-            },
-            onSkip: () => clearDesiredRemote(key),
+            hostKey,
+            run: () => openPrefilled(),
           });
         }
       }
@@ -593,8 +456,10 @@ export async function restoreSession(
     restoreActiveTab();
   } finally {
     restoring = false;
-    // Persist the restored state once (desiredRemotes keep servers whose
-    // launch reconnect failed; their tabs fall back to the pending sets).
-    writeSnapshot();
+    // NOTE deliberately no snapshot here: hosts with asks still pending
+    // aren't connected yet, and writing now would drop them before the user
+    // answers. The debounced subscriber writes on the next state change —
+    // by then answered hosts are connected (kept) and skipped ones aren't
+    // (forgotten), which is exactly the contract.
   }
 }

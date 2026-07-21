@@ -5,6 +5,7 @@ import { useEffect } from "react";
 
 import { refreshApp } from "../lib/appRefresh";
 import { allCommands } from "../lib/commands";
+import { openFindIn } from "../lib/editorModels";
 import { saveActiveFile } from "../lib/saveFile";
 import { matchShortcut } from "../lib/shortcuts";
 import { adjustTerminalFontSize } from "../lib/themes";
@@ -167,13 +168,22 @@ export function useKeyboard() {
           }
           break;
         case "newTerminal": {
-          // Only while a terminal is focused — the new one opens on THAT
-          // terminal's host. Elsewhere (editor, tools) the shortcut is inert:
-          // click into a host's terminal first.
-          const connId = inTerminal
+          // On the focused terminal's host; otherwise the panel's selected
+          // group (so it works from the empty-group screen and its hint),
+          // falling back to local. Reveals the panel either way.
+          const focusedConn = inTerminal
             ? (target?.closest(".terminal-host") as HTMLElement | null)
                 ?.dataset.connId
             : undefined;
+          const g = store.termGroup;
+          const groupConn =
+            g &&
+            (g === store.localConnId ||
+              store.wsls.some((w) => w.conn.connId === g) ||
+              store.remotes.some((r) => r.conn.connId === g))
+              ? g
+              : store.localConnId;
+          const connId = focusedConn ?? groupConn ?? undefined;
           if (connId) {
             const label =
               connId === store.localConnId
@@ -230,6 +240,21 @@ export function useKeyboard() {
             event.preventDefault();
           }
           break;
+        case "findInFile": {
+          if (inTerminal) break; // the shell keeps its own Ctrl+F
+          // Not while typing in an input / the commit box (Monaco's hidden
+          // textarea is fine — Monaco handles its own Ctrl+F before us).
+          const typing =
+            !!target?.closest("input, [contenteditable=true]") ||
+            (target instanceof HTMLTextAreaElement &&
+              !target.closest(".monaco-host"));
+          if (typing) break;
+          const tab = store.tabs.find((t) => t.id === store.activeTabId);
+          if (tab && (!tab.kind || tab.kind === "file") && !tab.isBinary) {
+            if (openFindIn(tab.id)) event.preventDefault();
+          }
+          break;
+        }
         case "refreshTree":
           // Ctrl+Shift+R is a global "refresh everything" — all sections.
           store.refreshLocal();

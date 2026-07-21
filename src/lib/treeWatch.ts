@@ -13,6 +13,28 @@ let started = false;
 let watched = new Set<string>();
 let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
+// Per-host throttle for the busy→idle refresh below.
+const lastIdleRefresh = new Map<string, number>();
+
+/** A WSL/remote terminal just went idle after producing output — the command
+ *  that ran probably touched files, and those hosts have no watcher (and the
+ *  window-refocus sweep never fires while you work in the app's own
+ *  terminal). Refresh that host's trees, throttled per host. Local is
+ *  excluded: the recursive watcher already covers it live. External changes
+ *  (not through an in-app terminal) on WSL/remote stay manual — F5. */
+export function refreshTreesOnIdle(connId: string): void {
+  const s = useAppStore.getState();
+  if (!connId || connId === s.localConnId) return;
+  const known =
+    s.wsls.some((w) => w.conn.connId === connId) ||
+    s.remotes.some((r) => r.conn.connId === connId);
+  if (!known) return;
+  const now = Date.now();
+  if (now - (lastIdleRefresh.get(connId) ?? 0) < 4_000) return;
+  lastIdleRefresh.set(connId, now);
+  s.refreshConn(connId);
+}
+
 function syncWatches(): void {
   const s = useAppStore.getState();
   const connId = s.localConnId;

@@ -113,6 +113,22 @@ impl Default for AppState {
     }
 }
 
+/// The real Windows build number (0 elsewhere / on failure). xterm's ConPTY
+/// heuristics are keyed by build — modern Win11 ConPTY reflows natively on
+/// resize, older builds need xterm's compensation. The frontend falls back to
+/// a safe Win10 build when this returns 0.
+#[tauri::command]
+fn windows_build_number() -> u32 {
+    #[cfg(windows)]
+    {
+        windows_version::OsVersion::current().build
+    }
+    #[cfg(not(windows))]
+    {
+        0
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::Builder::from_env(
@@ -190,6 +206,7 @@ pub fn run() {
             watch::dir_unwatch,
             watch::file_watch,
             watch::file_unwatch,
+            windows_build_number,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Straylight application");

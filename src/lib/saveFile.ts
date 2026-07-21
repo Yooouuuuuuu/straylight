@@ -81,7 +81,7 @@ export async function saveTab(tabId: string): Promise<SaveOutcome> {
     if (versionId !== null) markTabSavedVersion(tab.id, versionId);
     // Saved = the hot-exit draft is resolved; the stub records the new mtime.
     deleteDraftFor(tab.connId, tab.path);
-    store.setTabDraft(tab.id, { draftApplied: false, draftAvailable: false });
+    store.setTabDraft(tab.id, { draftApplied: false });
     updateStub(tab.connId, tab.path, result.modified, content.length);
     // An eager repo containing this file re-checks its status.
     useVcsStore.getState().onFileChanged(tab.connId, tab.path);
@@ -123,7 +123,7 @@ export async function overwriteConflict(tabId: string): Promise<void> {
     store.markTabSaved(tab.id, result.modified, content); // clears conflict too
     if (versionId !== null) markTabSavedVersion(tab.id, versionId);
     deleteDraftFor(tab.connId, tab.path);
-    store.setTabDraft(tab.id, { draftApplied: false, draftAvailable: false });
+    store.setTabDraft(tab.id, { draftApplied: false });
     updateStub(tab.connId, tab.path, result.modified, content.length);
     useVcsStore.getState().onFileChanged(tab.connId, tab.path);
   } catch (error) {
@@ -131,9 +131,10 @@ export async function overwriteConflict(tabId: string): Promise<void> {
   }
 }
 
-/** Conflict bar "Compare": read-only diff of the current buffer (your version)
- *  against the file as it is on disk right now. */
-export async function compareWithDisk(tabId: string): Promise<void> {
+/** "Compare": read-only diff of the current buffer (your unsaved version)
+ *  against the file as it is saved on its host right now. Used by the crumbs
+ *  Compare button and the conflict bar. */
+export async function compareWithSaved(tabId: string): Promise<void> {
   const store = useAppStore.getState();
   const tab = store.tabs.find((t) => t.id === tabId);
   if (!tab) return;
@@ -143,9 +144,9 @@ export async function compareWithDisk(tabId: string): Promise<void> {
     const file = await fsReadFile(tab.connId, tab.path);
     store.openDiffTab({
       connId: tab.connId,
-      name: `${tab.name} (yours ⇄ server)`,
+      name: `${tab.name} (yours ⇄ saved)`,
       path: tab.path,
-      relPath: `${tab.path}#conflict`,
+      relPath: `${tab.path}#compare`,
       base: file.content,
       baseExists: true,
       content,
@@ -169,7 +170,7 @@ export async function discardToServer(tabId: string): Promise<void> {
     setTabContentInPlace(tabId, file.content); // model = disk, marks saved-version
     store.setTabConflict(tabId, false);
     deleteDraftFor(tab.connId, tab.path);
-    store.setTabDraft(tabId, { draftApplied: false, draftAvailable: false });
+    store.setTabDraft(tabId, { draftApplied: false });
     updateStub(tab.connId, tab.path, file.modified, file.size);
   } catch (error) {
     store.pushNotice("error", `Couldn't reload ${tab.name}: ${String(error)}`);

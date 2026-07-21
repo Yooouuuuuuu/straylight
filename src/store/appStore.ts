@@ -61,10 +61,8 @@ export interface EditorTab {
   /** The file wasn't valid UTF-8 and was decoded with replacement characters —
    *  saving is blocked (it would write the damage back over the original). */
   lossy?: boolean;
-  /** A hot-exit draft exists for this file but wasn't loaded — the banner
-   *  offers Restore / Compare / Discard (docs/hot-exit.md). */
-  draftAvailable?: boolean;
-  /** The tab's content came from a restored draft (dirty by construction). */
+  /** The tab's content came from an auto-restored hot-exit draft (dirty by
+   *  construction; the crumbs Compare button diffs it against the saved file). */
   draftApplied?: boolean;
   /** The file's mtime when the draft was made — differs from `modified` when
    *  the file changed on the server while we were away (warning banner). */
@@ -88,7 +86,8 @@ export interface EditorTab {
     | "settings"
     | "themes"
     | "pins"
-    | "drafts";
+    | "drafts"
+    | "autoconnect";
   /** Which editor group (split) the tab lives in. Absent = group 0. */
   groupId?: number;
   /** VS Code-style preview tab (italic): the next preview open replaces it.
@@ -346,7 +345,9 @@ function saveConnPins(key: string, id: string, pins: string[]): void {
   }
 }
 
-export function remoteHostKey(r: RemoteConnection): string {
+export function remoteHostKey(
+  r: Pick<RemoteConnection, "user" | "host" | "port">,
+): string {
   return `${r.user}@${r.host}:${r.port}`;
 }
 
@@ -652,7 +653,7 @@ interface AppState {
     initialInput?: string | null,
   ) => void;
   closeTerminal: (id: string) => void;
-  setActiveTerminal: (id: string) => void;
+  setActiveTerminal: (id: string | null) => void;
   /** What the terminal panel body shows: the terminals, or a tool group. */
   terminalView: "terminals" | "containers" | "ports" | "forwarding" | "transfers";
   setTerminalView: (
@@ -661,6 +662,11 @@ interface AppState {
   /** Panel group-bar order (conn ids; unknown/new conns append). Draggable. */
   termGroupOrder: string[];
   setTermGroupOrder: (order: string[]) => void;
+  /** The selected group chip (conn id) — in the store so shortcuts can target
+   *  it (Ctrl+Shift+` in an empty group). The panel keeps it in step with the
+   *  active terminal. */
+  termGroup: string | null;
+  setTermGroup: (connId: string | null) => void;
   /** The right-side terminal list collapsed to icons only. */
   termListMini: boolean;
   setTermListMini: (mini: boolean) => void;
@@ -676,20 +682,21 @@ interface AppState {
   setForwardCount: (n: number) => void;
   /** Startup "connect to last …?" asks, shown one at a time. Skipping runs
    *  `onSkip` (drops the host from the saved session — no re-ask next time). */
-  /** Startup asks. `draftsCount` on a connect ask adds the default-checked
-   *  "also restore N drafts" checkbox, delivered as `run`'s argument. */
+  /** Startup asks: one "connect to last …?" per saved WSL distro / remote. */
   connectAsks: {
-    kind: "wsl" | "remote" | "drafts";
+    kind: "wsl" | "remote";
     label: string;
-    draftsCount?: number;
-    run: (restoreDrafts?: boolean) => void;
+    /** Host identity ("wsl:<name>" / "user@host:port") — what the dialog's
+     *  "don't ask again" checkbox writes into settings `autoConnect`. */
+    hostKey: string;
+    run: () => void;
     onSkip?: () => void;
   }[];
   pushConnectAsk: (a: {
-    kind: "wsl" | "remote" | "drafts";
+    kind: "wsl" | "remote";
     label: string;
-    draftsCount?: number;
-    run: (restoreDrafts?: boolean) => void;
+    hostKey: string;
+    run: () => void;
     onSkip?: () => void;
   }) => void;
   shiftConnectAsk: () => void;
@@ -744,7 +751,9 @@ interface AppState {
    *  the editor or the other column. */
   stepDock: (panel: "scm" | "chat", dir: 1 | -1) => void;
   /** Open (or focus) the Settings / Themes editor tabs. */
-  openAppTab: (kind: "settings" | "themes" | "pins" | "drafts") => void;
+  openAppTab: (
+    kind: "settings" | "themes" | "pins" | "drafts" | "autoconnect",
+  ) => void;
 
   openTab: (tab: NewTab, opts?: { preview?: boolean; pinned?: boolean }) => void;
   /** Promote a preview tab to permanent (double-click, edit, pin). */
@@ -801,7 +810,6 @@ interface AppState {
   setTabDraft: (
     id: string,
     d: {
-      draftAvailable?: boolean;
       draftApplied?: boolean;
       draftBaselineMtime?: number;
     },
@@ -1321,7 +1329,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
       // chat column from its residents — position-preserving like forceCloseTab.
       let activeTerminalId = s.activeTerminalId;
       if (!sess.inChat && s.activeTerminalId === id) {
-        const ring = s.terminals.filter((t) => !t.inChat);
+        // The successor stays on the SAME host — closing a group's last
+        // terminal keeps you in that group (its empty state shows), never
+        // jumping the bar to another host.
+        const ring = s.terminals.filter(
+          (t) => !t.inChat && t.connId === sess.connId,
+        );
         const rIdx = ring.findIndex((t) => t.id === id);
         const rest = ring.filter((t) => t.id !== id);
         activeTerminalId = rest[rIdx - 1]?.id ?? rest[rIdx]?.id ?? null;
@@ -1358,6 +1371,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   termGroupOrder: [],
   setTermGroupOrder: (termGroupOrder) => set({ termGroupOrder }),
+  termGroup: null,
+  setTermGroup: (termGroup) => set({ termGroup }),
   termListMini: false,
   setTermListMini: (termListMini) => set({ termListMini }),
   forwardPrefill: null,
@@ -1457,7 +1472,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
               ? "Theme"
               : kind === "pins"
                 ? "Pinned files"
-                : "Drafts",
+                : kind === "autoconnect"
+                  ? "Auto-connect"
+                  : "Drafts",
         content: "",
         language: "plaintext",
         isBinary: false,
@@ -1603,11 +1620,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const terminals = s.terminals.map((t) =>
         t.id === terminalId ? { ...t, inChat: true } : t,
       );
-      // The panel's active slot moves on to a remaining panel terminal.
+      // The panel's active slot moves on to a remaining terminal of the SAME
+      // host (or the group's empty state) — never another host's group.
       const panelLeft = terminals.filter((t) => !t.inChat);
       const activeTerminalId =
         s.activeTerminalId === terminalId
-          ? (panelLeft[0]?.id ?? null)
+          ? (panelLeft.find((t) => t.connId === sess.connId)?.id ?? null)
           : s.activeTerminalId;
       persistChatVisible(true);
       return {

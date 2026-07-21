@@ -133,17 +133,16 @@ Drafts make unsaved edits survive the app itself.
 - **Where.** The app data dir's `drafts/` folder (never inside your
   repositories — the no-repo-pollution promise holds), content plus a sidecar
   record carrying the file's baseline mtime and a content hash.
-- **Restore, per host.** On relaunch, `restore.openFiles` governs whether
-  drafts load back: **`always`** restores silently as each host connects;
-  **`ask`** asks each host separately — a checkbox on that host's connect popup
-  ("Also restore N unsaved drafts", default checked), or a standalone popup for
-  Local and auto-connected hosts. A restored draft opens the tab **dirty**, and
-  is applied as one undoable edit over the disk content, so **Ctrl+Z reaches
-  the original** and clears the dirty flag exactly there.
-- **Reopen on connect.** A file with an unresolved draft reopens on **every**
-  connect (launch, manual, mid-session reconnect) — like a pinned file — so
-  unsaved work always comes back with its host instead of only surfacing if you
-  happen to reopen the file.
+- **Restore.** Drafts always auto-restore — there is no per-host ask. As each
+  host connects, every file with an unresolved draft reopens with its draft
+  applied as one undoable edit over the disk content: the tab opens **dirty**
+  and **Ctrl+Z reaches the original**, clearing the dirty flag exactly there.
+  This runs on **every** connect (launch, manual, mid-session reconnect), so
+  unsaved work always comes back with its host.
+- **What else reopens** depends on the host. **Local** restores your whole
+  workspace — every tab that was open. **Remote/WSL** restore only pinned files
+  plus anything with a draft; incidental clean tabs don't return. One rule per
+  host kind, identical on relaunch and reconnect.
 - **Resolution.** A draft is deleted only when *resolved*: the file is saved
   (the confirming save checks the draft in after a short grace, so edits typed
   during the ack window keep their draft), explicitly discarded, or found
@@ -159,19 +158,20 @@ Drafts make unsaved edits survive the app itself.
 
 ## The conflict bar
 
-Every buffer-vs-disk divergence is a **non-modal bar on the tab**, never a
-modal you can dismiss by pressing save again. Two forms, one vocabulary:
+A **conflict** — the file changed under you (a background guard refusal, a
+restored draft whose file moved, or a local save-time conflict) — shows a
+**non-modal bar on the tab**, never a modal you can dismiss by pressing save
+again: **Compare · Overwrite · Discard**, with **Ctrl+S BLOCKED** until you
+resolve it. Overwrite (your version wins, guard skipped) and Discard (drop your
+changes, load the saved version) each **confirm**. Compare opens a read-only
+diff of your version against the saved file.
 
-- **Draft available** (an unresolved draft exists but isn't loaded; the buffer
-  is the disk content): **Compare · Restore · Discard**. Not a conflict —
-  Ctrl+S isn't blocked. Discard confirms (it destroys the only copy of unsaved
-  edits).
-- **Conflict** (the file changed under you — a background guard refusal, a
-  restored draft whose file moved, or a local save-time conflict):
-  **Compare · Overwrite · Discard**, and **Ctrl+S is BLOCKED** until you
-  resolve it. Overwrite (your version wins, guard skipped) and Discard (drop
-  your changes, load the server's) each **confirm**. Compare opens a read-only
-  diff of your version against the file on disk.
+There is no separate "draft available" banner: a restored draft is simply a
+**dirty tab**. Any dirty tab carries a **Compare** button at the right of its
+breadcrumb bar — a one-click read-only diff of your unsaved buffer against the
+file as currently saved — so you can always see what you changed before saving.
+Discard a restored draft the ordinary way: Ctrl+Z back to the saved state, or
+close without saving.
 
 Blocking Ctrl+S on a conflicted tab is the safety point: the only way out is a
 deliberate, confirmed choice — you can't accidentally clobber someone else's
@@ -199,10 +199,13 @@ whether pins reopen — a pin *is* the opt-in. **Settings → Pinned files** man
 the lists (per-file, per-host, clear-all) and is the only way to unpin a file
 on a host you're not currently connected to.
 
-Plain (unpinned + clean) tabs are session-scoped: they survive a relaunch and a
-connection *drop*, but an explicit disconnect closes them for good. The rule:
-**want it back? pin it.** Nothing of value is lost — dirty content is held by
-drafts, and pins persist, both independently of the plain-tab list.
+Plain (unpinned + clean) tabs follow the per-host restore rule. **Local** plain
+tabs survive a relaunch — the whole local workspace comes back. **Remote/WSL**
+plain tabs are session-scoped: they ride out a connection *drop* (the tab never
+closed), but a relaunch or an explicit disconnect brings back only pinned +
+drafted files. The rule: **want it back? pin it.** Nothing of value is lost —
+dirty content is held by drafts and pins persist, both independent of the
+plain-tab list.
 
 ---
 

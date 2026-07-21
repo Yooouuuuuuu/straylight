@@ -21,16 +21,113 @@ history of design changes — lives in the docs: the decision ledger in
   slots first.
 - **Revisit where password entry lives** — the current centered connect modal vs.
   an inline field (e.g. on the "Connect to a server" button).
-- **Auto-refresh** (optional): a filesystem watch for the local tree; SSH would
-  poll (opt-in).
 - **Version control, later:** per-hunk staging, blame.
-- **Auto-update** — deferred until installers are distributed (needs signing keys
-  + hosted releases; the app currently runs from source).
+- **Auto-update** — ships with 0.10 (updater keypair + GitHub Releases).
 - **Containers, later:** file browsing inside containers, logs, start/stop.
 - **Transfer polish (later):** drag directly between the sidebar trees, OS
   drag-in/out, and multi cut/copy/paste in the explorer.
 - **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
   daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
+
+## [0.9.10] - 2026-07-21
+
+The first fix round out of the final test walks: saves that can't silently
+lie under dropped links, trees that keep up with the app's own terminals,
+auto-connect rebuilt per host, and a terminal panel that no longer loses its
+place.
+
+### Added
+
+- **Ctrl+F finds in the current file** from anywhere — it focuses the editor
+  showing the active file and opens the find widget, even while the explorer
+  holds the keyboard after a single-click preview. Inside a terminal the shell
+  keeps its own Ctrl+F; rebindable as `editor.find`. Find matches got real
+  highlight colors — the current match brighter than the rest — as two new
+  editor theme colors (`findMatch`, `findMatchHighlight`), editable like any
+  other swatch and themed in every built-in preset.
+- **Folder expansion is remembered.** Explorer trees (every host) and both
+  transfer panes reopen with the folders you had expanded — persisted per
+  host identity, so it survives restarts and reconnects alike.
+- **WSL/remote trees refresh when your command finishes.** A terminal on that
+  host (panel or CHAT) going quiet after output — or ringing its bell —
+  freshens the host's trees automatically (throttled). Covers `mkdir`/`touch`/
+  agent edits done in the app's own terminals; changes made outside the app
+  still take F5 or a window refocus.
+- **Notifications are copyable** — bell entries are selectable and carry a
+  hover copy button.
+- **Terminals know your real Windows build** — modern Win11 gets ConPTY's
+  native resize reflow instead of the always-safe Win10 compensation.
+
+### Fixed
+
+- **Relaunch no longer steals the password cursor.** A terminal opened by the
+  session restore (e.g. the WSL shell) grabbed focus mid-typing; terminals now
+  never take focus while a dialog is open, queued startup asks wait for the
+  connect dialog to close, and toasts can never hold keyboard focus.
+- **Fetching a repo with no remote** says so in a calm info toast ("add one
+  first…") instead of relaying git's fatal error.
+- **Empty terminal groups behave now.** Picking a host with no panel
+  terminals no longer keeps showing the previous host's terminal — an empty
+  state ("No terminals on user@host yet" / "… has N in CHAT") offers a New
+  terminal button with its key. Closing (or moving to CHAT) a host's last
+  terminal stays on that host instead of jumping the bar to another one.
+  Ctrl+Shift+` now opens a terminal in the selected group when no terminal
+  is focused (it was inert), and Ctrl+` correctly hides the panel from an
+  empty group instead of going dead.
+- **A save can no longer look saved when it wasn't.** The local draft is
+  written before a staged save touches the network (covering a save fired
+  inside the edit debounce — previously such a save had no draft at all), and
+  every unconfirmed outcome — upload cut short, commit undispatched, guard
+  refusal — re-dirties the tab instead of keeping the optimistic clean.
+- **Reconnects recover file access immediately.** A transfer hung on the dead
+  link no longer blocks the reconnect (the SFTP session is swapped for a
+  fresh one instead of awaited), so trees and pinned folders load right after
+  the link returns instead of stalling ~45 s. A mid-session reconnect —
+  manual or automatic — now also runs the same pending-save reconcile as a
+  relaunch: a save stranded by the drop resolves within seconds — confirmed
+  if its server-side commit landed, otherwise swept and re-dirtied — and a
+  retry save dispatches immediately on the fresh link instead of queuing
+  behind the dead attempt until the old transport timed it out.
+- **Interrupted uploads no longer leave `.straysave` temps behind.** The save
+  record is written before the upload starts, so a drop or app kill
+  mid-upload leaves a tracked temp the next reconcile removes (previously
+  each became an untracked orphan that accumulated).
+- **A dead save no longer poisons the next one.** An attempt that died
+  unconfirmed left the guard chain expecting content the server never
+  received, so every following save of that file was refused as "changed on
+  the server". Every resolution path now resets the chain to the last
+  content actually confirmed.
+
+### Changed
+
+- **Hot-exit drafts now always auto-restore.** A file with unsaved changes
+  reopens **dirty** on its own — no more per-host "restore drafts?" ask or the
+  `restore.openFiles` setting. The draft-available banner is gone; a restored
+  draft is just a dirty tab you undo back to the saved state or close without
+  saving.
+- **Session restore splits by host.** **Local** restores your whole workspace
+  (every tab that was open); **remote/WSL** restore only pinned files plus
+  anything with an unsaved draft — incidental clean tabs no longer reopen
+  ("want it back? pin it"), so a relaunch matches a mid-session reconnect.
+- **Compare with saved.** Any dirty tab shows a **⇄ Compare** action at the
+  right of its breadcrumb bar — a one-click read-only diff of your unsaved
+  buffer against the file as currently saved. (The conflict bar keeps its own.)
+- **Declined hosts aren't re-asked.** The session snapshot records the hosts
+  connected when the app closed, so skipping a startup reconnect or cancelling
+  a password dialog drops that host from the next launch instead of prompting
+  again on every start.
+- **Terminal attention is a bell glyph now.** A rung terminal (any BEL — an
+  agent finishing, or just the shell's beep) shows a small bell on its host's
+  group chip (between the W/R letter and the name) and on the hidden TERMINAL/
+  CHAT buttons — no more green dot, which read as connection health.
+- **Auto-connect is per host now.** Every saved host asks on launch by
+  default; the ask's checkbox ("Don't ask again — always connect this host")
+  marks just that host into settings.json `autoConnect` — now a list of host
+  keys like `"wsl:Ubuntu"` / `"user@host:22"`, replacing the old all-or-nothing
+  per-kind modes. Marked hosts are managed (and unmarked) in the new
+  **Storage → Auto-connect** tab. A marked host you disconnected before
+  closing stays quiet — the mark only silences the ask, never forces a
+  connection.
 
 ## [0.9.9] - 2026-07-16
 

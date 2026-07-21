@@ -32,19 +32,16 @@ export interface Settings {
   /** Per-dialog "ask again?" flags: `false` silences that confirmation. All
    *  don't-ask-again checkboxes write here (visible + hand-restorable). */
   confirms?: Record<string, boolean>;
-  /** Startup reconnects: "ask" (default) pops a confirm on launch, "always"
-   *  connects silently, "never" skips. The ask dialog's checkbox sets
-   *  "always". */
-  autoConnect?: { wsl?: string; remote?: string };
+  /** Startup reconnects: host keys ("wsl:<name>" / "user@host:port") that
+   *  connect silently on launch — every other host asks first. The ask
+   *  dialog's "don't ask again" checkbox adds its host here; the Storage →
+   *  Auto-connect tab removes them. Only hosts still connected at close are
+   *  candidates at all. */
+  autoConnect?: string[];
   /** Hot-exit drafts: local copies of unsaved edits (app config dir,
    *  `drafts/`), surviving crash/close. `enabled: false` turns writing and
    *  restoring off (existing drafts stay on disk for the cleanup panel). */
   drafts?: { enabled?: boolean };
-  /** Session restore: whether drafts are loaded back into reopened files —
-   *  "ask" (default) decides per host (a checkbox on that host's connect
-   *  popup, or a standalone popup for Local / auto-connected hosts);
-   *  "always" restores silently once each host is up. */
-  restore?: { openFiles?: string };
   /** Bottom-panel tool groups: hide the ones you never use, and tune how often
    *  the open tab re-polls (seconds; nothing polls while closed). */
   panels?: {
@@ -127,9 +124,8 @@ function settingsTemplate(): Settings {
     keybindings: {},
     terminalFont: { family: "Fira Code", size: 13 },
     confirms: Object.fromEntries(CONFIRM_IDS.map((id) => [id, true])),
-    autoConnect: { wsl: "ask", remote: "ask" },
+    autoConnect: [],
     drafts: { enabled: true },
-    restore: { openFiles: "ask" },
     panels: { ...PANEL_DEFAULTS },
     ui: { localOnly: false, disableChat: false },
   };
@@ -200,11 +196,8 @@ export let keybindingOverrides: Record<string, string> = {};
 export let settingsZoom = 1;
 /** Effective bottom-panel config (visibility + poll intervals, seconds). */
 export let panelsConfig = { ...PANEL_DEFAULTS };
-/** Startup reconnect policy per connection kind. */
-export let autoConnectConfig: { wsl: "ask" | "always" | "never"; remote: "ask" | "always" | "never" } = {
-  wsl: "ask",
-  remote: "ask",
-};
+/** Host keys that reconnect on launch without asking (settings `autoConnect`). */
+export let autoConnectHosts: string[] = [];
 /** Hot-exit drafts on/off (settings `drafts.enabled`). */
 export let draftsConfig: { enabled: boolean } = { enabled: true };
 /** UI reduction switches (settings `ui`). Both are the raw wish — consumers
@@ -213,11 +206,6 @@ export let draftsConfig: { enabled: boolean } = { enabled: true };
 export let uiConfig: { localOnly: boolean; disableChat: boolean } = {
   localOnly: false,
   disableChat: false,
-};
-/** Whether drafts load back into restored files (settings `restore.openFiles`):
- *  "ask" = per-host decision at startup; "always" = silent restore. */
-export let restoreConfig: { openFiles: "ask" | "always" } = {
-  openFiles: "ask",
 };
 let confirms: Record<string, boolean> = {};
 
@@ -359,17 +347,19 @@ async function loadAndApply(): Promise<void> {
     }
   }
 
-  // Startup reconnect policy ("ask" | "always" | "never").
-  const mode = (v: unknown, name: string): "ask" | "always" | "never" => {
-    if (v === undefined) return "ask";
-    if (v === "ask" || v === "always" || v === "never") return v;
-    issues.push(`autoConnect: "${name}" must be "ask", "always", or "never"`);
-    return "ask";
-  };
-  autoConnectConfig = {
-    wsl: mode(s.autoConnect?.wsl, "wsl"),
-    remote: mode(s.autoConnect?.remote, "remote"),
-  };
+  // Startup reconnect list: per-host keys; anything not listed asks.
+  autoConnectHosts = [];
+  if (s.autoConnect !== undefined) {
+    if (Array.isArray(s.autoConnect)) {
+      autoConnectHosts = [
+        ...new Set(s.autoConnect.filter((v): v is string => typeof v === "string")),
+      ];
+    } else {
+      issues.push(
+        'autoConnect: now a list of host keys, e.g. ["wsl:Ubuntu", "user@host:22"] — the old {"wsl","remote"} modes were removed; unlisted hosts are asked on launch',
+      );
+    }
+  }
 
   // Hot-exit drafts (enabled flag) and the restore-drafts policy.
   draftsConfig = { enabled: true };
@@ -384,21 +374,6 @@ async function loadAndApply(): Promise<void> {
       }
     } else {
       issues.push('drafts: must be an object like { "enabled": true }');
-    }
-  }
-  restoreConfig = { openFiles: "ask" };
-  if (s.restore !== undefined) {
-    if (s.restore && typeof s.restore === "object") {
-      const v = s.restore.openFiles;
-      if (v !== undefined) {
-        if (v === "ask" || v === "always") {
-          restoreConfig.openFiles = v;
-        } else {
-          issues.push('restore: "openFiles" must be "ask" or "always"');
-        }
-      }
-    } else {
-      issues.push('restore: must be an object like { "openFiles": "ask" }');
     }
   }
 

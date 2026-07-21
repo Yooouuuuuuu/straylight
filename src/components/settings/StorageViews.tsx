@@ -2,9 +2,10 @@
  *  Preferences (they're things you audit and prune, not knobs you set):
  *  - DraftsView: cached unsaved edits per host (with the two switches that
  *    govern them, kept beside the list they control);
- *  - PinsView: pinned files per host.
- *  Both live in their existing stores (drafts/ dir, localStorage) — nothing
- *  here touches settings.json except the drafts on/off + restore policy. */
+ *  - PinsView: pinned files per host;
+ *  - AutoConnectView: hosts marked "don't ask again" on the startup ask.
+ *  Drafts/pins live in their existing stores (drafts/ dir, localStorage);
+ *  the auto-connect list is settings.json's `autoConnect`. */
 import { useState } from "react";
 
 import {
@@ -14,7 +15,7 @@ import {
 } from "../../lib/drafts";
 import { basename } from "../../lib/format";
 import { allPinnedTabs, setTabPinned } from "../../lib/pinnedTabs";
-import { draftsConfig, restoreConfig, updateSettings } from "../../lib/settings";
+import { autoConnectHosts, draftsConfig, updateSettings } from "../../lib/settings";
 import { remoteHostKey, useAppStore } from "../../store/appStore";
 import { useVcsStore } from "../../store/vcsStore";
 import { IconClose } from "../icons";
@@ -57,19 +58,6 @@ export function DraftsView() {
         />
         Keep local drafts of unsaved edits
       </label>
-      <div className="settings-row">
-        <span className="settings-row__label">Restore drafts on launch</span>
-        <select
-          className="input"
-          value={restoreConfig.openFiles}
-          onChange={(e) =>
-            void updateSettings({ restore: { openFiles: e.target.value } })
-          }
-        >
-          <option value="ask">ask (per host)</option>
-          <option value="always">always</option>
-        </select>
-      </div>
       {[...draftHosts.entries()].map(([host, g]) => (
         <div key={host} className="settings-row">
           <span className="settings-row__label" title={host}>
@@ -207,6 +195,47 @@ export function PinsView() {
         <div className="app-tab__hint">
           Nothing pinned — pin a tab (right-click → Pin) to make a file part of
           a host's permanent workspace.
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function AutoConnectView() {
+  useAppStore((s) => s.settingsRev); // re-render on settings apply
+  const hosts = autoConnectHosts;
+
+  return (
+    <div className="app-tab">
+      <h2 className="app-tab__title">Auto-connect</h2>
+      <div className="app-tab__hint">
+        These hosts reconnect on launch without asking — if they were still
+        connected when the app closed (a host you disconnected stays quiet).
+        Add one by checking "Don't ask again" on its startup ask; remove it
+        here to get the ask back.
+      </div>
+      {hosts.map((key) => (
+        <div key={key} className="settings-row">
+          <span className="settings-row__label mono" title={key}>
+            {key.startsWith("wsl:") ? "WSL — " : "SSH — "}
+            {key}
+          </span>
+          <button
+            className="icon-btn"
+            title={`Ask again for ${key}`}
+            onClick={() =>
+              void updateSettings({
+                autoConnect: autoConnectHosts.filter((h) => h !== key),
+              })
+            }
+          >
+            <IconClose size={12} />
+          </button>
+        </div>
+      ))}
+      {hosts.length === 0 && (
+        <div className="app-tab__hint">
+          Empty — every saved host asks before reconnecting.
         </div>
       )}
     </div>

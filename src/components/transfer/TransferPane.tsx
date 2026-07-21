@@ -26,6 +26,12 @@ import {
   type DragItem,
 } from "../../lib/transferDrag";
 import { useAppStore } from "../../store/appStore";
+import {
+  TRANSFER_EXPANSION,
+  expansionHostKey,
+  loadExpanded,
+  saveExpanded,
+} from "../../lib/treeExpansion";
 import { FolderBrowser } from "../FolderBrowser";
 import { RenameInput } from "../filetree/FileNode";
 import { FileIcon } from "../filetree/FileIcons";
@@ -78,7 +84,11 @@ export function TransferPane({
   const [showHidden, setShowHidden] = useState(false);
   const [browsing, setBrowsing] = useState(false);
   const [dirs, setDirs] = useState<Record<string, DirState>>({});
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Expansion persists per host (paths are absolute, so one set per pane).
+  const [expanded, setExpanded] = useState<Set<string>>(
+    () => new Set(loadExpanded(TRANSFER_EXPANSION, expansionHostKey(connId))),
+  );
+  const restoredExpansion = useRef(false);
   const [anchor, setAnchor] = useState<FileEntry | null>(null);
   const [selection, setSelection] = useState<FileEntry[]>([]);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -148,10 +158,22 @@ export function TransferPane({
   // Reset when the connection changes (the panel is reused across pairs).
   useEffect(() => {
     setExtraRoots([]);
-    setExpanded(new Set());
+    setExpanded(new Set(loadExpanded(TRANSFER_EXPANSION, expansionHostKey(connId))));
     setDirs({});
     setSelection([]);
     setAnchor(null);
+    restoredExpansion.current = false;
+  }, [connId]);
+
+  // Persist expansion; reload the remembered-open dirs once per host.
+  useEffect(() => {
+    saveExpanded(TRANSFER_EXPANSION, expansionHostKey(connId), expanded);
+  }, [expanded, connId]);
+  useEffect(() => {
+    if (restoredExpansion.current) return;
+    restoredExpansion.current = true;
+    expanded.forEach((p) => void loadDir(p));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connId]);
 
   useEffect(() => {

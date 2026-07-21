@@ -1,4 +1,4 @@
-/** Hot-exit drafts (docs/hot-exit.md): local copies of unsaved edits, so a
+/** Hot-exit drafts (docs/data-safety.md): local copies of unsaved edits, so a
  *  crash / close / power loss can't take dirty buffers with it.
  *
  *  Two tiers:
@@ -12,11 +12,7 @@
  *  A draft is deleted only when RESOLVED: saved, explicitly discarded, or
  *  found identical to the file. Declining the restore ask keeps drafts on
  *  disk (safety and convenience are separate questions — see the doc). */
-import {
-  getTabContent,
-  getTabVersionId,
-  markTabSavedVersion,
-} from "./activeEditor";
+import { getTabContent } from "./activeEditor";
 import {
   acquireModel,
   applyDraftContent,
@@ -31,7 +27,7 @@ import {
   fsWriteFile,
   settingsPath,
 } from "./ipc";
-import { draftsConfig, restoreConfig } from "./settings";
+import { draftsConfig } from "./settings";
 import {
   connKeyForConnId,
   useAppStore,
@@ -70,13 +66,6 @@ let sep = "/";
 /** Draft key (`connKey::path`) → meta, loaded once at init. */
 const cache = new Map<string, DraftMeta>();
 const timers = new Map<string, number>();
-
-/** Restore policy from settings: "always" restores silently per host once it
- *  connects; "ask" waits for that host's decision (below). */
-let restorePolicy: "ask" | "always" = "ask";
-/** Per-host answers for this session (connKey → restore?). A host with no
- *  entry is undecided: its tabs get the banner instead of an auto-apply. */
-const hostDecisions = new Map<string, boolean>();
 
 let readyResolve: (() => void) | null = null;
 const ready = new Promise<void>((resolve) => {
@@ -141,7 +130,6 @@ export async function initDrafts(connId: string): Promise<void> {
         /* torn meta — the cleanup panel's Clear all removes strays */
       }
     }
-    restorePolicy = restoreConfig.openFiles === "always" ? "always" : "ask";
   } finally {
     readyResolve?.();
   }
@@ -174,6 +162,41 @@ function scheduleFlush(tabId: string): void {
   );
 }
 
+/** Write a tab's draft (body then meta, so a complete meta always describes a
+ *  complete body) for `content`. Shared by the debounced flush and the
+ *  save-time guarantee below. */
+async function writeDraftFile(
+  tab: EditorTab,
+  connKey: string,
+  content: string,
+  contentHash: string,
+): Promise<void> {
+  if (!localConnId) return;
+  const key = dkey(connKey, tab.path);
+  const meta: DraftMeta = {
+    v: 1,
+    connKey,
+    path: tab.path,
+    name: tab.name,
+    language: tab.language,
+    baselineMtime: tab.draftApplied
+      ? (tab.draftBaselineMtime ?? tab.modified)
+      : tab.modified,
+    draftedAt: Date.now(),
+    chars: content.length,
+    bytes: new Blob([content]).size,
+    contentHash,
+  };
+  try {
+    const stem = stemFor(key);
+    await fsWriteFile(localConnId, bodyPath(stem), content, null);
+    await fsWriteFile(localConnId, metaPath(stem), JSON.stringify(meta), null);
+    cache.set(key, meta);
+  } catch {
+    /* disk unavailable — the buffer itself is unaffected; retried next edit */
+  }
+}
+
 async function flush(tabId: string): Promise<void> {
   if (!dir || !localConnId) return;
   const tab = useAppStore.getState().tabs.find((t) => t.id === tabId);
@@ -188,28 +211,32 @@ async function flush(tabId: string): Promise<void> {
   }
   const content = getTabContent(tabId);
   if (content === null) return;
-  const meta: DraftMeta = {
-    v: 1,
-    connKey,
-    path: tab.path,
-    name: tab.name,
-    language: tab.language,
-    baselineMtime: tab.draftApplied
-      ? (tab.draftBaselineMtime ?? tab.modified)
-      : tab.modified,
-    draftedAt: Date.now(),
-    chars: content.length,
-    bytes: new Blob([content]).size,
-    contentHash: await sha256Hex(content),
-  };
-  try {
-    const stem = stemFor(key);
-    await fsWriteFile(localConnId, bodyPath(stem), content, null);
-    await fsWriteFile(localConnId, metaPath(stem), JSON.stringify(meta), null);
-    cache.set(key, meta);
-  } catch {
-    /* disk unavailable — the buffer itself is unaffected; retried next edit */
+  await writeDraftFile(tab, connKey, content, await sha256Hex(content));
+}
+
+/** Guarantee a draft exists for CONTENT a staged save is about to send, BEFORE
+ *  the tab's dirty dot is cleared — so an in-flight save that never confirms is
+ *  always recoverable (the staged-save invariant; see stagedSave.ts). Cancels
+ *  any pending debounced flush so a late flush can't see the (now-clean) tab
+ *  and delete the very draft we're relying on. No-op if the debounce already
+ *  captured exactly this content. */
+export async function ensureDraftForSave(
+  tabId: string,
+  content: string,
+  contentHash: string,
+): Promise<void> {
+  if (!dir || !localConnId || !draftsConfig.enabled) return;
+  const tab = useAppStore.getState().tabs.find((t) => t.id === tabId);
+  if (!draftable(tab)) return;
+  const connKey = connKeyForConnId(tab.connId);
+  if (!connKey) return;
+  const timer = timers.get(tabId);
+  if (timer !== undefined) {
+    window.clearTimeout(timer);
+    timers.delete(tabId);
   }
+  if (cache.get(dkey(connKey, tab.path))?.contentHash === contentHash) return;
+  await writeDraftFile(tab, connKey, content, contentHash);
 }
 
 // ---- read / delete ---------------------------------------------------------
@@ -303,35 +330,9 @@ export function deleteDraftFor(connId: string, path: string): void {
 
 // ---- restore flow ----------------------------------------------------------
 
-/** How many drafts a host's ask should mention. 0 = no ask needed: drafts
- *  disabled, "always" mode (auto-restores), already decided, or no drafts. */
-export function draftAskCount(connKey: string): number {
-  if (!draftsConfig.enabled || restorePolicy === "always") return 0;
-  if (hostDecisions.has(connKey)) return 0;
-  let n = 0;
-  for (const m of cache.values()) if (m.connKey === connKey) n += 1;
-  return n;
-}
-
-/** A host's ask was answered. Approval sweeps that host's open tabs; a
- *  decline leaves their banners (per-file recovery stays one click away). */
-export function resolveHostDrafts(connKey: string, approved: boolean): void {
-  hostDecisions.set(connKey, approved);
-  if (!approved) return;
-  for (const tab of useAppStore.getState().tabs) {
-    if (
-      tab.draftAvailable &&
-      !tab.dirty &&
-      connKeyForConnId(tab.connId) === connKey
-    ) {
-      void restoreDraftForTab(tab.id);
-    }
-  }
-}
-
-/** Called for every opened file tab: auto-apply its draft (policy "always",
- *  or this host approved) or mark it draft-available (banner offers
- *  Restore / Compare / Discard). */
+/** Called for every opened file tab: a hot-exit draft always auto-restores
+ *  into the buffer (dirty by construction). The crumbs Compare button diffs it
+ *  against the saved file; Ctrl+Z / close-without-save discard it. */
 export async function maybeAttachDraft(tabId: string): Promise<void> {
   if (!draftsConfig.enabled) return;
   const s = useAppStore.getState();
@@ -341,10 +342,7 @@ export async function maybeAttachDraft(tabId: string): Promise<void> {
   if (!connKey) return;
   const meta = cache.get(dkey(connKey, tab.path));
   if (!meta) return;
-  const approved =
-    restorePolicy === "always" || hostDecisions.get(connKey) === true;
-  if (approved) await applyDraft(tabId, meta);
-  else s.setTabDraft(tabId, { draftAvailable: true });
+  await applyDraft(tabId, meta);
 }
 
 async function applyDraft(tabId: string, meta: DraftMeta): Promise<boolean> {
@@ -355,13 +353,11 @@ async function applyDraft(tabId: string, meta: DraftMeta): Promise<boolean> {
   if (content === null) {
     // Torn/missing body — nothing restorable; drop the stray meta.
     void removeDraftFiles(dkey(meta.connKey, meta.path));
-    s.setTabDraft(tabId, { draftAvailable: false });
     return false;
   }
   // Identical to what's on disk now → the draft is obsolete (resolved).
   if (!tab.dirty && content === tab.content) {
     void removeDraftFiles(dkey(meta.connKey, meta.path));
-    s.setTabDraft(tabId, { draftAvailable: false });
     return false;
   }
   // Make sure the model exists seeded with the DISK content (tab.content),
@@ -372,87 +368,12 @@ async function applyDraft(tabId: string, meta: DraftMeta): Promise<boolean> {
   applyDraftContent(tabId, content);
   s.setTabDraft(tabId, {
     draftApplied: true,
-    draftAvailable: false,
     draftBaselineMtime: meta.baselineMtime,
   });
   // If the file moved on the server since this draft's baseline, the restored
   // buffer conflicts with it — flag the tab (conflict bar + Ctrl+S block).
   if (tab.modified !== meta.baselineMtime) s.setTabConflict(tabId, true);
   return true;
-}
-
-// ---- banner actions ---------------------------------------------------------
-
-/** Banner "Restore": load the draft into the (open) tab. */
-export async function restoreDraftForTab(tabId: string): Promise<void> {
-  const s = useAppStore.getState();
-  const tab = s.tabs.find((t) => t.id === tabId);
-  if (!tab) return;
-  const connKey = connKeyForConnId(tab.connId);
-  if (!connKey) return;
-  const meta = cache.get(dkey(connKey, tab.path));
-  if (!meta) {
-    s.setTabDraft(tabId, { draftAvailable: false });
-    return;
-  }
-  await applyDraft(tabId, meta);
-}
-
-/** Banner "Discard": delete the draft; if it was applied, reload from disk. */
-export async function discardDraftForTab(tabId: string): Promise<void> {
-  const s = useAppStore.getState();
-  const tab = s.tabs.find((t) => t.id === tabId);
-  if (!tab) return;
-  deleteDraftFor(tab.connId, tab.path);
-  if (tab.draftApplied) {
-    try {
-      const file = await fsReadFile(tab.connId, tab.path);
-      useAppStore.getState().reloadTabContent(tabId, file);
-      applyDraftContent(tabId, file.content); // replace the buffer…
-      const v = getTabVersionId(tabId);
-      if (v !== null) markTabSavedVersion(tabId, v); // …and mark it clean
-    } catch {
-      /* unreadable — keep the buffer; the draft is gone either way */
-    }
-  }
-  useAppStore
-    .getState()
-    .setTabDraft(tabId, { draftAvailable: false, draftApplied: false });
-}
-
-/** Banner "Compare": a read-only diff — the file as it is on disk (base) vs
- *  the draft / current buffer. */
-export async function compareDraftForTab(tabId: string): Promise<void> {
-  const s = useAppStore.getState();
-  const tab = s.tabs.find((t) => t.id === tabId);
-  if (!tab) return;
-  let draftContent: string | null = null;
-  if (tab.draftApplied) {
-    draftContent = getTabContent(tabId) ?? tab.content;
-  } else {
-    const connKey = connKeyForConnId(tab.connId);
-    const meta = connKey ? cache.get(dkey(connKey, tab.path)) : undefined;
-    if (meta) draftContent = await readDraftContent(meta);
-  }
-  if (draftContent === null) return;
-  try {
-    const file = await fsReadFile(tab.connId, tab.path);
-    useAppStore.getState().openDiffTab({
-      connId: tab.connId,
-      name: `${tab.name} (draft ⇄ disk)`,
-      path: tab.path,
-      relPath: `${tab.path}#draft`,
-      base: file.content,
-      baseExists: true,
-      content: draftContent,
-      language: tab.language,
-      isBinary: false,
-    });
-  } catch (e) {
-    useAppStore
-      .getState()
-      .pushNotice("error", `Couldn't read ${tab.name} for compare: ${String(e)}`);
-  }
 }
 
 // ---- clean-tab stubs (phase-2 groundwork) -----------------------------------

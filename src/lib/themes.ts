@@ -32,6 +32,8 @@ export const EDITOR_DEFAULTS: Record<string, string> = {
   cursor: "#f30100",
   selection: "#46232c",
   lineHighlight: "#221418",
+  findMatch: "#9e6a03",
+  findMatchHighlight: "#5c4308",
   widget: "#0f0b0d",
   comment: "#7a5f66",
   keyword: "#ff4d6d",
@@ -118,8 +120,8 @@ function buildMonacoTheme(): monaco.editor.IStandaloneThemeData {
       "editorWhitespace.foreground": g("selection"),
       "editorLineNumber.foreground": g("comment"),
       "editorLineNumber.activeForeground": g("foreground"),
-      "editor.findMatchBackground": `${g("selection")}CC`,
-      "editor.findMatchHighlightBackground": `${g("selection")}66`,
+      "editor.findMatchBackground": g("findMatch"),
+      "editor.findMatchHighlightBackground": g("findMatchHighlight"),
       "editorWidget.background": g("widget"),
       "editorWidget.border": g("selection"),
       "editorSuggestWidget.background": g("widget"),
@@ -351,6 +353,7 @@ export const THEME_PRESETS: ThemePreset[] = [
     editor: {
       background: "#1c070c", foreground: "#f5e6e8", cursor: "#ff00ff",
       selection: "#591a28", lineHighlight: "#2b0c13", widget: "#120407",
+      findMatch: "#9e6a03", findMatchHighlight: "#5c4308",
       comment: "#8f5a66", keyword: "#ff00ff", string: "#5ce626",
       number: "#f30100", type: "#ff8fb0", function: "#ff4d6d",
       variable: "#f5e6e8", constant: "#f30100", operator: "#ff4d6d",
@@ -384,6 +387,7 @@ export const THEME_PRESETS: ThemePreset[] = [
     editor: {
       background: "#0a0a0a", foreground: "#e8e8e8", cursor: "#5ce626",
       selection: "#3d0f17", lineHighlight: "#161014", widget: "#050505",
+      findMatch: "#9e6a03", findMatchHighlight: "#5c4308",
       comment: "#5c4448", keyword: "#ff00ff", string: "#5ce626",
       number: "#f30100", type: "#ff40ff", function: "#ff1744",
       variable: "#e8e8e8", constant: "#f30100", operator: "#ff00ff",
@@ -416,6 +420,7 @@ export const THEME_PRESETS: ThemePreset[] = [
     editor: {
       background: "#282a36", foreground: "#f8f8f2", cursor: "#f8f8f2",
       selection: "#44475a", lineHighlight: "#343746", widget: "#21222c",
+      findMatch: "#a97f56", findMatchHighlight: "#5e4e44",
       comment: "#6272a4", keyword: "#ff79c6", string: "#f1fa8c",
       number: "#bd93f9", type: "#8be9fd", function: "#50fa7b",
       variable: "#f8f8f2", constant: "#bd93f9", operator: "#ff79c6",
@@ -444,6 +449,7 @@ export const THEME_PRESETS: ThemePreset[] = [
     editor: {
       background: "#2e3440", foreground: "#d8dee9", cursor: "#d8dee9",
       selection: "#434c5e", lineHighlight: "#3b4252", widget: "#272c36",
+      findMatch: "#5f818f", findMatchHighlight: "#445764",
       comment: "#616e88", keyword: "#81a1c1", string: "#a3be8c",
       number: "#b48ead", type: "#8fbcbb", function: "#88c0d0",
       variable: "#d8dee9", constant: "#b48ead", operator: "#81a1c1",
@@ -478,6 +484,7 @@ export const THEME_PRESETS: ThemePreset[] = [
     editor: {
       background: "#fdf6e3", foreground: "#657b83", cursor: "#657b83",
       selection: "#dcd4b9", lineHighlight: "#eee8d5", widget: "#eee8d5",
+      findMatch: "#e4d094", findMatchHighlight: "#f0e2ba",
       comment: "#93a1a1", keyword: "#859900", string: "#2aa198",
       number: "#d33682", type: "#b58900", function: "#268bd2",
       variable: "#657b83", constant: "#6c71c4", operator: "#859900",

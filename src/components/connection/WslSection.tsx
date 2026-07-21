@@ -13,7 +13,6 @@ import {
   wslProbeSsh,
   type WslDistro,
 } from "../../lib/ipc";
-import { clearDesiredWsl } from "../../lib/session";
 import { connectWslDistro } from "../../lib/wslSession";
 import {
   HOST_COLOR_RAMP,
@@ -68,8 +67,8 @@ function WslHost({ ws, order }: { ws: RemoteWorkspace; order: number }) {
     } catch {
       /* ignore */
     }
-    // Explicit disconnect: don't offer this distro at next launch.
-    clearDesiredWsl(conn.name);
+    // The session snapshot persists connected distros only, so removing it
+    // here is all "don't offer at next launch" takes.
     removeWsl(conn.connId);
   }
 

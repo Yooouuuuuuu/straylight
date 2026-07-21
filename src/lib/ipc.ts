@@ -491,6 +491,12 @@ export function onVcsFsChange(
   return listen<VcsFsChange>("vcs-fs-change", (event) => handler(event.payload));
 }
 
+/** The real Windows build number (0 elsewhere/unknown) — xterm's ConPTY
+ *  reflow heuristics are keyed by it. */
+export function windowsBuildNumber(): Promise<number> {
+  return invoke("windows_build_number");
+}
+
 /** Watch a pinned **local** folder (recursive) for the explorer tree. */
 export function dirWatch(connId: string, root: string): Promise<void> {
   return invoke("dir_watch", { connId, root });

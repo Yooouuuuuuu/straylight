@@ -106,6 +106,18 @@ function editorShowing(
   return null;
 }
 
+/** Focus the editor showing `tabId` and open Monaco's find widget (Ctrl+F —
+ *  works from anywhere, e.g. with focus still in the explorer after a
+ *  single-click preview). False if the tab has no live editor. */
+export function openFindIn(tabId: string): boolean {
+  const model = models.get(tabId);
+  const editor = model ? editorShowing(model) : null;
+  if (!editor) return false;
+  editor.focus();
+  void editor.getAction("actions.find")?.run();
+  return true;
+}
+
 /** Track a group's editor instance. Returns the unregister function. Installs
  *  the save/reload bridge on first registration (module-lived thereafter). */
 export function registerGroupEditor(

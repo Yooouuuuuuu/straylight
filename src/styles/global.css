@@ -3584,9 +3584,10 @@ select option {
   font-weight: 600;
 }
 
-/* Per-file action at the breadcrumb's right edge (¶ Preview for Markdown). */
+/* Per-file actions at the breadcrumb's right edge (⇄ Compare, then ¶ Preview).
+   Only the first pushes the group right; the rest sit beside it via the crumbs'
+   4px gap, so the actions stay together rather than spread apart. */
 .editor-crumbs__action {
-  margin-left: auto;
   flex: 0 0 auto;
   border: none;
   background: none;
@@ -3594,6 +3595,10 @@ select option {
   font-size: var(--font-size-xs);
   cursor: pointer;
   padding: 0 var(--space-2);
+}
+
+.editor-crumbs__action:first-of-type {
+  margin-left: auto;
 }
 
 .editor-crumbs__action:hover {
@@ -4116,6 +4121,19 @@ select option {
   font-size: var(--font-size-sm);
   gap: var(--space-3);
 }
+.terminal-message .btn {
+  padding: 1px var(--space-3);
+  font-size: var(--font-size-xs);
+}
+.terminal-message kbd {
+  font-family: var(--font-code);
+  font-size: var(--font-size-xs);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--fg-primary);
+}
 
 /* Terminal tabs */
 .terminal-tabs {
@@ -4283,21 +4301,21 @@ select option {
 }
 
 /* ——— Attention (terminal BEL) + the status-bar notification bell ——— */
-/* A rang-while-you-weren't-looking terminal: green marks, cleared on focus. */
+/* A rang-while-you-weren't-looking terminal: marked, cleared when you type.
+ * Deliberately a bell glyph, never a colored dot — dots mean host/health. */
 .terminal-entry--bell .terminal-entry__icon {
   color: var(--green);
 }
-.termgroup__bell {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--green);
-  margin-left: 4px;
-  vertical-align: 1px;
+.termgroup__bellicon {
+  flex: 0 0 auto;
+  margin: 0 -2px;
 }
-/* Badge on a status-bar button whose (hidden) panel holds a rang terminal —
- * and on the bell itself while there are unread notices. */
+/* Tiny bell on a status-bar button whose (hidden) panel holds a rang
+ * terminal. */
+.statusbar__panelbell {
+  flex: 0 0 auto;
+}
+/* Unread-notices badge on the notification bell itself. */
 .statusbar__attn {
   width: 6px;
   height: 6px;
@@ -4391,6 +4409,17 @@ select option {
 .bell-pop__text {
   flex: 1;
   overflow-wrap: anywhere;
+  user-select: text;
+}
+.bell-pop__copy {
+  flex: 0 0 auto;
+  opacity: 0;
+}
+.bell-pop__item:hover .bell-pop__copy {
+  opacity: 0.7;
+}
+.bell-pop__copy:hover {
+  opacity: 1;
 }
 .bell-pop__time {
   flex: 0 0 auto;

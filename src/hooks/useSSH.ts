@@ -18,11 +18,7 @@ import {
   useAppStore,
   type RemoteConnection,
 } from "../store/appStore";
-import {
-  clearDesiredRemote,
-  consumePendingRemoteTabs,
-  setDesiredRemote,
-} from "../lib/session";
+import { consumePendingRemoteTabs } from "../lib/session";
 
 export interface ConnectProfile {
   name: string;
@@ -92,9 +88,8 @@ export function useSSH() {
           proxyJump: profile.proxyJump ?? null,
         };
         store.setRemote(remote, listing.path);
-        // Remember this server for restore-on-next-launch, and reopen any tabs
-        // that were waiting for it (session restore).
-        setDesiredRemote(remote);
+        // Reopen this host's pinned/drafted files (persistence is simply
+        // "connected at close" now — the snapshot reads live connections).
         await consumePendingRemoteTabs(remote);
         // Give the new connection a ready-to-use remote shell.
         store.openTerminal(remote.connId, remote.name);
@@ -176,9 +171,8 @@ export function useSSH() {
       } catch {
         /* ignore */
       }
-      // Explicit disconnect: forget this server so it isn't auto-reconnected
-      // next launch.
-      clearDesiredRemote(remoteHostKey(entry.conn));
+      // No bookkeeping needed: the session snapshot persists whatever is
+      // connected, so a disconnected host simply isn't in the next one.
       store.clearRemote(entry.conn.connId);
     }
   }, []);

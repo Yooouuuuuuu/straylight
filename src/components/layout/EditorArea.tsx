@@ -14,12 +14,7 @@ import {
 } from "../../store/appStore";
 
 import {
-  compareDraftForTab,
-  discardDraftForTab,
-  restoreDraftForTab,
-} from "../../lib/drafts";
-import {
-  compareWithDisk,
+  compareWithSaved,
   discardToServer,
   overwriteConflict,
 } from "../../lib/saveFile";
@@ -28,7 +23,7 @@ import { tabHostColor } from "../../lib/hostColors";
 import { useVcsStore } from "../../store/vcsStore";
 import { useAppStore } from "../../store/appStore";
 import { SettingsView } from "../settings/SettingsView";
-import { DraftsView, PinsView } from "../settings/StorageViews";
+import { AutoConnectView, DraftsView, PinsView } from "../settings/StorageViews";
 import { ThemesView } from "../settings/ThemesView";
 import { BinaryFileCard } from "../editor/BinaryFileCard";
 import { EditorTabs } from "../editor/EditorTabs";
@@ -164,6 +159,15 @@ function EditorBreadcrumbs({ tab }: { tab: EditorTab }) {
           </span>
         </Fragment>
       ))}
+      {tab.dirty && !tab.conflict && (!tab.kind || tab.kind === "file") && (
+        <button
+          className="editor-crumbs__action"
+          title="Compare your unsaved changes with the saved file"
+          onClick={() => void compareWithSaved(tab.id)}
+        >
+          ⇄ Compare
+        </button>
+      )}
       {canPreview && (
         <button
           className="editor-crumbs__action"
@@ -256,7 +260,7 @@ function GroupPane({ gid, splitDrop }: { gid: number; splitDrop: boolean }) {
               <button
                 className="editor-banner__act"
                 title="Diff your version against the file on the server"
-                onClick={() => void compareWithDisk(active.id)}
+                onClick={() => void compareWithSaved(active.id)}
               >
                 Compare
               </button>
@@ -281,45 +285,6 @@ function GroupPane({ gid, splitDrop }: { gid: number; splitDrop: boolean }) {
                     "Discard your changes?",
                     `Throw away your unsaved changes to ${active.name} and load the version on the server?`,
                     () => void discardToServer(active.id),
-                  )
-                }
-              >
-                Discard
-              </button>
-            </div>
-          )}
-        {/* Draft-available bar: an unresolved draft exists but isn't loaded
-            (the buffer is the disk content). Not a conflict — no Ctrl+S
-            block. Discard still confirms (it destroys unsaved edits). */}
-        {active &&
-          (!active.kind || active.kind === "file") &&
-          !active.conflict &&
-          active.draftAvailable && (
-            <div className="editor-banner">
-              Unsaved changes from a previous session exist for this file.
-              <span className="editor-banner__spacer" />
-              <button
-                className="editor-banner__act"
-                title="Diff the draft against the file on disk"
-                onClick={() => void compareDraftForTab(active.id)}
-              >
-                Compare
-              </button>
-              <button
-                className="editor-banner__act"
-                title="Load the draft into this tab (marks it unsaved)"
-                onClick={() => void restoreDraftForTab(active.id)}
-              >
-                Restore
-              </button>
-              <button
-                className="editor-banner__act"
-                title="Delete the draft (the file is untouched)"
-                onClick={() =>
-                  askConfirm(
-                    "Discard the draft?",
-                    `Delete the unsaved changes cached for ${active.name}? This can't be undone; the file on the host is untouched.`,
-                    () => void discardDraftForTab(active.id),
                   )
                 }
               >
@@ -358,6 +323,8 @@ function GroupPane({ gid, splitDrop }: { gid: number; splitDrop: boolean }) {
             <PinsView />
           ) : active?.kind === "drafts" ? (
             <DraftsView />
+          ) : active?.kind === "autoconnect" ? (
+            <AutoConnectView />
           ) : (
             active?.isBinary && <BinaryFileCard file={active} />
           )}

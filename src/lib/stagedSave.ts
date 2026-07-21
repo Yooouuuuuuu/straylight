@@ -4,9 +4,10 @@
  *  A save is OPTIMISTIC: the tab is marked saved the moment its content is
  *  uploaded to a `.straysave` temp and the detached server-side commit is
  *  dispatched (S1–S3). Confirmation runs in the BACKGROUND (S4) and only
- *  matters when it fails — a hash-guard refusal ("changed") or a commit error
- *  ("fail") re-dirties the tab loudly; the local draft holds the content until
- *  the ok is truly confirmed, so nothing rests on the optimistic signal.
+ *  matters when it fails — any non-confirmed exit re-dirties the tab loudly. A
+ *  local draft, written BEFORE the dispatch (`ensureDraftForSave`) so it holds
+ *  even for a save fired inside the edit debounce, keeps the content until the
+ *  ok is truly confirmed. Nothing rests on the optimistic signal.
  *
  *  Commits for one file are SERIALIZED through a per-file queue that collapses
  *  to the newest pending content (superseded versions are never dispatched),
@@ -18,7 +19,7 @@
  *  even start (jailed SFTP-only host). */
 import { getTabVersionId, markTabSavedVersion } from "./activeEditor";
 import { markTabUnsaved } from "./editorModels";
-import { checkInDraft, hasDraft, updateStub } from "./drafts";
+import { checkInDraft, ensureDraftForSave, hasDraft, updateStub } from "./drafts";
 import { basename } from "./format";
 import { sha256Hex } from "./hash";
 import { fsReadFile, fsRemove, fsStat, fsWriteFile, saveCommit } from "./ipc";
@@ -92,6 +93,21 @@ const dirOf = (path: string) => {
 const notice = (kind: "info" | "warn" | "error", text: string) =>
   useAppStore.getState().pushNotice(kind, text);
 
+/** Re-raise the dirty dot on an open tab whose save didn't confirm — the local
+ *  draft still holds the content, but the tab must not keep looking saved.
+ *  No-op if the tab isn't open, or is already dirty. */
+function reDirtyOpenTab(connId: string, path: string): void {
+  const s = useAppStore.getState();
+  const tab = s.tabs.find(
+    (t) =>
+      t.connId === connId &&
+      t.path === path &&
+      (!t.kind || t.kind === "file") &&
+      !t.dirty,
+  );
+  if (tab) markTabUnsaved(tab.id);
+}
+
 let counter = 0;
 
 // ---- per-file commit queue --------------------------------------------------
@@ -115,11 +131,27 @@ interface QueueEntry {
 }
 
 /** file key (`connKey::path`) → { running, next }. `next` collapses to the
- *  newest pending save; only it is ever dispatched. */
-const queues = new Map<string, { running: boolean; next: QueueEntry | null }>();
+ *  newest pending save; only it is ever dispatched. `startedAt` stamps the
+ *  running dispatch so a reconnect-reconcile can tell a doomed attempt (began
+ *  before the link died) from a healthy live one. */
+const queues = new Map<
+  string,
+  { running: boolean; next: QueueEntry | null; startedAt?: number }
+>();
 /** The hash last committed (or in flight) per file, so a rapid follow-up save
  *  guards against what WE are about to write, not a stale disk read. */
 const lastHash = new Map<string, string>();
+
+/** Reset the guard chain after an attempt resolves WITHOUT landing: the next
+ *  save must expect the last content confirmed on the server — not the content
+ *  the dead attempt optimistically advanced the tab to (which would make its
+ *  guard refuse as "changed" on every retry). `"-"` (a force save) or `null`
+ *  (an external change: server content now unknown) drops the chain, falling
+ *  back to the tab's seed. */
+function resetGuard(key: string, expected: string | null): void {
+  if (expected === null || expected === "-") lastHash.delete(key);
+  else lastHash.set(key, expected);
+}
 
 const fkey = (connKey: string, path: string) => `${connKey}::${path}`;
 
@@ -156,6 +188,10 @@ export async function stagedSaveTab(
   queues.set(key, q);
   q.next = entry; // collapse — newest content wins
 
+  // Guarantee a local draft backs this content BEFORE the dirty dot clears, so
+  // an in-flight save that never confirms is always recoverable (the invariant
+  // this file's header promises). checkInDraft removes it once the ok lands.
+  await ensureDraftForSave(tabId, content, entry.contentHash);
   // Accept immediately (optimistic): the tab is finalized now; the upload +
   // dispatch happen on the queue worker (this call, or the running one).
   finalizeOptimistic(entry);
@@ -174,7 +210,7 @@ function finalizeOptimistic(entry: QueueEntry): void {
   if (!tab) return;
   s.markTabSaved(entry.tabId, tab.modified, entry.content);
   if (entry.versionId !== null) markTabSavedVersion(entry.tabId, entry.versionId);
-  s.setTabDraft(entry.tabId, { draftApplied: false, draftAvailable: false });
+  s.setTabDraft(entry.tabId, { draftApplied: false });
   updateStub(entry.connId, entry.path, tab.modified, entry.content.length);
 }
 
@@ -187,10 +223,14 @@ async function runQueue(key: string): Promise<void> {
   while (q.next) {
     const entry = q.next;
     q.next = null;
+    q.startedAt = Date.now();
     await dispatchOne(entry);
+    // Doomed and replaced while we were stuck on a dead link? A fresh worker
+    // owns this file now — exit without touching its state.
+    if (queues.get(key) !== q) return;
   }
   q.running = false;
-  if (!q.next) queues.delete(key);
+  if (queues.get(key) === q && !q.next) queues.delete(key);
 }
 
 /** Upload + dispatch one save, record it, and kick off its background ack. */
@@ -211,26 +251,19 @@ async function dispatchOne(entry: QueueEntry): Promise<void> {
   // tab's seed hash (first save this session). Overwrite skips the guard.
   const guard = entry.force ? "-" : (lastHash.get(key) ?? entry.baseHash);
 
-  // S1 — stage upload. Failure with the target untouched → fallback.
-  try {
-    await fsWriteFile(connId, tmp, content, null);
-  } catch {
-    // Undo the optimism for this attempt — the save didn't happen and no
-    // newer save is queued to cover it.
-    if (!queues.get(key)?.next) {
-      const s = useAppStore.getState();
-      if (s.tabs.find((t) => t.id === entry.tabId)) markTabUnsaved(entry.tabId);
-      notice(
-        "error",
-        `Couldn't stage ${basename(path)} on the server — your changes are still in this tab. Saving to disk directly instead.`,
-      );
-    }
-    return;
+  // A parked earlier attempt for this file is superseded — sweep its temp
+  // best-effort, so replacing its record below can't orphan the temp. (A
+  // young record is a just-dispatched attempt whose server-side commit may
+  // still be running; its markers resolve it — leave it alone.)
+  const prev = loadRecs().find((r) => r.connKey === connKey && r.path === path);
+  if (prev && Date.now() - prev.at >= 30_000) {
+    await fsRemove(connId, prev.tmp).catch(() => {});
   }
 
-  // Chain the guard immediately so a rapid follow-up save expects THIS
-  // content, then record (death here is recoverable) and dispatch detached.
-  lastHash.set(key, entry.contentHash);
+  // Record BEFORE the first network byte (localStorage is synchronous), so an
+  // upload cut short — dropped link, killed app — always leaves a record, and
+  // reconcile owns its temp: sweep the partial, re-dirty the tab. Without
+  // this, an interrupted upload was an untracked orphan that accumulated.
   addRec({
     connKey,
     path,
@@ -244,14 +277,61 @@ async function dispatchOne(entry: QueueEntry): Promise<void> {
     baselineMtime,
     at: Date.now(),
   });
+
+  // S1 — stage upload.
+  try {
+    await fsWriteFile(connId, tmp, content, null);
+  } catch {
+    // The upload died (drop, host error). If a reconnect-reconcile already
+    // resolved this record it also re-dirtied — stay silent then; the id
+    // check tells the two apart (a newer save reuses the slot, fresh id).
+    const owned = loadRecs().some(
+      (r) => r.connKey === connKey && r.path === path && r.id === id,
+    );
+    const cleaned = await fsRemove(connId, tmp).then(() => true).catch(() => false);
+    if (owned) {
+      // The attempt died before landing — the next save (queued or future)
+      // must guard against the server's REAL content again.
+      resetGuard(key, guard);
+      // Keep the record while the temp is unreachable (mid-outage) — the
+      // next connected reconcile sweeps both.
+      if (cleaned) removeRec({ connKey, path, id });
+      if (!queues.get(key)?.next) {
+        reDirtyOpenTab(connId, path);
+        notice(
+          "error",
+          `Couldn't stage ${basename(path)} on the server — your changes are safe in this tab.`,
+        );
+      }
+    }
+    return;
+  }
+
+  // Chain the guard immediately so a rapid follow-up save expects THIS
+  // content, then dispatch the detached commit.
+  lastHash.set(key, entry.contentHash);
   try {
     await saveCommit(connId, dir, tmp, path, ok, err, guard);
   } catch {
-    removeRec({ connKey, path, id });
-    await fsRemove(connId, tmp).catch(() => {});
+    // Same shape as the upload catch: silent if a reconcile already owns it.
+    const owned = loadRecs().some(
+      (r) => r.connKey === connKey && r.path === path && r.id === id,
+    );
+    const cleaned = await fsRemove(connId, tmp).then(() => true).catch(() => false);
+    if (owned) {
+      resetGuard(key, guard); // roll back the chained-in-flight hash above
+      if (cleaned) removeRec({ connKey, path, id });
+      if (!queues.get(key)?.next) {
+        reDirtyOpenTab(connId, path);
+        notice(
+          "error",
+          `Couldn't finish saving ${basename(path)} on the server — your changes are safe in this tab.`,
+        );
+      }
+    }
     return;
   }
-  await awaitAck(entry, { id, tmp, ok, err });
+  await awaitAck(entry, { id, tmp, ok, err, guard });
 }
 
 /** S4 — background acknowledgement. Poll fast then slow, then PARK. Only acts
@@ -259,7 +339,7 @@ async function dispatchOne(entry: QueueEntry): Promise<void> {
  *  success at the UI; ok just cleans up + checks the draft in. */
 async function awaitAck(
   entry: QueueEntry,
-  h: { id: string; tmp: string; ok: string; err: string },
+  h: { id: string; tmp: string; ok: string; err: string; guard: string },
 ): Promise<void> {
   const { connId, connKey, path } = entry;
   const key = fkey(connKey, path);
@@ -298,6 +378,13 @@ async function awaitAck(
         // the safe copy.
         if (kind.startsWith("changed")) await fsRemove(connId, h.tmp).catch(() => {});
         reDirty(entry, h.tmp, kind);
+        // The attempt resolved without landing — reset the guard chain so the
+        // NEXT save expects the server's real content ("changed" drops the
+        // chain entirely: the server moved to unknown content). Skip if a
+        // newer save already owns the chain.
+        if (lastHash.get(key) === entry.contentHash) {
+          resetGuard(key, kind.startsWith("changed") ? null : h.guard);
+        }
         return;
       }
     } catch {
@@ -365,6 +452,21 @@ function connIdForConnKey(connKey: string): string | null {
   );
 }
 
+/** Whether a host is currently connected. Local always is; a reconnecting or
+ *  dropped host is not — reconcile waits for the reconnect to call it. */
+function connReady(connKey: string): boolean {
+  const s = useAppStore.getState();
+  if (connKey === "local") return true;
+  if (connKey.startsWith("wsl:")) {
+    return s.wsls.find((w) => w.conn.name === connKey.slice(4))?.state === "connected";
+  }
+  return (
+    s.remotes.find(
+      (r) => `${r.conn.user}@${r.conn.host}:${r.conn.port}` === connKey,
+    )?.state === "connected"
+  );
+}
+
 // ---- S5 reconcile (reconnect / relaunch / sweep) ---------------------------
 
 /** Reconcile a host's pending saves. Markers found are consumed; with no
@@ -374,11 +476,39 @@ function connIdForConnKey(connKey: string): string | null {
 export async function reconcilePendingSaves(
   connId: string,
   connKey: string,
+  staleBefore?: number,
 ): Promise<void> {
+  // Only reconcile a reachable host — running mid-outage would half-resolve
+  // records (e.g. drop a record whose temp we couldn't actually remove).
+  if (!connReady(connKey)) return;
   for (const rec of loadRecs().filter((r) => r.connKey === connKey)) {
     try {
+      // A live queue worker owns its file's record — unless the running
+      // dispatch began before `staleBefore` (a reconnect: that attempt died
+      // with the old link and will never confirm on its own; resolve it now).
+      let doomed = false;
+      const q = queues.get(fkey(connKey, rec.path));
+      if (q?.running) {
+        doomed = staleBefore !== undefined && (q.startedAt ?? 0) < staleBefore;
+        if (!doomed) continue;
+        // Detach the queue from the doomed worker so nothing waits on the old
+        // transport's ~45 s death: a save queued behind the dead attempt (or
+        // the user's next Ctrl+S) dispatches NOW on the fresh link. The old
+        // worker exits via the identity check in runQueue; its op can't land
+        // anything (dead transport, distinct temp path).
+        const k = fkey(connKey, rec.path);
+        queues.delete(k);
+        const next = q.next;
+        q.next = null;
+        if (next) {
+          queues.set(k, { running: false, next });
+          void runQueue(k);
+        }
+      }
       const okFile = await fsReadFile(connId, rec.ok).catch(() => null);
       if (okFile) {
+        // Confirmed landed — the chain now truthfully expects this content.
+        lastHash.set(fkey(connKey, rec.path), rec.contentHash);
         checkInDraft(connId, rec.path, rec.contentHash);
         useVcsStore.getState().onFileChanged(connId, rec.path);
         removeRec(rec);
@@ -394,20 +524,30 @@ export async function reconcilePendingSaves(
             ? `${basename(rec.path)} changed on the server before an earlier save could apply — that version is kept at ${rec.tmp}.`
             : `An earlier save of ${basename(rec.path)} failed on the server — the unsaved version is kept at ${rec.tmp}.`,
         );
+        reDirtyOpenTab(connId, rec.path);
+        resetGuard(
+          fkey(connKey, rec.path),
+          kind.startsWith("changed") ? null : rec.expectedHash,
+        );
         removeRec(rec);
         await fsRemove(connId, rec.err).catch(() => {});
         continue;
       }
-      // No marker — job may still be running (or a live ack loop owns it).
-      if (Date.now() - rec.at < 30_000) continue;
+      // No marker — the job may still be running (or a live ack loop owns
+      // it). A doomed attempt can't still be running: its link is gone.
+      if (!doomed && Date.now() - rec.at < 30_000) continue;
 
       if (hasDraft(connKey, rec.path)) {
+        reDirtyOpenTab(connId, rec.path);
+        resetGuard(fkey(connKey, rec.path), rec.expectedHash);
         await fsRemove(connId, rec.tmp).catch(() => {});
         removeRec(rec);
         continue;
       }
       const tmpSt = await fsStat(connId, rec.tmp).catch(() => null);
       if (!tmpSt || tmpSt.size !== rec.byteSize) {
+        reDirtyOpenTab(connId, rec.path);
+        resetGuard(fkey(connKey, rec.path), rec.expectedHash);
         if (tmpSt) await fsRemove(connId, rec.tmp).catch(() => {});
         removeRec(rec);
         continue;
@@ -428,6 +568,7 @@ export async function reconcilePendingSaves(
         await sleep(1_000);
         const ok2 = await fsReadFile(connId, rec.ok).catch(() => null);
         if (ok2) {
+          lastHash.set(fkey(connKey, rec.path), rec.contentHash);
           removeRec(rec);
           await fsRemove(connId, rec.ok).catch(() => {});
           notice("info", `Finished an interrupted save of ${basename(rec.path)}.`);
@@ -438,6 +579,8 @@ export async function reconcilePendingSaves(
         "warn",
         `${basename(rec.path)} changed on the server after an interrupted save — that unsaved version is kept at ${rec.tmp}.`,
       );
+      reDirtyOpenTab(connId, rec.path);
+      resetGuard(fkey(connKey, rec.path), null);
       removeRec(rec);
     } catch {
       /* per-record best-effort; the record survives for the next pass */

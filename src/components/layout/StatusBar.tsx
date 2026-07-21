@@ -14,6 +14,7 @@ import {
   IconBranch,
   IconChatBubble,
   IconClose,
+  IconCopy,
   IconFolder,
   IconTerminalGlyph,
 } from "../icons";
@@ -127,7 +128,7 @@ export function StatusBar() {
         title="Toggle the terminal panel (Ctrl+`) — Ports/Containers/Forwarding live on its top bar"
       >
         <IconTerminalGlyph size={13} /> TERMINAL
-        {bellInPanel && <span className="statusbar__attn" />}
+        {bellInPanel && <IconBell size={10} className="statusbar__panelbell" />}
       </span>
 
       {(!uiConfig.disableChat || terminals.some((t) => t.inChat)) && (
@@ -139,7 +140,7 @@ export function StatusBar() {
             title="Toggle CHAT — a terminal column for Claude Code or any CLI"
           >
             <IconChatBubble size={13} /> CHAT
-            {bellInChat && <span className="statusbar__attn" />}
+            {bellInChat && <IconBell size={10} className="statusbar__panelbell" />}
           </span>
         </>
       )}
@@ -292,7 +293,18 @@ export function StatusBar() {
               <div className="bell-pop__list">
                 {noticeLog.map((n) => (
                   <div key={n.id} className={`bell-pop__item bell-pop__item--${n.kind}`}>
+                    {/* Selectable AND one-click copyable — error texts get
+                        pasted into searches and bug reports. */}
                     <span className="bell-pop__text">{n.text}</span>
+                    <button
+                      className="icon-btn bell-pop__copy"
+                      title="Copy message"
+                      onClick={() =>
+                        void navigator.clipboard.writeText(n.text).catch(() => {})
+                      }
+                    >
+                      <IconCopy size={12} />
+                    </button>
                     <span className="bell-pop__time">
                       <RelativeTime at={n.time} title={null} />
                     </span>

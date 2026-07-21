@@ -19,13 +19,13 @@ import {
   onTransferProgress,
   onVcsFsChange,
 } from "./lib/ipc";
-import { useAppStore, type DockToken } from "./store/appStore";
+import { connKeyForConnId, useAppStore, type DockToken } from "./store/appStore";
 import { useVcsStore } from "./store/vcsStore";
 import { initDrafts } from "./lib/drafts";
 import { initFileWatching } from "./lib/fileWatch";
 import { initTreeWatching } from "./lib/treeWatch";
 import { initSettings, uiConfig } from "./lib/settings";
-import { startSaveSweep } from "./lib/stagedSave";
+import { reconcilePendingSaves, startSaveSweep } from "./lib/stagedSave";
 import { initThemes } from "./lib/themes";
 import { initSessionPersistence, restoreSession } from "./lib/session";
 import { useKeyboard } from "./hooks/useKeyboard";
@@ -196,8 +196,8 @@ export default function App() {
 
   // Theme layer first (it subscribes to settings), then load settings.json
   // (zoom, keybinding overrides, colors) and keep it live. Drafts follow
-  // settings (they read draftsConfig/restoreConfig) and must init even if
-  // settings failed — session restore awaits the draft index.
+  // settings (they read draftsConfig) and must init even if settings failed —
+  // session restore awaits the draft index.
   useEffect(() => initThemes(), []);
   useEffect(() => {
     if (localConnId)
@@ -235,6 +235,10 @@ export default function App() {
           store.refreshRemote(status.connId);
           store.restartConnTerminals(status.connId);
           store.pushNotice("info", `Reconnected to ${entry.conn.name}.`);
+          // Same recovery as a relaunch: resolve saves stranded by the drop.
+          // Anything dispatched before this instant died with the old link.
+          const connKey = connKeyForConnId(status.connId);
+          if (connKey) void reconcilePendingSaves(status.connId, connKey, Date.now());
         }
         return;
       }
@@ -250,6 +254,8 @@ export default function App() {
           store.refreshConn(status.connId);
           store.restartConnTerminals(status.connId);
           store.pushNotice("info", `Reconnected to ${w.conn.name}.`);
+          const connKey = connKeyForConnId(status.connId);
+          if (connKey) void reconcilePendingSaves(status.connId, connKey, Date.now());
         }
       }
     });

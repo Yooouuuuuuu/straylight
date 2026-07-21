@@ -185,6 +185,15 @@ export function TitleBar() {
               >
                 Pinned files
               </button>
+              <button
+                className="terminal-menu__item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  useAppStore.getState().openAppTab("autoconnect");
+                }}
+              >
+                Auto-connect
+              </button>
               <div className="terminal-menu__sep" />
               <div className="titlebar__menu-label">Quick theme</div>
               {savedThemeNames().map((name) => (

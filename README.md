@@ -6,7 +6,7 @@ Built with **Tauri v2** (a Rust backend on the OS-native WebView) and a **React/
 
 **Built for the AI era.** Your coding agent lives in the terminal now — so Straylight gives it a real one. Genuine system PTYs on the host mean tools like Claude Code run right where your code does, next to the files, editor, and source control they touch. (We build Straylight this way, too.)
 
-**Status:** Runs from source (the 0.9.x test pass — see `docs/release-plan.md`). Installers and binaries debut with the 0.10.0 release.
+**Status:** Runs from source (the 0.9.x test pass). Installers and binaries debut with the 0.10.0 release.
 
 > 💡 **[Insert a high-resolution screenshot or a looping 15-second WebP/GIF here showing Local, WSL, and a Remote server side-by-side, featuring a split Monaco editor and an open terminal.]**
 

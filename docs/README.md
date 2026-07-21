@@ -19,8 +19,10 @@ code-focused.
 |---|---|
 | [architecture.md](architecture.md) | The as-built system: process shape, backend modules, frontend state, how a save/transfer/VCS call actually flows. Start here. |
 | [stability.md](stability.md) | What 1.0 promises not to break — command ids, `settings.json` keys, VCS semantics — and what it deliberately does not promise. |
-| [release-plan.md](release-plan.md) | The committed path: 0.9 test → 0.10 package → 1.0 public, plus packaging and version-bump process. |
 | [future-work.md](future-work.md) | The prioritized pool of "might do later", by rough order. |
+
+(The release plan and other working notes live in `docs/dev/`, which is not
+published — maintainer material, not user docs.)
 
 ### Design records (one per subsystem, present-tense)
 
