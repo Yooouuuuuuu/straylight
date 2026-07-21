@@ -5,6 +5,7 @@ import { copyPath, pasteInto } from "../../lib/fileOps";
 import { dirname } from "../../lib/format";
 import { fsTransferBatch } from "../../lib/ipc";
 import { useAppStore } from "../../store/appStore";
+import { Tip } from "../Tooltip";
 
 export function ContextMenu() {
   const menu = useAppStore((s) => s.contextMenu);
@@ -133,9 +134,9 @@ export function ContextMenu() {
       </button>
       <div className="context-menu__sep" />
       {menu.connId !== useAppStore.getState().localConnId && (
+        <Tip label="Copies to your Downloads folder">
         <button
           className="context-menu__item"
-          title="Copy straight to your Downloads folder (use Transfer for a specific destination)"
           onClick={() => {
             closeContextMenu();
             const sel = selection.filter((n) => n.connId === menu.connId);
@@ -168,6 +169,7 @@ export function ContextMenu() {
         >
           Download{selection.length > 1 && ` (${selection.length})`}
         </button>
+        </Tip>
       )}
       <button
         className="context-menu__item"

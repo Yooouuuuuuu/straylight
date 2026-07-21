@@ -7,6 +7,13 @@ rationale for what exists is in the [design docs](README.md).
 
 ---
 
+## Later
+- **Richer editor right-click menu** — the file editor shares the simple
+  six-entry text menu (Undo/Redo/Cut/Copy/Paste/Select All) for now. Grow it
+  toward VS Code's: Go to Definition/References, Change All Occurrences,
+  Format Document, Command Palette… (the Monaco actions already exist — this
+  is menu wiring and ordering in `TextContextMenu`).
+
 ## Parked
 - **Linux version** — a full port pass, before macOS. First job when it starts:
   runtime-test the terminals (real Unix PTYs there, not ConPTY — a codepath

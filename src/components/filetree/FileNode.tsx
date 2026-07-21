@@ -7,18 +7,24 @@ import { formatSize, formatTimestamp } from "../../lib/format";
 import type { FileEntry } from "../../lib/ipc";
 import { repoColorForPath, useVcsStore } from "../../store/vcsStore";
 import { vcsClass, vcsLetter } from "../../lib/vcsDecorations";
-import { IconChevron } from "../icons";
+import { IconBranch, IconChevron } from "../icons";
+import { Tip } from "../Tooltip";
 import { FileIcon } from "./FileIcons";
 
-function tooltip(entry: FileEntry): string {
+/** File info tip: the path first, then one topic per line — mode + ownership,
+ *  size, date (+ the target for symlinks). Shared with the pinned-root
+ *  headers; rendered by Tip (`white-space: pre` keeps the indents). */
+export function entryTooltip(entry: FileEntry): string {
   const typeChar = entry.isDir ? "d" : entry.isSymlink ? "l" : "-";
-  const parts = [`${typeChar}${entry.permissions}`, `${entry.owner}:${entry.group}`];
-  if (!entry.isDir) parts.push(formatSize(entry.size));
-  parts.push(formatTimestamp(entry.modified));
+  // Local Windows entries carry no owner/group — never print a bare ":".
+  const own = entry.owner || entry.group ? `  ${entry.owner}:${entry.group}` : "";
+  const lines = [entry.path, `${typeChar}${entry.permissions}${own}`];
+  if (!entry.isDir) lines.push(formatSize(entry.size));
+  lines.push(formatTimestamp(entry.modified));
   if (entry.isSymlink && entry.symlinkTarget) {
-    parts.push(`→ ${entry.symlinkTarget}`);
+    lines.push(`→ ${entry.symlinkTarget}`);
   }
-  return parts.join("   ");
+  return lines.join("\n");
 }
 
 export function RenameInput({
@@ -178,7 +184,6 @@ export function FileNode({
         event.preventDefault();
         onContextMenu(event.clientX, event.clientY);
       }}
-      title={renaming ? undefined : tooltip(entry)}
     >
       <span className={twistyClass}>
         {entry.isDir ? <IconChevron size={14} /> : null}
@@ -194,21 +199,20 @@ export function FileNode({
         />
       ) : (
         <>
-          <span
-            className={`file-node__name ${entry.isDir ? "file-node__name--dir" : ""} ${
-              vcsKind ? vcsClass(vcsKind) : ""
-            }`}
-            style={!vcsDirect && trackedColor ? { color: trackedColor } : undefined}
-          >
-            {entry.name}
-          </span>
-          {entry.isSymlink && (
+          <Tip label={entryTooltip(entry)}>
             <span
-              className="file-node__symlink"
-              title={entry.symlinkTarget ?? undefined}
+              className={`file-node__name ${entry.isDir ? "file-node__name--dir" : ""} ${
+                vcsKind ? vcsClass(vcsKind) : ""
+              }`}
+              style={!vcsDirect && trackedColor ? { color: trackedColor } : undefined}
             >
-              ↪
+              {entry.name}
             </span>
+          </Tip>
+          {entry.isSymlink && (
+            <Tip label={entry.symlinkTarget ?? ""}>
+              <span className="file-node__symlink">↪</span>
+            </Tip>
           )}
           {vcsDirect ? (
             <span className={`file-node__vcs ${vcsClass(vcsDirect)}`}>
@@ -225,6 +229,26 @@ export function FileNode({
             !entry.isDir && (
               <span className="file-node__meta">{formatSize(entry.size)}</span>
             )
+          )}
+          {entry.isDir && (
+            <Tip
+              label={
+                trackedColor
+                  ? "In Source Control — open the panel"
+                  : "Add to Source Control"
+              }
+            >
+              <button
+                className="file-node__vcsbtn"
+                style={trackedColor ? { color: trackedColor } : undefined}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  useVcsStore.getState().openRepoFromExplorer(connId, entry.path);
+                }}
+              >
+                <IconBranch size={12} />
+              </button>
+            </Tip>
           )}
         </>
       )}

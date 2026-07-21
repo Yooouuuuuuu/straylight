@@ -6,6 +6,7 @@
 import { useDialogKeys } from "../../hooks/useDialogKeys";
 import { useAppStore } from "../../store/appStore";
 import { IconClose } from "../icons";
+import { Tip } from "../Tooltip";
 
 export function HostKeyDialog() {
   const prompt = useAppStore((s) => s.hostKeyPrompt);
@@ -36,9 +37,11 @@ export function HostKeyDialog() {
           <span className="modal__title">
             {changed ? "Host key changed" : "Unknown host key"}
           </span>
-          <button className="icon-btn" onClick={close} title="Close">
-            <IconClose />
-          </button>
+          <Tip label="Close">
+            <button className="icon-btn" onClick={close}>
+              <IconClose />
+            </button>
+          </Tip>
         </div>
         <div className="modal__body">
           <div className="modal__section">

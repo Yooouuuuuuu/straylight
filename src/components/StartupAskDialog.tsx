@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { autoConnectHosts, updateSettings } from "../lib/settings";
 import { useDialogKeys } from "../hooks/useDialogKeys";
 import { useAppStore } from "../store/appStore";
+import { Tip } from "./Tooltip";
 
 export function StartupAskDialog() {
   const rawAsk = useAppStore((s) => s.connectAsks[0] ?? null);
@@ -56,17 +57,16 @@ export function StartupAskDialog() {
           <kbd>Enter</kbd> connects · <kbd>Esc</kbd> skips
         </div>
         <div className="exit-ask__actions">
-          <label
-            className="confirm-silence"
-            title='Adds this host to settings.json "autoConnect" (only if you connect) — undo in Storage → Auto-connect'
-          >
-            <input
-              type="checkbox"
-              checked={always}
-              onChange={(e) => setAlways(e.target.checked)}
-            />
-            Don't ask again — always connect this host
-          </label>
+          <Tip label="Saved to autoConnect — undo in Storage → Auto-connect">
+            <label className="confirm-silence">
+              <input
+                type="checkbox"
+                checked={always}
+                onChange={(e) => setAlways(e.target.checked)}
+              />
+              Don't ask again — always connect this host
+            </label>
+          </Tip>
           <button className="btn btn--ghost" onClick={skip}>
             Skip
           </button>

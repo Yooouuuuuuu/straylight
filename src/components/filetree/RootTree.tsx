@@ -11,7 +11,7 @@ import {
 } from "react";
 
 import { commitRename } from "../../lib/fileOps";
-import { fsListDir, type FileEntry } from "../../lib/ipc";
+import { fsEntryMeta, fsListDir, type FileEntry } from "../../lib/ipc";
 import { openRemoteFile } from "../../lib/openFile";
 import {
   registerTreeRoot,
@@ -21,7 +21,7 @@ import {
   type TreeRow,
 } from "../../lib/treeNav";
 import { remoteHostKey, useAppStore } from "../../store/appStore";
-import { findRepoForPath, repoColorForPath, useVcsStore } from "../../store/vcsStore";
+import { findRepoContaining, repoColorForPath, useVcsStore } from "../../store/vcsStore";
 
 // Root collapse/expand persists per host+path (stable across reconnects —
 // connIds change per session, so the key uses the host identity instead).
@@ -60,13 +60,14 @@ function saveCollapsed(key: string, collapsed: boolean): void {
     /* ignore */
   }
 }
-import { FileNode } from "./FileNode";
+import { entryTooltip, FileNode } from "./FileNode";
 import {
   EXPLORER_EXPANSION,
   loadExpanded,
   saveExpanded,
 } from "../../lib/treeExpansion";
 import { IconBranch, IconChevron, IconClose } from "../icons";
+import { Tip } from "../Tooltip";
 
 interface DirState {
   entries: FileEntry[] | null;
@@ -126,6 +127,21 @@ export function RootTree({
     [connId, rootPath],
   );
   const [dirs, setDirs] = useState<Record<string, DirState>>({});
+  // The root's own metadata, so its header tip shows the same file info as
+  // every row (path + mode/ownership + date). Best-effort; path-only until it
+  // arrives.
+  const [rootMeta, setRootMeta] = useState<FileEntry | null>(null);
+  useEffect(() => {
+    let live = true;
+    fsEntryMeta(connId, rootPath)
+      .then((m) => {
+        if (live) setRootMeta(m);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [connId, rootPath]);
   // Expansion persists per host+root and is reloaded (dirs re-listed) on
   // mount — remembered folders come back open across restarts/reconnects.
   const [expanded, setExpanded] = useState<Set<string>>(
@@ -135,8 +151,10 @@ export function RootTree({
 
   const openRepoFromExplorer = useVcsStore((s) => s.openRepoFromExplorer);
   const askConfirm = useVcsStore((s) => s.askConfirm);
+  // "Tracked" = a Source Control card covers this folder (its root, or a pin
+  // inside one). A pin that merely CONTAINS a repo deeper down stays gray.
   const repoTracked = useVcsStore(
-    (s) => findRepoForPath(s.repos, connId, rootPath) !== undefined,
+    (s) => findRepoContaining(s.repos, connId, rootPath) !== undefined,
   );
   // Tracked pins take the repo's color (default green; editable on the card).
   const rootRepoColor = useVcsStore((s) =>
@@ -406,50 +424,55 @@ export function RootTree({
           setSelected({ connId, path: rootPath, name: label, isDir: true });
           setCollapsed((c) => !c);
         }}
-        title={rootPath}
       >
         <span
           className={`root-tree__twisty ${collapsed ? "" : "root-tree__twisty--open"}`}
         >
           <IconChevron size={14} />
         </span>
-        <span
-          className="root-tree__label"
-          style={rootRepoColor ? { color: rootRepoColor } : undefined}
-        >
-          {label}
-        </span>
-        <button
-          className={`root-tree__remove root-tree__vcs ${repoTracked ? "root-tree__vcs--tracked" : ""}`}
-          style={rootRepoColor ? { color: rootRepoColor } : undefined}
-          title={
+        <Tip label={rootMeta ? entryTooltip(rootMeta) : rootPath}>
+          <span
+            className="root-tree__label"
+            style={rootRepoColor ? { color: rootRepoColor } : undefined}
+          >
+            {label}
+          </span>
+        </Tip>
+        <Tip
+          label={
             repoTracked
               ? "In Source Control — open the panel"
-              : "Add this folder to Source Control…"
+              : "Add to Source Control"
           }
-          onClick={(event) => {
-            event.stopPropagation();
-            openRepoFromExplorer(connId, rootPath);
-          }}
         >
-          <IconBranch size={13} />
-        </button>
-        {removable && (
           <button
-            className="root-tree__remove"
-            title="Remove from sidebar"
+            className={`root-tree__remove root-tree__vcs ${repoTracked ? "root-tree__vcs--tracked" : ""}`}
+            style={rootRepoColor ? { color: rootRepoColor } : undefined}
             onClick={(event) => {
               event.stopPropagation();
-              askConfirm(
-                "Unpin folder?",
-                `Remove "${label}" from the sidebar? Nothing on disk is touched — you can pin it again any time.`,
-                () => onRemove?.(),
-                "unpin-folder",
-              );
+              openRepoFromExplorer(connId, rootPath);
             }}
           >
-            <IconClose size={13} />
+            <IconBranch size={13} />
           </button>
+        </Tip>
+        {removable && (
+          <Tip label="Remove from sidebar">
+            <button
+              className="root-tree__remove"
+              onClick={(event) => {
+                event.stopPropagation();
+                askConfirm(
+                  "Unpin folder?",
+                  `Remove "${label}" from the sidebar? Nothing on disk is touched — you can pin it again any time.`,
+                  () => onRemove?.(),
+                  "unpin-folder",
+                );
+              }}
+            >
+              <IconClose size={13} />
+            </button>
+          </Tip>
         )}
       </div>
 

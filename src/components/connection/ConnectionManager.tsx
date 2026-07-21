@@ -8,6 +8,7 @@ import { sshListConfigHosts, type SshHostEntry } from "../../lib/ipc";
 import { useSSH } from "../../hooks/useSSH";
 import { useAppStore } from "../../store/appStore";
 import { IconPlug } from "../icons";
+import { Tip } from "../Tooltip";
 
 function hostDetail(host: SshHostEntry): string {
   const target = host.hostName ?? host.name;
@@ -108,16 +109,16 @@ export function ConnectionManager() {
         </div>
       ) : (
         hosts.map((host) => (
-          <div
-            key={host.name}
-            className="conn-item"
-            style={{ borderLeftColor: colorForName(host.name) }}
-            onClick={() => onHostClick(host)}
-            title={`Connect to ${host.name}`}
-          >
-            <div className="conn-item__name">{host.name}</div>
-            <div className="conn-item__detail">{hostDetail(host)}</div>
-          </div>
+          <Tip key={host.name} label={`Connect to ${host.name}`}>
+            <div
+              className="conn-item"
+              style={{ borderLeftColor: colorForName(host.name) }}
+              onClick={() => onHostClick(host)}
+            >
+              <div className="conn-item__name">{host.name}</div>
+              <div className="conn-item__detail">{hostDetail(host)}</div>
+            </div>
+          </Tip>
         ))
       )}
     </div>

@@ -1,6 +1,6 @@
 /** Bulk tab operations shared by the command palette and the tab context menu.
  *  One dialog covers unsaved files ("save all & close"); pinned tabs are spared
- *  by Others/Right/Saved and only fall to an explicit Close All. */
+ *  by EVERY bulk close (Others/Right/Saved/All) — unpin to close one. */
 import { saveTab } from "./saveFile";
 import { useAppStore } from "../store/appStore";
 import { useVcsStore } from "../store/vcsStore";
@@ -37,8 +37,12 @@ export function closeTabs(ids: string[]): void {
     );
 }
 
+/** Close every tab EXCEPT pinned ones — surviving bulk closes is the whole
+ *  point of a pin (VS Code behaves the same). Unpin to let one go. */
 export function closeAllTabs(): void {
-  closeTabs(useAppStore.getState().tabs.map((t) => t.id));
+  closeTabs(
+    useAppStore.getState().tabs.filter((t) => !t.pinned).map((t) => t.id),
+  );
 }
 
 export function closeSavedTabs(): void {

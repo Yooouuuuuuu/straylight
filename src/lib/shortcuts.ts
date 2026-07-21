@@ -29,7 +29,14 @@ export type ShortcutAction =
   | "focusFileExplorer"
   | "closeFile"
   | "refreshTree"
-  | "findInFile";
+  | "findInFile"
+  | "toggleSourceControl"
+  | "toggleChat"
+  | "splitRight"
+  | "togglePanel"
+  | "focusGroup1"
+  | "focusGroup2"
+  | "focusGroup3";
 
 export interface Shortcut {
   /** Stable command id (the contract) — palette + overrides reference this. */
@@ -42,6 +49,10 @@ export interface Shortcut {
   alt?: boolean;
   description: string;
   label: string;
+  /** Never pass THIS binding through from a focused terminal, even when its
+   *  action is terminal-capable — e.g. Ctrl+J toggles the panel outside a
+   *  shell but stays the shell's newline inside one. */
+  noTerminal?: boolean;
 }
 
 /** The default keybinding table. Never mutated — overrides produce a copy. */
@@ -70,11 +81,28 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "explorer.delete", action: "deleteSelected", key: "Delete", description: "Delete the selected item", label: "Del" },
   { id: "terminal.toggle", action: "toggleTerminal", key: "`", ctrl: true, description: "Toggle the terminal panel", label: "Ctrl+`" },
   { id: "terminal.new", action: "newTerminal", key: "`", ctrl: true, shift: true, description: "New terminal — on the focused terminal's host, else the selected group", label: "Ctrl+Shift+`" },
-  { id: "terminal.next", action: "nextTerminal", key: "PageDown", ctrl: true, description: "Next terminal", label: "Ctrl+PageDown" },
-  { id: "terminal.previous", action: "prevTerminal", key: "PageUp", ctrl: true, description: "Previous terminal", label: "Ctrl+PageUp" },
+  // Context keys (VS Code-style): next/previous tab of whatever is focused —
+  // the terminal panel's tabs (host groups, then tool views) or, anywhere
+  // else, the editor's tabs. CHAT cycles its residents.
+  { id: "terminal.next", action: "nextTerminal", key: "PageDown", ctrl: true, description: "Next tab — terminal panel when focused, else editor", label: "Ctrl+PageDown" },
+  { id: "terminal.previous", action: "prevTerminal", key: "PageUp", ctrl: true, description: "Previous tab — terminal panel when focused, else editor", label: "Ctrl+PageUp" },
   { id: "view.toggleSidebar", action: "toggleSidebar", key: "b", ctrl: true, description: "Toggle the sidebar", label: "Ctrl+B" },
+  { id: "view.toggleSourceControl", action: "toggleSourceControl", key: "g", ctrl: true, shift: true, description: "Toggle Source Control", label: "Ctrl+Shift+G" },
+  { id: "view.toggleChat", action: "toggleChat", key: "i", ctrl: true, alt: true, description: "Toggle the CHAT column", label: "Ctrl+Alt+I" },
+  // Second CHAT binding (VS Code pairs Ctrl+Alt+I with Ctrl+Shift+I). In dev
+  // builds the WebView may grab this one for DevTools; packaged builds don't.
+  { id: "view.toggleChat", action: "toggleChat", key: "i", ctrl: true, shift: true, description: "Toggle the CHAT column", label: "Ctrl+Shift+I" },
+  { id: "editor.splitRight", action: "splitRight", key: "\\", ctrl: true, description: "Split right — move the file over, or open an empty pane", label: "Ctrl+\\" },
+  // VS Code's Ctrl+J: pure show/hide of the panel — it wins over the shell
+  // (VS Code also steals Ctrl+J from the terminal for this).
+  { id: "view.togglePanel", action: "togglePanel", key: "j", ctrl: true, description: "Show/hide the terminal panel", label: "Ctrl+J" },
+  // VS Code's way back to the editor without hiding the terminal.
+  { id: "editor.focusGroup1", action: "focusGroup1", key: "1", ctrl: true, description: "Focus editor group 1", label: "Ctrl+1" },
+  { id: "editor.focusGroup2", action: "focusGroup2", key: "2", ctrl: true, description: "Focus editor group 2", label: "Ctrl+2" },
+  { id: "editor.focusGroup3", action: "focusGroup3", key: "3", ctrl: true, description: "Focus editor group 3", label: "Ctrl+3" },
   { id: "explorer.focus", action: "focusFileExplorer", key: "e", ctrl: true, shift: true, description: "Focus the file explorer", label: "Ctrl+Shift+E" },
-  { id: "editor.closeTab", action: "closeFile", key: "w", ctrl: true, description: "Close the current file", label: "Ctrl+W" },
+  { id: "editor.closeTab", action: "closeFile", key: "w", ctrl: true, description: "Close the current file (or empty split)", label: "Ctrl+W" },
+  { id: "editor.closeTab", action: "closeFile", key: "F4", ctrl: true, description: "Close the current file (or empty split)", label: "Ctrl+F4" },
   { id: "explorer.refreshTrees", action: "refreshTree", key: "r", ctrl: true, shift: true, description: "Refresh the file tree", label: "Ctrl+Shift+R" },
 ];
 
@@ -142,8 +170,8 @@ export function keyLabelFor(commandId: string): string | null {
   return effective.find((s) => s.id === commandId)?.label ?? null;
 }
 
-/** Resolve a keyboard event to a shortcut action, if any. Treats Cmd as Ctrl. */
-export function matchShortcut(event: KeyboardEvent): ShortcutAction | null {
+/** Resolve a keyboard event to its shortcut entry, if any. Treats Cmd as Ctrl. */
+function findShortcut(event: KeyboardEvent): Shortcut | null {
   const ctrl = event.ctrlKey || event.metaKey;
   // Match the backtick on its physical key or the "~" it yields under Shift, so
   // Ctrl+` and Ctrl+Shift+` both resolve (event.key alone would miss the latter).
@@ -159,10 +187,15 @@ export function matchShortcut(event: KeyboardEvent): ShortcutAction | null {
       !!shortcut.alt === event.altKey &&
       shortcut.key.toLowerCase() === key
     ) {
-      return shortcut.action;
+      return shortcut;
     }
   }
   return null;
+}
+
+/** Resolve a keyboard event to a shortcut action, if any. */
+export function matchShortcut(event: KeyboardEvent): ShortcutAction | null {
+  return findShortcut(event)?.action ?? null;
 }
 
 /** Actions that belong to the terminal. These are the *only* shortcuts that act
@@ -178,9 +211,16 @@ const TERMINAL_ACTIONS: ShortcutAction[] = [
   "zoomIn",
   "zoomOut",
   "zoomReset",
+  // Jumping out of the terminal is exactly when these are needed.
+  "toggleChat",
+  "toggleSourceControl",
+  "togglePanel",
+  "focusGroup1",
+  "focusGroup2",
+  "focusGroup3",
 ];
 
 export function isPassthroughShortcut(event: KeyboardEvent): boolean {
-  const action = matchShortcut(event);
-  return action !== null && TERMINAL_ACTIONS.includes(action);
+  const s = findShortcut(event);
+  return s !== null && TERMINAL_ACTIONS.includes(s.action) && !s.noTerminal;
 }

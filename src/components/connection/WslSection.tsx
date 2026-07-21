@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { PALETTE, paletteName } from "../../lib/connectionColor";
+import { connStateTip } from "../../lib/hostColors";
 import { basename, dirname } from "../../lib/format";
 import {
   sshDisconnect,
@@ -22,6 +23,7 @@ import {
 } from "../../store/appStore";
 import { FolderBrowser } from "../FolderBrowser";
 import { RootTree } from "../filetree/RootTree";
+import { Tip } from "../Tooltip";
 import {
   IconEye,
   IconEyeOff,
@@ -77,7 +79,6 @@ function WslHost({ ws, order }: { ws: RemoteWorkspace; order: number }) {
       <div
         className="host-bar"
         style={{ "--host-color": hostColor } as React.CSSProperties}
-        title={`${conn.name} — right-click: host color`}
         onContextMenu={(e) => {
           e.preventDefault();
           setColorMenu((o) => !o);
@@ -87,81 +88,90 @@ function WslHost({ ws, order }: { ws: RemoteWorkspace; order: number }) {
           <div className="color-menu">
             <span className="color-menu__label">{wslKey}</span>
             {[...HOST_COLOR_RAMP, ...PALETTE].map((c) => (
+              <Tip key={c} label={c.startsWith("var(") ? paletteName(c) : c}>
+                <button
+                  className="color-menu__swatch"
+                  style={{ background: c }}
+                  onClick={() => {
+                    setHostColor(wslKey, c);
+                    setColorMenu(false);
+                  }}
+                />
+              </Tip>
+            ))}
+            <Tip label="Back to the section color">
               <button
-                key={c}
-                className="color-menu__swatch"
-                style={{ background: c }}
-                title={c.startsWith("var(") ? paletteName(c) : c}
+                className="color-menu__reset"
                 onClick={() => {
-                  setHostColor(wslKey, c);
+                  setHostColor(wslKey, null);
                   setColorMenu(false);
                 }}
-              />
-            ))}
-            <button
-              className="color-menu__reset"
-              title="Back to the WSL section color"
-              onClick={() => {
-                setHostColor(wslKey, null);
-                setColorMenu(false);
-              }}
-            >
-              Auto
-            </button>
+              >
+                Auto
+              </button>
+            </Tip>
           </div>
         )}
-        <span className={`dot dot--${ws.state}`} />
-        <span className="host-bar__label" title={conn.name}>
-          {conn.user ? `${conn.user}@${conn.name}` : conn.name}
-        </span>
-        <button
-          className="icon-btn icon-btn--danger sidebar__section-action"
-          title={`Disconnect ${conn.name}`}
-          onClick={() => void disconnect()}
-        >
-          <IconUnplug />
-        </button>
+        <Tip label={`${conn.name} — right-click: host color`}>
+          <span className="host-bar__label">
+            {conn.user ? `${conn.user}@${conn.name}` : conn.name}
+          </span>
+        </Tip>
+        <Tip label="Disconnect">
+          <button
+            className="icon-btn icon-btn--danger sidebar__section-action"
+            onClick={() => void disconnect()}
+          >
+            <IconUnplug />
+          </button>
+        </Tip>
       </div>
       <div
         className="host-tools"
         style={{ "--host-color": hostColor } as React.CSSProperties}
       >
-        <button
-          className="icon-btn"
-          title="Pin a folder"
-          onClick={() => setBrowsing(true)}
-        >
-          <IconPlus />
-        </button>
-        <button
-          className={`icon-btn ${ws.showHidden ? "icon-btn--active" : ""}`}
-          title={ws.showHidden ? "Hide hidden files" : "Show hidden files"}
-          onClick={() => toggleHiddenWsl(conn.connId)}
-        >
-          {ws.showHidden ? <IconEye /> : <IconEyeOff />}
-        </button>
-        <button
-          className="icon-btn"
-          title="New file"
-          onClick={() => openNewEntry(conn.connId, newParent, false)}
-        >
-          <IconFilePlus />
-        </button>
-        <button
-          className="icon-btn"
-          title="New folder"
-          onClick={() => openNewEntry(conn.connId, newParent, true)}
-        >
-          <IconFolderPlus />
-        </button>
+        <Tip label="Pin a folder">
+          <button className="icon-btn" onClick={() => setBrowsing(true)}>
+            <IconPlus />
+          </button>
+        </Tip>
+        <Tip label={ws.showHidden ? "Hide hidden files" : "Show hidden files"}>
+          <button
+            className={`icon-btn ${ws.showHidden ? "icon-btn--active" : ""}`}
+            onClick={() => toggleHiddenWsl(conn.connId)}
+          >
+            {ws.showHidden ? <IconEye /> : <IconEyeOff />}
+          </button>
+        </Tip>
+        <Tip label="New file">
+          <button
+            className="icon-btn"
+            onClick={() => openNewEntry(conn.connId, newParent, false)}
+          >
+            <IconFilePlus />
+          </button>
+        </Tip>
+        <Tip label="New folder">
+          <button
+            className="icon-btn"
+            onClick={() => openNewEntry(conn.connId, newParent, true)}
+          >
+            <IconFolderPlus />
+          </button>
+        </Tip>
         <span className="host-tools__spacer" />
-        <button
-          className="icon-btn"
-          title={`Refresh ${conn.name}`}
-          onClick={() => refreshWsl(conn.connId)}
-        >
-          <IconRefresh />
-        </button>
+        {/* Issue light: near-invisible while fine, colored on trouble (same
+            rule as the status bar). */}
+        <Tip label={connStateTip(ws.state)}>
+          <span
+            className={`dot ${ws.state === "connected" ? "dot--fine" : `dot--${ws.state}`}`}
+          />
+        </Tip>
+        <Tip label="Refresh">
+          <button className="icon-btn" onClick={() => refreshWsl(conn.connId)}>
+            <IconRefresh />
+          </button>
+        </Tip>
       </div>
       {ws.pins.length > 0 ? (
         ws.pins.map((path, index) => (
@@ -287,22 +297,24 @@ export function WslSection() {
         <span className="sidebar__section-label">WSL</span>
         {anyConnected ? (
           wsls.length < MAX_WSLS && (
-            <button
-              className={`icon-btn sidebar__section-action ${listOpen ? "icon-btn--active" : ""}`}
-              title={`Connect another distro (up to ${MAX_WSLS})`}
-              onClick={() => setListOpen((o) => !o)}
-            >
-              <IconPlug size={13} />
-            </button>
+            <Tip label="Connect another distro">
+              <button
+                className={`icon-btn sidebar__section-action ${listOpen ? "icon-btn--active" : ""}`}
+                onClick={() => setListOpen((o) => !o)}
+              >
+                <IconPlug size={13} />
+              </button>
+            </Tip>
           )
         ) : (
-          <button
-            className="icon-btn sidebar__section-action"
-            title="Refresh WSL distros"
-            onClick={() => load()}
-          >
-            <IconRefresh />
-          </button>
+          <Tip label="Refresh WSL distros">
+            <button
+              className="icon-btn sidebar__section-action"
+              onClick={() => load()}
+            >
+              <IconRefresh />
+            </button>
+          </Tip>
         )}
       </div>
 
@@ -351,17 +363,19 @@ export function WslSection() {
                       ? "ready"
                       : "running";
                   return (
-                    <div
+                    <Tip
                       key={d.name}
+                      label={
+                        light === "ready"
+                          ? "sshd up — connects instantly"
+                          : light === "running"
+                            ? "Running — ssh starts on connect"
+                            : "Stopped — boots on connect"
+                      }
+                    >
+                    <div
                       className="conn-item"
                       style={{ borderLeftColor: WSL_COLOR }}
-                      title={
-                        light === "ready"
-                          ? `${d.name} — sshd is up; connects instantly`
-                          : light === "running"
-                            ? `${d.name} — running; ssh starts on connect`
-                            : `${d.name} — stopped; will boot on connect`
-                      }
                       onClick={() => void connect(d.name, false)}
                     >
                       <div className="conn-item__name">
@@ -381,6 +395,7 @@ export function WslSection() {
                         {connecting === d.name ? "connecting…" : light}
                       </div>
                     </div>
+                    </Tip>
                   );
                 })}
             </div>

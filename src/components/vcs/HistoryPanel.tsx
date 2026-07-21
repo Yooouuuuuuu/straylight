@@ -6,6 +6,7 @@ import { useAppStore } from "../../store/appStore";
 import { useVcsStore } from "../../store/vcsStore";
 import { hostColorForConnKey } from "../../lib/hostColors";
 import { IconClose, IconPanelToEditor } from "../icons";
+import { Tip } from "../Tooltip";
 import { VcsLogView } from "./VcsLogView";
 
 export function HistoryPanel() {
@@ -27,9 +28,11 @@ export function HistoryPanel() {
       <div className="history-panel">
         <div className="history-panel__head">
           <span className="history-panel__title">History</span>
-          <button className="icon-btn" title="Close" onClick={() => closeHistory()}>
-            <IconClose />
-          </button>
+          <Tip label="Close">
+            <button className="icon-btn" onClick={() => closeHistory()}>
+              <IconClose />
+            </button>
+          </Tip>
         </div>
         <div className="vcs-log__msg">
           {historyRepo ? "Repository not connected." : "No repository selected."}
@@ -45,33 +48,37 @@ export function HistoryPanel() {
         <span className="history-panel__title">
           {repo.backend === "jj" ? "jj history" : "git history"}
         </span>
-        <button
-          className="icon-btn"
-          title="Open in the editor (closes this panel)"
-          onClick={() => {
-            openLogTab({
-              connId: repo.connId!,
-              root: repo.root,
-              backend: repo.backend,
-              label: repo.label,
-            });
-            closeHistory();
-          }}
-        >
-          <IconPanelToEditor size={14} />
-        </button>
-        <button className="icon-btn" title="Close" onClick={() => closeHistory()}>
-          <IconClose />
-        </button>
+        <Tip label="Open as an editor tab">
+          <button
+            className="icon-btn"
+            onClick={() => {
+              openLogTab({
+                connId: repo.connId!,
+                root: repo.root,
+                backend: repo.backend,
+                label: repo.label,
+              });
+              closeHistory();
+            }}
+          >
+            <IconPanelToEditor size={14} />
+          </button>
+        </Tip>
+        <Tip label="Close">
+          <button className="icon-btn" onClick={() => closeHistory()}>
+            <IconClose />
+          </button>
+        </Tip>
       </div>
       {/* Row 2: which repo, on which machine (host identity color). */}
-      <div
-        className="history-panel__repo"
-        title={repo.root}
-        style={{ borderLeftColor: hostColorForConnKey(hostColors, repo.connKey) }}
-      >
-        {repo.label}
-      </div>
+      <Tip label={repo.root}>
+        <div
+          className="history-panel__repo"
+          style={{ borderLeftColor: hostColorForConnKey(hostColors, repo.connKey) }}
+        >
+          {repo.label}
+        </div>
+      </Tip>
       {/* Colocated repos: an explicit lens swap on its own line. */}
       {repo.colocated && (
         <button

@@ -4,6 +4,7 @@
 import { formatSize } from "../../lib/format";
 import { useAppStore } from "../../store/appStore";
 import { IconClose } from "../icons";
+import { Tip } from "../Tooltip";
 
 export function TransferProgressBar({ variant }: { variant: "panel" | "status" }) {
   const t = useAppStore((s) => s.activeTransfer);
@@ -33,18 +34,21 @@ export function TransferProgressBar({ variant }: { variant: "panel" | "status" }
 
   if (variant === "status") {
     return (
-      <span className="statusbar__transfer" title={`${t.label} · ${detail}`}>
-        <span className="statusbar__transfer-track">
-          <span className="statusbar__transfer-fill" style={{ width: `${pct}%` }} />
-        </span>
+      <span className="statusbar__transfer">
+        <Tip label={`${t.label} · ${detail}`}>
+          <span className="statusbar__transfer-track">
+            <span
+              className="statusbar__transfer-fill"
+              style={{ width: `${pct}%` }}
+            />
+          </span>
+        </Tip>
         <span className="statusbar__transfer-text">{detail}</span>
-        <button
-          className="statusbar__transfer-cancel"
-          onClick={cancel}
-          title="Cancel transfer"
-        >
-          <IconClose size={12} />
-        </button>
+        <Tip label="Cancel transfer">
+          <button className="statusbar__transfer-cancel" onClick={cancel}>
+            <IconClose size={12} />
+          </button>
+        </Tip>
       </span>
     );
   }

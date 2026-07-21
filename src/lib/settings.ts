@@ -99,7 +99,6 @@ const THEME_KEYS = new Set(["themes"]);
 export const CONFIRM_IDS = [
   "exit",
   "unpin-folder",
-  "track-repo",
   "remove-repo",
   "vcs-update",
   "vcs-push",

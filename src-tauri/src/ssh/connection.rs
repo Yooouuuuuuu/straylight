@@ -128,18 +128,32 @@ impl Connection {
         Ok(guard)
     }
 
-    /// Open a fresh session channel on the live handle. Used by SFTP, the PTY
-    /// layer, and the supervisor's health probe; reading the lock means a
-    /// reconnect (which write-locks) is briefly serialized against new channels.
-    pub async fn open_channel(&self) -> Result<Channel<client::Msg>, String> {
+    /// Open a fresh session channel, surfacing the raw russh error — the
+    /// supervisor must tell an active REFUSAL (server alive, just full) from a
+    /// dead transport.
+    pub async fn open_channel_raw(&self) -> Result<Channel<client::Msg>, russh::Error> {
         // Clone the (cheap) handle and drop the read guard before the network
         // round-trip, so an in-flight channel open never blocks a reconnect
         // (which needs the write lock).
         let handle = self.live.read().await.handle.clone();
-        handle
-            .channel_open_session()
-            .await
-            .map_err(|e| format!("could not open SSH channel: {e}"))
+        handle.channel_open_session().await
+    }
+
+    /// Open a fresh session channel on the live handle. Used by SFTP, the PTY
+    /// layer, and exec; reading the lock means a reconnect (which write-locks)
+    /// is briefly serialized against new channels.
+    pub async fn open_channel(&self) -> Result<Channel<client::Msg>, String> {
+        self.open_channel_raw().await.map_err(|e| match e {
+            // The refusal users actually hit: the server's per-connection
+            // session cap — every terminal, the file browser (SFTP), and each
+            // background command counts against it.
+            russh::Error::ChannelOpenFailure(_) => {
+                "the server's session limit is reached (sshd MaxSessions, default 10) — \
+                 close a terminal, or raise MaxSessions in sshd_config"
+                    .to_string()
+            }
+            e => format!("could not open SSH channel: {e}"),
+        })
     }
 
     /// Open a `direct-tcpip` channel to `host:port` as reachable from the server
@@ -717,17 +731,19 @@ async fn supervise(app: AppHandle, conn: Arc<Connection>) {
             return;
         }
 
-        let alive = match tokio::time::timeout(PROBE_TIMEOUT, conn.open_channel()).await {
-            Ok(Ok(channel)) => {
-                // Close the probe channel so an idle connection doesn't leak one
-                // channel per interval — but never block the loop on a half-open
-                // socket waiting for the close handshake.
-                let _ = tokio::time::timeout(Duration::from_secs(3), channel.close()).await;
-                true
-            }
-            _ => false,
-        };
-        if alive {
+        if probe_alive(&conn).await {
+            continue;
+        }
+        if conn.is_stopped() {
+            return;
+        }
+        // One failed probe can be a busy link, not a dead one — confirm with a
+        // second probe after a short beat before tearing anything down: a
+        // false "drop" would restart every terminal on the connection.
+        if sleep_or_stopped(&conn, 2).await {
+            return;
+        }
+        if probe_alive(&conn).await {
             continue;
         }
         if conn.is_stopped() {
@@ -778,6 +794,25 @@ async fn supervise(app: AppHandle, conn: Arc<Connection>) {
                 }
             }
         }
+    }
+}
+
+/// One health probe: open + close a throwaway channel. An active REFUSAL (e.g.
+/// `MaxSessions` reached — every terminal + SFTP + exec counts against it) is
+/// proof of life: the server answered us. Only silence (timeout) or a transport
+/// error reads as dead — a full server must never be mistaken for a dead one
+/// (that mistake restarted every terminal in a loop; F23).
+async fn probe_alive(conn: &Connection) -> bool {
+    match tokio::time::timeout(PROBE_TIMEOUT, conn.open_channel_raw()).await {
+        Ok(Ok(channel)) => {
+            // Close the probe channel so an idle connection doesn't leak one
+            // channel per interval — but never block the loop on a half-open
+            // socket waiting for the close handshake.
+            let _ = tokio::time::timeout(Duration::from_secs(3), channel.close()).await;
+            true
+        }
+        Ok(Err(russh::Error::ChannelOpenFailure(_))) => true,
+        _ => false,
     }
 }
 

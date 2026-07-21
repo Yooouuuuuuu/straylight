@@ -485,12 +485,27 @@
 }
 
 /* The three panel buttons: uniform width, icon + label, easy targets. */
+/* The four panel blocks: EQUAL width (the rule), same font size as the rest
+   of the bar. The icon anchors at the SAME inset in every block; the label
+   centers in the remaining space — so different text lengths can't make the
+   blocks look ragged. */
 .statusbar__panel-btn {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: var(--space-2);
-  min-width: 104px;
+  width: 92px;
+  min-width: 0;
+  padding: 0 0 0 var(--space-4);
+  font-size: var(--font-size-xs);
+}
+
+.statusbar__panel-label {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-width: 0;
 }
 
 /* Incoming block at the top of the history panel (git). */
@@ -1820,6 +1835,10 @@
 
 /* The pop-out editor log tab: a one-line head above the (absolute) log. */
 .vcs-logtab {
+  /* Positioned like .app-tab: the blanked Monaco host underneath is
+   * `absolute inset:0` and would otherwise sit ABOVE the (static) head and
+   * swap button in hit-testing — visible but unclickable. */
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -1876,6 +1895,14 @@
 .dot--connected {
   background: var(--green);
   box-shadow: 0 0 6px var(--green);
+}
+
+/* The status bar's ISSUE LIGHT while a host is fine: present but nearly
+   invisible, so trouble brightens an existing light instead of popping a new
+   one into the bar. */
+.dot--fine {
+  background: var(--fg-secondary);
+  opacity: 0.35;
 }
 
 .dot--connecting,
@@ -3365,13 +3392,40 @@ select option {
   line-height: 1;
 }
 
+/* Untracked stays plain gray even on hover (straightforward: color = "in
+ * Source Control", gray = not) — this overrides the shared ✕ red hover. A
+ * tracked root's inline repo color wins over this either way. */
 .root-tree__vcs:hover {
+  color: var(--fg-secondary);
+}
+
+/* Tracked keeps its color (repo color inline; purple fallback) but stays
+ * hover-revealed like the other row actions — no always-on icon. */
+.root-tree__vcs--tracked {
   color: var(--purple);
 }
 
-.root-tree__vcs--tracked {
+/* Every folder row gets the same button (any depth, not just pinned roots),
+ * revealed on row hover at the row's RIGHT edge (matching the root header);
+ * a tracked repo root colors it via inline style. */
+.file-node__vcsbtn {
+  flex: 0 0 auto;
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  padding: 1px;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  display: inline-flex;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+.file-node:hover .file-node__vcsbtn {
   opacity: 1;
-  color: var(--purple);
+}
+.file-node__vcsbtn:hover {
+  background: var(--bg-selected);
 }
 
 .root-tree__body {
@@ -3605,7 +3659,36 @@ select option {
   text-decoration: underline;
 }
 
+/* An intentionally empty split: the mark centered, its own ✕ top-right. */
+.editor-group__empty {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-primary);
+}
+
+.editor-group__empty img {
+  opacity: 0.2;
+}
+
+/* A tab is being dragged over the empty pane — light it as the drop target. */
+.editor-group__empty--drop {
+  background: color-mix(in srgb, var(--green) 10%, var(--bg-primary));
+  outline: 2px dashed var(--green);
+  outline-offset: -2px;
+}
+
+.editor-group__emptyclose {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+}
+
 .editor-area__body {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -3977,8 +4060,8 @@ select option {
 }
 
 .empty-state__logo {
-  width: 64px;
-  height: 64px;
+  width: 144px;
+  height: 144px;
   opacity: 0.5;
 }
 
@@ -4517,11 +4600,17 @@ select option {
   font-size: var(--font-size-xs);
   color: var(--fg-primary);
 }
+/* The CHAT column headlines its resident: larger, semibold, tinted with the
+   host color (matching its dot above) — which agent, on which machine, at a
+   glance. */
 .chat-panel__title {
   flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 1.5em;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 .chat-panel__rename {
   flex: 1 1 auto;
@@ -4573,6 +4662,32 @@ select option {
   position: fixed;
   inset: 0;
   z-index: 40;
+}
+/* ——— Right-click edit menu (text fields + the file editor) ——— */
+.ctx-menu {
+  position: fixed;
+  z-index: 1200;
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+.ctx-menu .terminal-menu__item:disabled {
+  color: var(--fg-secondary);
+  opacity: 0.55;
+  cursor: default;
+}
+.ctx-menu .terminal-menu__item:disabled:hover {
+  background: transparent;
+}
+.ctx-menu__sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border);
 }
 .terminal-menu {
   position: absolute;
@@ -4916,7 +5031,10 @@ select option {
   border-radius: var(--radius-sm);
   padding: 2px var(--space-3);
   font-size: var(--font-size-xs);
-  white-space: nowrap;
+  /* pre honors \n and the indents in multi-line labels (file info) while
+     single-line labels render exactly as before. */
+  white-space: pre;
+  text-align: left;
   pointer-events: none;
   box-shadow: var(--shadow-md);
 }

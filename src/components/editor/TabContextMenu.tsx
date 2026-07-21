@@ -1,6 +1,6 @@
 /** Right-click menu for editor tabs: close variants (with the shared one-dialog
- *  unsaved check), pin/unpin, and copy path. Pinned tabs are spared by
- *  Others / Right / Saved — only an explicit Close All takes them. */
+ *  unsaved check), pin/unpin, and copy path. Pinned tabs are spared by EVERY
+ *  bulk close (Others / Right / Saved / All) — unpin to close one. */
 import { useEffect, useRef } from "react";
 
 import { copyPath } from "../../lib/fileOps";

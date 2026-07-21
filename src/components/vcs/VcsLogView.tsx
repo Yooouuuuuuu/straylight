@@ -21,10 +21,13 @@ import { hostColorForConnKey } from "../../lib/hostColors";
 import { useAppStore } from "../../store/appStore";
 import { useVcsStore } from "../../store/vcsStore";
 import { RelativeTime } from "../RelativeTime";
+import { Tip } from "../Tooltip";
 
 /** One-line header for the pop-out editor tab (the sidebar panel has its own
  *  two-row header): "GIT HISTORY · repo", host-colored. `backend` comes from
- *  the tab (frozen at open) so the head always matches the tab's content. */
+ *  the tab and stays in step with the repo card in BOTH directions: the swap
+ *  button below flips the card, and the card/panel toggle patches this tab
+ *  (vcsStore.toggleBackend → setLogTabBackend). */
 export function VcsLogTabHead({
   connId,
   root,
@@ -42,13 +45,15 @@ export function VcsLogTabHead({
     : "var(--border)";
   return (
     <>
-      <div className="vcs-logtab__head" title={root} style={{ borderLeftColor: color }}>
-        <span className="vcs-logtab__kind">
-          {backend === "jj" ? "jj history" : "git history"}
-        </span>
-        {" · "}
-        {repo?.label ?? basename(root)}
-      </div>
+      <Tip label={root}>
+        <div className="vcs-logtab__head" style={{ borderLeftColor: color }}>
+          <span className="vcs-logtab__kind">
+            {backend === "jj" ? "jj history" : "git history"}
+          </span>
+          {" · "}
+          {repo?.label ?? basename(root)}
+        </div>
+      </Tip>
       {repo?.colocated && (
         <button
           className="history-swap history-swap--tab"
@@ -135,25 +140,28 @@ function IncomingBlock({
           <button className="btn btn--primary incoming__merge" onClick={merge}>
             Merge into {ref ?? "branch"}
           </button>
-          <button
-            className="btn btn--ghost incoming__merge"
-            title="Hide — nothing is merged; ⇣ Fetch shows it again"
-            onClick={() => dismissIncoming(repo.connKey, repo.root)}
-          >
-            Dismiss
-          </button>
+          <Tip label="Nothing is merged — ⇣ Fetch shows it again">
+            <button
+              className="btn btn--ghost incoming__merge"
+              onClick={() => dismissIncoming(repo.connKey, repo.root)}
+            >
+              Dismiss
+            </button>
+          </Tip>
         </span>
       </div>
       {incoming.commits.map((c) => (
-        <div className="incoming__row" key={c.id} title={`${c.id} · ${c.author}`}>
-          <span className="incoming__id mono">{c.id}</span>
-          <span className="incoming__subject">{c.subject}</span>
-          {c.timestamp ? (
-            <span className="incoming__when">
-              <RelativeTime at={c.timestamp * 1000} />
-            </span>
-          ) : null}
-        </div>
+        <Tip key={c.id} label={`${c.id} · ${c.author}`}>
+          <div className="incoming__row">
+            <span className="incoming__id mono">{c.id}</span>
+            <span className="incoming__subject">{c.subject}</span>
+            {c.timestamp ? (
+              <span className="incoming__when">
+                <RelativeTime at={c.timestamp * 1000} title={null} />
+              </span>
+            ) : null}
+          </div>
+        </Tip>
       ))}
     </div>
   );
@@ -268,7 +276,6 @@ export function VcsLogView({
                 <div
                   className="commit-row"
                   onClick={() => toggle(c.id)}
-                  title="Show changed files"
                 >
                   <svg
                     className="commit-row__graph"
@@ -335,7 +342,7 @@ export function VcsLogView({
                       {c.timestamp ? (
                         <span>
                           {" · "}
-                          <RelativeTime at={c.timestamp * 1000} />
+                          <RelativeTime at={c.timestamp * 1000} title={null} />
                         </span>
                       ) : null}
                       {c.parents.length > 1 ? <span> · merge</span> : null}
@@ -354,19 +361,22 @@ export function VcsLogView({
                       <div className="commit-files__msg">No file changes.</div>
                     ) : (
                       fs.map((ch) => (
-                        <div
-                          className="change-row"
+                        <Tip
                           key={ch.path}
-                          title={`${ch.path} — open diff at this commit`}
-                          onClick={() =>
-                            void openCommitDiff({ connId, root, backend }, c.id, ch)
-                          }
+                          label={`${ch.path} — open diff at this commit`}
                         >
-                          <span className={`change-row__badge ${vcsClass(ch.kind)}`}>
-                            {vcsLetter(ch.kind) || "•"}
-                          </span>
-                          <span className="change-row__path">{ch.path}</span>
-                        </div>
+                          <div
+                            className="change-row"
+                            onClick={() =>
+                              void openCommitDiff({ connId, root, backend }, c.id, ch)
+                            }
+                          >
+                            <span className={`change-row__badge ${vcsClass(ch.kind)}`}>
+                              {vcsLetter(ch.kind) || "•"}
+                            </span>
+                            <span className="change-row__path">{ch.path}</span>
+                          </div>
+                        </Tip>
                       ))
                     )}
                   </div>

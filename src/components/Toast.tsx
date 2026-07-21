@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { useAppStore, type Notice } from "../store/appStore";
 import { IconCheck, IconClose, IconCopy } from "./icons";
+import { Tip } from "./Tooltip";
 
 function ToastItem({
   notice,
@@ -44,22 +45,20 @@ function ToastItem({
       {/* tabIndex -1: a toast must never take keyboard focus — it's transient
           chrome, and stealing focus mid-typing (e.g. a password) is the worst
           possible moment. Mouse-only controls. */}
-      <button
-        className="toast__close"
-        tabIndex={-1}
-        onClick={copy}
-        title={copied ? "Copied" : "Copy message"}
-      >
-        {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
-      </button>
-      <button
-        className="toast__close"
-        tabIndex={-1}
-        onClick={() => onClose(notice.id)}
-        title="Dismiss"
-      >
-        <IconClose size={14} />
-      </button>
+      <Tip label={copied ? "Copied" : "Copy message"}>
+        <button className="toast__close" tabIndex={-1} onClick={copy}>
+          {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+        </button>
+      </Tip>
+      <Tip label="Dismiss">
+        <button
+          className="toast__close"
+          tabIndex={-1}
+          onClick={() => onClose(notice.id)}
+        >
+          <IconClose size={14} />
+        </button>
+      </Tip>
     </div>
   );
 }

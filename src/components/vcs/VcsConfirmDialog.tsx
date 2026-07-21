@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { disableConfirm } from "../../lib/settings";
 import { useDialogKeys } from "../../hooks/useDialogKeys";
 import { useVcsStore } from "../../store/vcsStore";
+import { Tip } from "../Tooltip";
 
 export function VcsConfirmDialog() {
   const confirm = useVcsStore((s) => s.vcsConfirm);
@@ -45,14 +46,16 @@ export function VcsConfirmDialog() {
         </div>
         <div className="modal__footer">
           {confirm.id && (
-            <label className="confirm-silence" title="Saved to settings.json (confirms) — delete the key there to bring this dialog back">
-              <input
-                type="checkbox"
-                checked={silence}
-                onChange={(e) => setSilence(e.target.checked)}
-              />
-              Don't ask again
-            </label>
+            <Tip label="Saved to settings.json — delete the key there to undo">
+              <label className="confirm-silence">
+                <input
+                  type="checkbox"
+                  checked={silence}
+                  onChange={(e) => setSilence(e.target.checked)}
+                />
+                Don't ask again
+              </label>
+            </Tip>
           )}
           <button className="btn btn--ghost" onClick={() => clearConfirm()}>
             Cancel

@@ -22,6 +22,7 @@ import {
   IconMinimize,
   IconRestore,
 } from "../icons";
+import { Tip } from "../Tooltip";
 
 function Logo({ size = 16 }: { size?: number }) {
   return (
@@ -115,26 +116,30 @@ export function TitleBar() {
         </div>
       </div>
       <div className="titlebar__controls">
-        <button
-          className={`titlebar__btn ${settingsIssues.length > 0 ? "titlebar__btn--warn" : ""}`}
-          title={
+        <Tip
+          label={
             settingsIssues.length > 0
               ? `All commands (Ctrl+Shift+P) — ${settingsIssues.length} settings problem${settingsIssues.length === 1 ? "" : "s"}`
               : "All commands (Ctrl+Shift+P)"
           }
-          onClick={() => useAppStore.getState().setPaletteOpen(true)}
         >
-          ⌘
-        </button>
-        <button
-          className="titlebar__btn"
-          title="Settings"
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((v) => !v)}
-        >
-          ⚙
-        </button>
+          <button
+            className={`titlebar__btn ${settingsIssues.length > 0 ? "titlebar__btn--warn" : ""}`}
+            onClick={() => useAppStore.getState().setPaletteOpen(true)}
+          >
+            ⌘
+          </button>
+        </Tip>
+        <Tip label="Settings">
+          <button
+            className="titlebar__btn"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            ⚙
+          </button>
+        </Tip>
         {menuOpen && (
           <>
             <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />
@@ -211,27 +216,30 @@ export function TitleBar() {
             </div>
           </>
         )}
-        <button
-          className="titlebar__btn titlebar__btn--winctl titlebar__btn--live"
-          title="Minimize"
-          onClick={() => void appWindow.minimize()}
-        >
-          <IconMinimize />
-        </button>
-        <button
-          className="titlebar__btn titlebar__btn--live"
-          title={maximized ? "Restore" : "Maximize"}
-          onClick={() => void appWindow.toggleMaximize()}
-        >
-          {maximized ? <IconRestore /> : <IconMaximize />}
-        </button>
-        <button
-          className="titlebar__btn titlebar__btn--close"
-          title="Close"
-          onClick={requestClose}
-        >
-          <IconClose />
-        </button>
+        <Tip label="Minimize">
+          <button
+            className="titlebar__btn titlebar__btn--winctl titlebar__btn--live"
+            onClick={() => void appWindow.minimize()}
+          >
+            <IconMinimize />
+          </button>
+        </Tip>
+        <Tip label={maximized ? "Restore" : "Maximize"}>
+          <button
+            className="titlebar__btn titlebar__btn--live"
+            onClick={() => void appWindow.toggleMaximize()}
+          >
+            {maximized ? <IconRestore /> : <IconMaximize />}
+          </button>
+        </Tip>
+        <Tip label="Close">
+          <button
+            className="titlebar__btn titlebar__btn--close"
+            onClick={requestClose}
+          >
+            <IconClose />
+          </button>
+        </Tip>
       </div>
       {exitAsk && (
         <div className="modal-overlay" onClick={() => setExitAsk(false)}>
@@ -248,17 +256,16 @@ export function TitleBar() {
               <kbd>Enter</kbd> closes · <kbd>Esc</kbd> stays
             </div>
             <div className="exit-ask__actions">
-              <label
-                className="confirm-silence"
-                title='Saved to settings.json ("confirms") only if you close — Cancel discards it'
-              >
-                <input
-                  type="checkbox"
-                  checked={exitSilence}
-                  onChange={(e) => setExitSilence(e.target.checked)}
-                />
-                Don't ask again
-              </label>
+              <Tip label="Saved to settings.json only if you close">
+                <label className="confirm-silence">
+                  <input
+                    type="checkbox"
+                    checked={exitSilence}
+                    onChange={(e) => setExitSilence(e.target.checked)}
+                  />
+                  Don't ask again
+                </label>
+              </Tip>
               <button className="btn btn--ghost" onClick={() => setExitAsk(false)}>
                 Cancel
               </button>

@@ -18,6 +18,7 @@ import {
 import { useDialogKeys } from "../../hooks/useDialogKeys";
 import { useAppStore } from "../../store/appStore";
 import { IconClose } from "../icons";
+import { Tip } from "../Tooltip";
 
 function kindLabel(m: FileEntry): string {
   if (m.isSymlink) return m.isDir ? "Symlink → folder" : "Symlink";
@@ -111,21 +112,18 @@ export function PropertiesDialog() {
       >
         <div className="modal__header">
           <span className="modal__title">Properties</span>
-          <button
-            className="icon-btn"
-            data-dialog-primary
-            onClick={close}
-            title="Close"
-          >
-            <IconClose />
-          </button>
+          <Tip label="Close">
+            <button className="icon-btn" data-dialog-primary onClick={close}>
+              <IconClose />
+            </button>
+          </Tip>
         </div>
         <div className="modal__body">
           <div className="props">
             <Row label={multi ? "Selection" : "Name"}>
-              <span className="props__name" title={single?.path}>
-                {title}
-              </span>
+              <Tip label={single?.path ?? ""}>
+                <span className="props__name">{title}</span>
+              </Tip>
             </Row>
 
             {single && (
@@ -136,9 +134,11 @@ export function PropertiesDialog() {
 
             {single && (
               <Row label="Location">
-                <span className="props__mono" title={dirname(single.path)}>
-                  {dirname(single.path) || "—"}
-                </span>
+                <Tip label={dirname(single.path)}>
+                  <span className="props__mono">
+                    {dirname(single.path) || "—"}
+                  </span>
+                </Tip>
               </Row>
             )}
 

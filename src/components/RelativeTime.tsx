@@ -4,6 +4,8 @@
  *  timer that slows down on its own as the timestamp ages. */
 import { useEffect, useState } from "react";
 
+import { Tip } from "./Tooltip";
+
 /** Shared "N ago" formatter. Under 10 s it's a static bucket — a per-second
  *  count-up right after every action reads as nervous ticking. */
 export function formatAgo(seconds: number): string {
@@ -51,9 +53,8 @@ export function RelativeTime({
 
   if (at == null) return null;
   const seconds = Math.max(0, Math.floor((Date.now() - at) / 1000));
-  return (
-    <span className="sidebar__section-ago" title={title ?? undefined}>
-      {formatAgo(seconds)}
-    </span>
+  const span = (
+    <span className="sidebar__section-ago">{formatAgo(seconds)}</span>
   );
+  return title ? <Tip label={title}>{span}</Tip> : span;
 }

@@ -25,6 +25,7 @@ interface AnchorProps {
   onMouseEnter?: (e: ReactMouseEvent<HTMLElement>) => void;
   onMouseLeave?: (e: ReactMouseEvent<HTMLElement>) => void;
   onMouseDown?: (e: ReactMouseEvent<HTMLElement>) => void;
+  title?: string;
 }
 
 export function Tip({
@@ -49,6 +50,7 @@ export function Tip({
     setPos(null);
   };
   const show = (e: ReactMouseEvent<HTMLElement>) => {
+    if (!label) return; // dynamic labels can be empty — no empty bubble
     const el = e.currentTarget;
     clear();
     timer.current = window.setTimeout(() => {

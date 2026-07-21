@@ -36,6 +36,7 @@ import { FolderBrowser } from "../FolderBrowser";
 import { RenameInput } from "../filetree/FileNode";
 import { FileIcon } from "../filetree/FileIcons";
 import { IconChevron, IconEye, IconEyeOff, IconPlus } from "../icons";
+import { Tip } from "../Tooltip";
 
 interface DirState {
   entries: FileEntry[] | null;
@@ -507,20 +508,19 @@ export function TransferPane({
         >
           {label}
         </span>
-        <button
-          className={`icon-btn ${showHidden ? "icon-btn--active" : ""}`}
-          title={showHidden ? "Hide hidden files" : "Show hidden files"}
-          onClick={() => setShowHidden((v) => !v)}
-        >
-          {showHidden ? <IconEye /> : <IconEyeOff />}
-        </button>
-        <button
-          className="icon-btn"
-          title="Open a folder (this panel only)"
-          onClick={() => setBrowsing(true)}
-        >
-          <IconPlus />
-        </button>
+        <Tip label={showHidden ? "Hide hidden files" : "Show hidden files"}>
+          <button
+            className={`icon-btn ${showHidden ? "icon-btn--active" : ""}`}
+            onClick={() => setShowHidden((v) => !v)}
+          >
+            {showHidden ? <IconEye /> : <IconEyeOff />}
+          </button>
+        </Tip>
+        <Tip label="Open a folder (this panel only)">
+          <button className="icon-btn" onClick={() => setBrowsing(true)}>
+            <IconPlus />
+          </button>
+        </Tip>
       </div>
 
       <div

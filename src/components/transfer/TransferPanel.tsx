@@ -9,6 +9,7 @@ import { fsTransferCheck } from "../../lib/ipc";
 import type { DragItem } from "../../lib/transferDrag";
 import { useAppStore } from "../../store/appStore";
 import { IconClose } from "../icons";
+import { Tip } from "../Tooltip";
 import { TransferPane } from "./TransferPane";
 import { TransferProgressBar } from "./TransferProgressBar";
 
@@ -112,9 +113,11 @@ export function TransferPanel({
           <span className="transfer-modal__hint">
             Drag between the panes — or select and Ctrl+C / Ctrl+V — to copy
           </span>
-          <button className="icon-btn" onClick={onClose} title="Close">
-            <IconClose />
-          </button>
+          <Tip label="Close">
+            <button className="icon-btn" onClick={onClose}>
+              <IconClose />
+            </button>
+          </Tip>
         </div>
 
         <div className="transfer-modal__body">

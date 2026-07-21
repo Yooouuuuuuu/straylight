@@ -8,6 +8,7 @@ import { useDialogKeys } from "../../hooks/useDialogKeys";
 import { useSSH } from "../../hooks/useSSH";
 import { useAppStore } from "../../store/appStore";
 import { IconClose } from "../icons";
+import { Tip } from "../Tooltip";
 
 export function ConnectionDialog() {
   const prefill = useAppStore((s) => s.dialogPrefill);
@@ -113,9 +114,11 @@ export function ConnectionDialog() {
       >
         <div className="modal__header">
           <span className="modal__title">Connect with a password</span>
-          <button className="icon-btn" onClick={close} title="Close">
-            <IconClose />
-          </button>
+          <Tip label="Close">
+            <button className="icon-btn" onClick={close}>
+              <IconClose />
+            </button>
+          </Tip>
         </div>
 
         <div className="modal__body">

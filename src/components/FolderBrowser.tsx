@@ -8,6 +8,7 @@ import { dirname } from "../lib/format";
 import { fsListDir, listDrives, type FileEntry } from "../lib/ipc";
 import { FileIcon } from "./filetree/FileIcons";
 import { IconClose } from "./icons";
+import { Tip } from "./Tooltip";
 
 export function FolderBrowser({
   connId,
@@ -88,9 +89,11 @@ export function FolderBrowser({
       <div className="folder-browser" role="dialog" aria-modal="true">
         <div className="folder-browser__head">
           <span className="folder-browser__title">{title}</span>
-          <button className="icon-btn" onClick={onClose} title="Close">
-            <IconClose />
-          </button>
+          <Tip label="Close">
+            <button className="icon-btn" onClick={onClose}>
+              <IconClose />
+            </button>
+          </Tip>
         </div>
 
         {drives.length > 1 && (
@@ -101,28 +104,25 @@ export function FolderBrowser({
                 .toLowerCase()
                 .startsWith(root.toLowerCase());
               return (
-                <button
-                  key={d}
-                  className={`folder-browser__drive ${active ? "folder-browser__drive--active" : ""}`}
-                  onClick={() => setPath(d)}
-                  title={d}
-                >
-                  {root}
-                </button>
+                <Tip key={d} label={d}>
+                  <button
+                    className={`folder-browser__drive ${active ? "folder-browser__drive--active" : ""}`}
+                    onClick={() => setPath(d)}
+                  >
+                    {root}
+                  </button>
+                </Tip>
               );
             })}
           </div>
         )}
 
         <div className="folder-browser__pathbar">
-          <button
-            className="btn btn--ghost"
-            onClick={goUp}
-            disabled={!current}
-            title="Up one level"
-          >
-            ↑
-          </button>
+          <Tip label="Up one level">
+            <button className="btn btn--ghost" onClick={goUp} disabled={!current}>
+              ↑
+            </button>
+          </Tip>
           <input
             className="input input--mono"
             value={input}
@@ -148,25 +148,25 @@ export function FolderBrowser({
             <div className="folder-browser__msg">No subfolders here.</div>
           ) : (
             dirs.map((d) => (
-              <div
-                key={d.path}
-                className="folder-browser__item"
-                title={d.path}
-                onClick={() => setPath(d.path)}
-              >
-                <span className="folder-browser__icon">
-                  <FileIcon name={d.name} isDir isOpen={false} />
-                </span>
-                <span className="folder-browser__name">{d.name}</span>
-              </div>
+              <Tip key={d.path} label={d.path}>
+                <div
+                  className="folder-browser__item"
+                  onClick={() => setPath(d.path)}
+                >
+                  <span className="folder-browser__icon">
+                    <FileIcon name={d.name} isDir isOpen={false} />
+                  </span>
+                  <span className="folder-browser__name">{d.name}</span>
+                </div>
+              </Tip>
             ))
           )}
         </div>
 
         <div className="folder-browser__foot">
-          <span className="folder-browser__current" title={current ?? ""}>
-            {current ?? "…"}
-          </span>
+          <Tip label={current ?? ""}>
+            <span className="folder-browser__current">{current ?? "…"}</span>
+          </Tip>
           <div className="folder-browser__actions">
             <button className="btn btn--ghost" onClick={onClose}>
               Cancel

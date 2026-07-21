@@ -54,6 +54,18 @@ export function ScmPanel() {
   const [picking, setPicking] = useState(false);
   const [browse, setBrowse] = useState<ConnChoice | null>(null);
 
+  // Explorer ⑂ handoff: scroll the requested repo's card into view (the card
+  // list can be taller than the panel), then clear the request.
+  const revealRepo = useVcsStore((s) => s.revealRepo);
+  const clearReveal = useVcsStore((s) => s.clearReveal);
+  useEffect(() => {
+    if (!revealRepo) return;
+    document
+      .querySelector(`[data-repo-id="${CSS.escape(revealRepo)}"]`)
+      ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    clearReveal();
+  }, [revealRepo, clearReveal]);
+
   const conns: ConnChoice[] = [
     localConnId
       ? { connId: localConnId, label: "Local", showDrives: true }
@@ -97,7 +109,7 @@ export function ScmPanel() {
             <IconRefresh />
           </button>
         </Tip>
-        <Tip label="Move left (past the editor)">
+        <Tip label="Move left">
           <button
             className="icon-btn"
             disabled={scmPos <= 0}
@@ -106,7 +118,7 @@ export function ScmPanel() {
             <IconToBar size={13} dir="left" />
           </button>
         </Tip>
-        <Tip label="Move right (past the editor)">
+        <Tip label="Move right">
           <button
             className="icon-btn"
             disabled={scmPos === dockOrder.length - 1}
@@ -115,7 +127,7 @@ export function ScmPanel() {
             <IconToBar size={13} dir="right" />
           </button>
         </Tip>
-        <Tip label="Minimize Source Control (status bar to bring it back)">
+        <Tip label="Minimize">
           <button
             className="icon-btn panel-head__hide"
             onClick={() => setScmVisible(false)}
@@ -278,23 +290,25 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
     <div
       className="change-row"
       key={c.path}
-      title={`${c.path} — open diff`}
       onClick={() => void openDiff(repo, c)}
     >
       <span className={`change-row__badge ${vcsClass(c.kind)}`}>
         {vcsLetter(c.kind) || "•"}
       </span>
-      <span className="change-row__path">{c.path}</span>
-      <button
-        className="change-row__act change-row__act--discard"
-        title="Discard changes"
-        onClick={(e) => {
-          e.stopPropagation();
-          requestDiscard(repo.connKey, repo.root, [c]);
-        }}
-      >
-        <IconUndo size={13} />
-      </button>
+      <Tip label={`${c.path} — open diff`}>
+        <span className="change-row__path">{c.path}</span>
+      </Tip>
+      <Tip label="Discard changes">
+        <button
+          className="change-row__act change-row__act--discard"
+          onClick={(e) => {
+            e.stopPropagation();
+            requestDiscard(repo.connKey, repo.root, [c]);
+          }}
+        >
+          <IconUndo size={13} />
+        </button>
+      </Tip>
       {action}
     </div>
   );
@@ -307,8 +321,8 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   return (
     <div
       className={`repo-card ${dropPos ? `repo-card--drop-${dropPos}` : ""}`}
+      data-repo-id={`${repo.connKey}::${repo.root}`}
       style={{ borderColor: hostColorForConnKey(hostColors, repo.connKey) }}
-      title={`${repo.connKey} — ${repo.root}`}
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes("application/x-straylight-repo")) {
           e.preventDefault();
@@ -338,27 +352,31 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
         }}
       >
         {repo.backend === "jj" || repo.colocated ? (
-          <button
-            className={`repo-card__backend repo-card__backend--${repo.backend} repo-card__backend--toggle`}
-            title={`Colocated repo — click to drive it with ${repo.backend === "jj" ? "git" : "jj"} instead`}
-            onClick={() =>
-              useVcsStore.getState().toggleBackend(repo.connKey, repo.root)
-            }
+          <Tip
+            label={`Colocated — drive with ${repo.backend === "jj" ? "git" : "jj"} instead`}
           >
-            {repo.backend}
-          </button>
+            <button
+              className={`repo-card__backend repo-card__backend--${repo.backend} repo-card__backend--toggle`}
+              onClick={() =>
+                useVcsStore.getState().toggleBackend(repo.connKey, repo.root)
+              }
+            >
+              {repo.backend}
+            </button>
+          </Tip>
         ) : (
-          <span
-            className={`repo-card__backend repo-card__backend--${repo.backend}`}
-            title="git repository"
-          >
-            {repo.backend}
-          </span>
+          <Tip label="git repository">
+            <span
+              className={`repo-card__backend repo-card__backend--${repo.backend}`}
+            >
+              {repo.backend}
+            </span>
+          </Tip>
         )}
-        <span className="repo-card__name" title={repo.root}>
-          {repo.label}
-        </span>
-        <Tip label={historyShown ? "Hide history" : "Commit history (live)"}>
+        <Tip label={`${repo.connKey} — ${repo.root}`}>
+          <span className="repo-card__name">{repo.label}</span>
+        </Tip>
+        <Tip label={historyShown ? "Hide history" : "Commit history"}>
           <button
             className={`icon-btn ${historyShown ? "icon-btn--active" : ""}`}
             disabled={inactive}
@@ -370,7 +388,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
           </button>
         </Tip>
         {isLocal ? (
-          <Tip label="Monitored live — file-watched; changes appear by themselves">
+          <Tip label="Watched live">
             <span className="icon-btn icon-btn--static">
               <IconPulse size={14} />
             </span>
@@ -379,8 +397,8 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
           <Tip
             label={
               repo.eager
-                ? "Monitoring — checks every 5 s, plus your in-app saves; click to stop"
-                : "Not monitored — only your in-app saves update this repo; click to monitor"
+                ? "Monitoring every 5 s — click to stop"
+                : "Not monitored — click to monitor"
             }
           >
             <button
@@ -392,7 +410,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
           </Tip>
         )}
         {loading && (
-          <Tip label="Refreshing — click to stop waiting">
+          <Tip label="Refreshing — click to cancel">
             <button
               className="icon-btn"
               onClick={() => cancelRefresh(repo.connKey, repo.root)}
@@ -423,16 +441,17 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
           <span className="repo-card__offline">offline</span>
         ) : st ? (
           <>
-            <span
-              className="repo-card__branch repo-card__branch--btn"
-              title="Switch / create branch"
-              onClick={() => {
-                setActionsOpen(false);
-                setBranchOpen((o) => !o);
-              }}
-            >
-              {st.ref || "—"} <IconChevron size={11} dir="down" />
-            </span>
+            <Tip label="Switch / create branch">
+              <span
+                className="repo-card__branch repo-card__branch--btn"
+                onClick={() => {
+                  setActionsOpen(false);
+                  setBranchOpen((o) => !o);
+                }}
+              >
+                {st.ref || "—"} <IconChevron size={11} dir="down" />
+              </span>
+            </Tip>
             {(st.ahead || st.behind) && (
               <span className="repo-card__ab">
                 {st.ahead ? (
@@ -495,7 +514,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                   </button>
                 </Tip>
               )}
-              <Tip label="Fetch & review incoming commits">
+              <Tip label="Fetch incoming commits">
                 <button
                   className="icon-btn"
                   onClick={() => {
@@ -595,13 +614,14 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
             >
               Commit
             </button>
-            <button
-              className={`repo-card__mode-btn ${amendMode ? "repo-card__mode-btn--active" : ""}`}
-              title="Amend the last commit (message and/or staged changes)"
-              onClick={() => setAmendMode(true)}
-            >
-              Amend
-            </button>
+            <Tip label="Amend the last commit">
+              <button
+                className={`repo-card__mode-btn ${amendMode ? "repo-card__mode-btn--active" : ""}`}
+                onClick={() => setAmendMode(true)}
+              >
+                Amend
+              </button>
+            </Tip>
           </div>
           <textarea
             className="repo-card__msg input--mono"
@@ -649,25 +669,27 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
               <div
                 className="change-row"
                 key={c.path}
-                title={`${c.path} — open to resolve the conflict markers`}
                 onClick={() => openConflictFile(c.path)}
               >
                 <span className={`change-row__badge ${vcsClass(c.kind)}`}>!</span>
-                <span className="change-row__path">{c.path}</span>
-                <button
-                  className="change-row__act"
-                  title="Open in the merge editor"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void openMergeEditor(repo, c.path);
-                  }}
-                >
-                  ⚔
-                </button>
-                {isGit && (
+                <Tip label={`${c.path} — open to resolve the conflicts`}>
+                  <span className="change-row__path">{c.path}</span>
+                </Tip>
+                <Tip label="Open in the merge editor">
                   <button
                     className="change-row__act"
-                    title="Mark resolved (stage)"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void openMergeEditor(repo, c.path);
+                    }}
+                  >
+                    ⚔
+                  </button>
+                </Tip>
+                {isGit && (
+                  <Tip label="Mark resolved (stage)">
+                  <button
+                    className="change-row__act"
                     onClick={(e) => {
                       e.stopPropagation();
                       void stage(repo.connKey, repo.root, [c.path]);
@@ -675,6 +697,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                   >
                     ✓
                   </button>
+                  </Tip>
                 )}
               </div>
             ))}
@@ -701,16 +724,17 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                 {staged.map((c) =>
                   changeRow(
                     c,
-                    <button
-                      className="change-row__act"
-                      title="Unstage"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void unstage(repo.connKey, repo.root, [c.path]);
-                      }}
-                    >
-                      −
-                    </button>,
+                    <Tip label="Unstage">
+                      <button
+                        className="change-row__act"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void unstage(repo.connKey, repo.root, [c.path]);
+                        }}
+                      >
+                        −
+                      </button>
+                    </Tip>,
                   ),
                 )}
               </div>
@@ -733,16 +757,17 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                 {unstaged.map((c) =>
                   changeRow(
                     c,
-                    <button
-                      className="change-row__act"
-                      title="Stage"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void stage(repo.connKey, repo.root, [c.path]);
-                      }}
-                    >
-                      +
-                    </button>,
+                    <Tip label="Stage">
+                      <button
+                        className="change-row__act"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void stage(repo.connKey, repo.root, [c.path]);
+                        }}
+                      >
+                        +
+                      </button>
+                    </Tip>,
                   ),
                 )}
               </div>
@@ -848,10 +873,9 @@ function BranchMenu({
             {branches
               .filter((b) => b.remote)
               .map((b) => (
+                <Tip key={b.name} label={`Track ${b.name} locally`}>
                 <button
-                  key={b.name}
                   className="branch-menu__item branch-menu__item--remote"
-                  title={`Create a local tracking branch from ${b.name}`}
                   onClick={() => {
                     // "origin/x" → checkout "x": git's DWIM creates the
                     // tracking branch automatically.
@@ -862,6 +886,7 @@ function BranchMenu({
                 >
                   {b.name}
                 </button>
+                </Tip>
               ))}
           </>
         )}
@@ -877,14 +902,15 @@ function BranchMenu({
             else if (e.key === "Escape") onClose();
           }}
         />
-        <button
-          className="icon-btn branch-menu__add"
-          title={isJj ? "Create bookmark" : "Create branch"}
-          disabled={!name.trim()}
-          onClick={create}
-        >
-          ＋
-        </button>
+        <Tip label={isJj ? "Create bookmark" : "Create branch"}>
+          <button
+            className="icon-btn branch-menu__add"
+            disabled={!name.trim()}
+            onClick={create}
+          >
+            ＋
+          </button>
+        </Tip>
       </div>
     </div>
   );

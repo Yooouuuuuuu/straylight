@@ -106,6 +106,18 @@ function editorShowing(
   return null;
 }
 
+/** The registered group editor whose DOM contains `node` — how the custom
+ *  right-click menu resolves which editor was clicked (Monaco's own menu is
+ *  disabled in the file editors). */
+export function editorAtNode(
+  node: Node,
+): monaco.editor.IStandaloneCodeEditor | null {
+  for (const e of editors) {
+    if (e.getContainerDomNode()?.contains(node)) return e;
+  }
+  return null;
+}
+
 /** Focus the editor showing `tabId` and open Monaco's find widget (Ctrl+F —
  *  works from anywhere, e.g. with focus still in the explorer after a
  *  single-click preview). False if the tab has no live editor. */

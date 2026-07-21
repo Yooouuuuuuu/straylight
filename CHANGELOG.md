@@ -13,9 +13,10 @@ history of design changes — lives in the docs: the decision ledger in
 
 ### Planned
 
-- **Tip tooltip rollout** — convert all ~139 native `title=` tooltips to the
-  themed Tip component (texts reviewed surface by surface), then walk test
-  plan Part H.
+- **F11 focus view + agent rail** (next up) — hide every panel for a
+  full-width editor; a slim left rail keeps the CHAT agents one click away
+  (full names, host colors, a bell when one wants attention). F11 restores
+  the exact layout.
 - **Color/contrast sweep** — all themed controls in one pass (incl. the
   multi-WSL connection surfaces flagged 2026-07-14); reuse existing theme
   slots first.
@@ -26,8 +27,95 @@ history of design changes — lives in the docs: the decision ledger in
 - **Containers, later:** file browsing inside containers, logs, start/stop.
 - **Transfer polish (later):** drag directly between the sidebar trees, OS
   drag-in/out, and multi cut/copy/paste in the explorer.
-- **WSL session auto-recovery** — re-provision `sshd` if a connected distro's
-  daemon dies (WSL file browsing itself now works via auto-provisioned SSH).
+
+## [0.9.11] - 2026-07-22
+
+Keyboard and split-model round: the editor grew VS Code's keys and a real
+split lifecycle, every tooltip is themed now, and two server-session bugs
+found by the terminal-stress test are gone.
+
+### Added
+
+- **A real right-click menu wherever you type.** Text fields (commit box,
+  renames, dialog inputs) and the file editor get the app's own edit menu —
+  Undo / Redo / Cut / Copy / Paste / Select All with their keys — instead of
+  the browser's native menu (or Monaco's, in the editor). Password fields
+  show the reduced Paste / Select All set; the WebView's own context menu
+  (refresh/print/inspect) can no longer appear anywhere. A richer editor
+  menu (Go to Definition etc.) is future work.
+- **VS Code keyboard parity.** New defaults: `Ctrl+Shift+G` Source Control ·
+  `Ctrl+Alt+I` / `Ctrl+Shift+I` CHAT (new command; DevTools are disabled, so
+  the key is unambiguous) · `Ctrl+J` show/hide the panel (wins even from a
+  shell, as in VS Code) · `Ctrl+1..3` focus editor group, and asking for the
+  next index creates it · `Ctrl+W` / `Ctrl+F4` close the file — the last
+  file closes its split too, and on an empty split they close the split.
+  `Ctrl+PageDown/Up` is "next tab of whatever I'm in": editor tabs anywhere;
+  in the terminal panel every shell in bar order, then Ports → Containers →
+  Forwarding → Transfers; CHAT's residents in CHAT. Pin and close-all/saved
+  stay palette-only, like the VS Code chords nobody types.
+- **Splits have a real lifecycle.** `Ctrl+\` splits half/half — with several
+  files the active one moves over; with one (or none) you get an EMPTY pane:
+  app icon, its own ✕, a first-class drop target that lights up when you
+  drag a tab over it. A group that loses its last tab closes itself; the
+  green drag-to-split zone appears only when there's something to CREATE
+  (never beside an existing empty pane, never past the 3-group cap).
+
+### Fixed
+
+- **Closed terminals no longer leak server sessions.** Closing an SSH
+  terminal sent EOF but never CHANNEL_CLOSE — an interactive shell ignores
+  EOF, so every closed terminal kept occupying one of sshd's session slots
+  (MaxSessions, default 10) until the whole connection died. Terminals now
+  close their channel explicitly, freeing the slot immediately.
+- **A full server no longer reads as a dead one.** At sshd's per-connection
+  session cap (`MaxSessions` — each terminal, the file browser, and every
+  background command counts), the health probe's refused channel was misread
+  as a dropped connection — reconnecting in a loop and restarting every
+  terminal each cycle. A refusal now counts as proof of life, a drop needs
+  two failed probes in a row, and actually hitting the cap says so plainly.
+- **Split focus obeys the keyboard.** Focus hand-offs (Ctrl+1..3, tab
+  clicks) were answered by every split at once, so the last-mounted group
+  always stole the cursor; a focused empty pane also let typing fall through
+  into another group's file. Only the active group answers now, and an empty
+  pane swallows the keyboard.
+- **The green drag-to-split zone can't get stuck or go dead.** Drops that
+  closed the source's group (or were swallowed by a tab strip) left the zone
+  on screen; the fix for that then unmounted the zone before its own drop
+  landed. Both directions hold now.
+- **The editor history tab's git ⇄ jj swap button works.** The blanked code
+  editor underneath overlapped the tab's header row in hit-testing, so the
+  swap button (and the head line) were visible but unclickable. The lens also
+  syncs both ways now: flipping a colocated repo's backend from the repo card
+  or sidebar history updates an open editor history tab too.
+
+### Changed
+
+- **Themed tooltips everywhere.** ~150 controls across every surface swap the
+  OS-native `title` tooltip for the themed Tip bubble (instant, above the
+  control, viewport-clamped), with texts shortened in the same pass — file
+  tree rows and pinned roots show path + mode/owner + size + date on the
+  name, one topic per line. The only native tooltips left are the handful of
+  disabled-state explanations (a disabled control fires no hover events, so
+  only the OS tooltip can explain *why* it's disabled).
+- **Hosts carry an "issue light", not a green lamp.** Status-bar host entries
+  and the explorer's per-host tools row (beside Refresh) show a light that's
+  near-invisible while the host is fine and colors up on connecting /
+  reconnecting / disconnected, with a state tooltip — trouble brightens an
+  existing light instead of popping a new one in. No resting green anywhere.
+- **Explorer ⑂ goes straight to Source Control.** No confirm dialog — a
+  folder covered by a tracked repo opens the panel scrolled to its card; any
+  other folder is tracked directly, and a non-repo just toasts. The button
+  appears on row hover at the right edge, on every folder at any depth;
+  color is the whole story: repo color = tracked, gray = not.
+- **Truncated (>50 MB) files open read-only.** Editing a partial view was
+  wasted work — saving it was (rightly) blocked, so typed changes could never
+  be kept. The banner points at the host terminal instead; no editor lets you
+  edit a truncated view (VS Code opens large files whole with features off).
+- **Chrome polish.** The status bar's four panel blocks are equal-width with
+  aligned icons and no tooltips (they label themselves); the CHAT column
+  headlines its resident — bigger, host-colored; DevTools are locked
+  (packaged builds ship without the inspector entirely); the welcome logo
+  and empty-pane icon got their proper sizes.
 
 ## [0.9.10] - 2026-07-21
 
@@ -1367,13 +1455,3 @@ terminal, in a Dracula-themed, VS Code-style window built on Tauri v2 and React.
 - Host keys are trusted on first use; `known_hosts` verification is planned.
 - Verified with `tsc --noEmit` and `vite build` (frontend) and `cargo check` and
   `cargo test` (backend, 4 tests passing).
-
-[Unreleased]: https://github.com/Yooouuuuuuu/straylight/compare/v0.7.0...HEAD
-[0.7.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.6.0...v0.7.0
-[0.6.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.5.1...v0.6.0
-[0.5.1]: https://github.com/Yooouuuuuuu/straylight/compare/v0.5.0...v0.5.1
-[0.5.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/Yooouuuuuuu/straylight/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/Yooouuuuuuu/straylight/releases/tag/v0.1.0

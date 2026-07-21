@@ -117,13 +117,11 @@ export function ChatPanel() {
           })}
           <span className="chat-panel__spacer" />
           <span className="chat-panel__newwrap">
-            <button
-              className="icon-btn"
-              title="New terminal here…"
-              onClick={() => setMenuOpen((v) => !v)}
-            >
-              <IconPlus size={13} />
-            </button>
+            <Tip label="New terminal in CHAT">
+              <button className="icon-btn" onClick={() => setMenuOpen((v) => !v)}>
+                <IconPlus size={13} />
+              </button>
+            </Tip>
             {menuOpen && (
               <>
                 <div
@@ -151,29 +149,32 @@ export function ChatPanel() {
               </>
             )}
           </span>
-          <button
-            className="icon-btn"
-            title="Move left (past the editor)"
-            disabled={chatPos <= 0}
-            onClick={() => stepDock("chat", -1)}
-          >
-            <IconToBar size={13} dir="left" />
-          </button>
-          <button
-            className="icon-btn"
-            title="Move right (past the editor)"
-            disabled={chatPos === dockOrder.length - 1}
-            onClick={() => stepDock("chat", 1)}
-          >
-            <IconToBar size={13} dir="right" />
-          </button>
-          <button
-            className="icon-btn panel-head__hide"
-            title="Hide CHAT (the status bar brings it back)"
-            onClick={() => setChatVisible(false)}
-          >
-            <IconPanelHide size={14} />
-          </button>
+          <Tip label="Move left">
+            <button
+              className="icon-btn"
+              disabled={chatPos <= 0}
+              onClick={() => stepDock("chat", -1)}
+            >
+              <IconToBar size={13} dir="left" />
+            </button>
+          </Tip>
+          <Tip label="Move right">
+            <button
+              className="icon-btn"
+              disabled={chatPos === dockOrder.length - 1}
+              onClick={() => stepDock("chat", 1)}
+            >
+              <IconToBar size={13} dir="right" />
+            </button>
+          </Tip>
+          <Tip label="Hide CHAT">
+            <button
+              className="icon-btn panel-head__hide"
+              onClick={() => setChatVisible(false)}
+            >
+              <IconPanelHide size={14} />
+            </button>
+          </Tip>
         </div>
         {active && (
           <div className="chat-panel__name">
@@ -200,28 +201,34 @@ export function ChatPanel() {
                 }}
               />
             ) : (
-              <span
-                className="chat-panel__title"
-                title={termDisplayName(active)}
-                onDoubleClick={() => setRenaming(termDisplayName(active))}
-              >
-                {termDisplayName(active)}
-              </span>
+              <Tip label={termDisplayName(active)}>
+                <span
+                  className="chat-panel__title"
+                  style={{
+                    color: hostColorForConnKey(hostColors, hostKeyOf(active.connId)),
+                  }}
+                  onDoubleClick={() => setRenaming(termDisplayName(active))}
+                >
+                  {termDisplayName(active)}
+                </span>
+              </Tip>
             )}
-            <button
-              className="icon-btn"
-              title="Return to the terminal panel"
-              onClick={() => returnTerminalFromChat(active.id)}
-            >
-              <IconMinus size={13} />
-            </button>
-            <button
-              className="icon-btn chat-panel__kill"
-              title="Close terminal"
-              onClick={() => closeTerminal(active.id)}
-            >
-              <IconClose size={12} />
-            </button>
+            <Tip label="Back to TERMINAL">
+              <button
+                className="icon-btn"
+                onClick={() => returnTerminalFromChat(active.id)}
+              >
+                <IconMinus size={13} />
+              </button>
+            </Tip>
+            <Tip label="Close terminal">
+              <button
+                className="icon-btn chat-panel__kill"
+                onClick={() => closeTerminal(active.id)}
+              >
+                <IconClose size={12} />
+              </button>
+            </Tip>
           </div>
         )}
       </div>

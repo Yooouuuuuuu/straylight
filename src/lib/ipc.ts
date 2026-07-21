@@ -131,6 +131,12 @@ export function sshTrustHost(host: string, port: number): Promise<void> {
   return invoke("ssh_trust_host", { host, port });
 }
 
+/** Close the web inspector if the debug WebView opened it (Ctrl+Shift+I is a
+ *  browser-level accelerator the page can't preventDefault). */
+export function closeDevtools(): Promise<void> {
+  return invoke("ui_close_devtools");
+}
+
 
 // ---------------------------------------------------------------------------
 // Filesystem (transport-agnostic: SFTP for SSH sessions, std::fs for local)

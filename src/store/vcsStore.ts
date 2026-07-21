@@ -88,6 +88,10 @@ export function repoColorForPath(
 interface VcsState {
   repos: TrackedRepo[];
   scmVisible: boolean;
+  /** Repo card (`connKey::root`) the panel should scroll into view — set when
+   *  the explorer's ⑂ opens/adds a repo; the panel consumes and clears it. */
+  revealRepo: string | null;
+  clearReveal: () => void;
   /** Which repo's history is shown in the left-of-SCM history panel (or null). */
   historyRepo: { connKey: string; root: string } | null;
   /** Pending discard awaiting confirmation. */
@@ -98,8 +102,8 @@ interface VcsState {
   decorations: Record<string, string>;
 
   openRepo: (connId: string, dir: string) => Promise<void>;
-  /** Explorer ⑂ button: reveal the panel if the folder's repo is tracked,
-   *  else confirm and add it. */
+  /** Explorer ⑂ button: reveal the panel scrolled to the repo covering the
+   *  folder, else track the folder directly (a non-repo just toasts). */
   openRepoFromExplorer: (connId: string, path: string) => void;
   removeRepo: (connKey: string, root: string) => void;
   toggleEager: (connKey: string, root: string) => void;
@@ -293,6 +297,23 @@ export function findRepoForPath(
   });
 }
 
+/** The tracked repo whose working copy COVERS `path` (its root, or a folder
+ *  inside it). Unlike [`findRepoForPath`] this does NOT match a folder that
+ *  merely contains a repo deeper down — such a folder is not itself in Source
+ *  Control, so its ⑂ stays gray and clicking tries to track it. */
+export function findRepoContaining(
+  repos: TrackedRepo[],
+  connId: string,
+  path: string,
+): TrackedRepo | undefined {
+  const p = stripSlash(path);
+  return repos.find((r) => {
+    if (r.connId !== connId) return false;
+    const root = stripSlash(r.root);
+    return p === root || p.startsWith(`${root}/`);
+  });
+}
+
 const repoId = (connKey: string, root: string) => `${connKey}::${root}`;
 const mapRepo = (
   repos: TrackedRepo[],
@@ -327,6 +348,8 @@ const watchedRepos = new Set<string>();
 export const useVcsStore = create<VcsState>()((set, get) => ({
   repos: load(),
   scmVisible: false,
+  revealRepo: null,
+  clearReveal: () => set({ revealRepo: null }),
   historyRepo: null,
   pendingDiscard: null,
   vcsConfirm: null,
@@ -342,14 +365,17 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
     try {
       info = await vcsOpen(connId, dir);
     } catch (e) {
-      useAppStore.getState().pushNotice("error", String(e));
+      // Not a repo (or unreachable): toast and leave the panel closed.
+      useAppStore
+        .getState()
+        .pushNotice("error", `${basename(dir) || dir}: ${String(e)}`);
       return;
     }
     const root = info.root;
     let added = false;
     set((s) => {
       if (s.repos.some((r) => r.connKey === connKey && r.root === root))
-        return { scmVisible: true };
+        return { scmVisible: true, revealRepo: repoId(connKey, root) };
       added = true;
       const repos = [
         ...s.repos,
@@ -367,7 +393,7 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
         },
       ];
       persist(repos);
-      return { repos, scmVisible: true };
+      return { repos, scmVisible: true, revealRepo: repoId(connKey, root) };
     });
     if (added) {
       get().syncWatchers();
@@ -376,17 +402,15 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
   },
 
   openRepoFromExplorer: (connId, path) => {
-    const existing = findRepoForPath(get().repos, connId, path);
+    // A repo COVERING the folder → just reveal its card. A folder that only
+    // contains a repo deeper down doesn't count — tracking it is attempted
+    // like any other folder (vcs_open resolves or refuses with a toast).
+    const existing = findRepoContaining(get().repos, connId, path);
     if (existing) {
-      set({ scmVisible: true });
+      set({ scmVisible: true, revealRepo: repoId(existing.connKey, existing.root) });
       return;
     }
-    get().askConfirm(
-      "Add to Source Control?",
-      `Track "${basename(path)}" in the Source Control panel? It must be a git or jj repository; its status will then show in the explorer.`,
-      () => void get().openRepo(connId, path),
-      "track-repo",
-    );
+    void get().openRepo(connId, path);
   },
 
   removeRepo: (connKey, root) => {
@@ -697,17 +721,29 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
     }),
 
   toggleBackend: (connKey, root) => {
+    let next: string | null = null;
+    let liveConnId: string | null = null;
     set((s) => {
-      const repos = mapRepo(s.repos, connKey, root, (r) => ({
-        ...r,
-        backend: r.backend === "jj" ? "git" : "jj",
-        colocated: true,
-        status: null,
-        lastUpdated: null,
-      }));
+      const repos = mapRepo(s.repos, connKey, root, (r) => {
+        const flipped = r.backend === "jj" ? "git" : "jj";
+        next = flipped;
+        liveConnId = r.connId;
+        return {
+          ...r,
+          backend: flipped,
+          colocated: true,
+          status: null,
+          lastUpdated: null,
+        };
+      });
       persist(repos);
       return { repos };
     });
+    // Keep an open editor log tab on the same lens — the tab's own swap
+    // button already flips the card, so the sync is two-way.
+    if (next && liveConnId) {
+      useAppStore.getState().setLogTabBackend(liveConnId, root, next);
+    }
     void get().refreshRepo(connKey, root);
   },
 

@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { containerList, type ContainerInfo } from "../../lib/ipc";
 import { panelsConfig } from "../../lib/settings";
 import { useAppStore } from "../../store/appStore";
+import { Tip } from "../Tooltip";
 
 interface HostContainers {
   connId: string;
@@ -105,10 +106,9 @@ export function ContainersView() {
             <div className="containers-view__host" key={h.connId}>
               <div className="containers-view__host-label">{h.label}</div>
               {h.containers.map((c) => (
+                <Tip key={`${h.connId}:${c.id}`} label="Open a shell inside">
                 <div
                   className="container-row"
-                  key={`${h.connId}:${c.id}`}
-                  title={`${c.image} — click to open a shell inside`}
                   onClick={() => enter(h, c)}
                 >
                   <span className="container-row__engine">{c.engine}</span>
@@ -117,6 +117,7 @@ export function ContainersView() {
                   <span className="container-row__ports">{c.ports || "—"}</span>
                   <span className="container-row__status">{c.status}</span>
                 </div>
+                </Tip>
               ))}
             </div>
           ))

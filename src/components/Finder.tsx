@@ -20,6 +20,7 @@ import {
 } from "../lib/searchScope";
 import { useAppStore } from "../store/appStore";
 import { ScopePicker } from "./ScopePicker";
+import { Tip } from "./Tooltip";
 
 interface Entry extends SearchRoot {
   rel: string;
@@ -138,13 +139,11 @@ function FinderModal({ onClose }: { onClose: () => void }) {
     >
       <div className="finder" role="dialog" aria-modal="true">
         <div className="pin-tabs">
-          <button
-            className="pin-tabs__scope"
-            title="Change scope"
-            onClick={() => setStep("scope")}
-          >
-            ‹ {scope === "all" ? "All hosts" : SCOPES.find((s) => s.id === scope)?.label}
-          </button>
+          <Tip label="Change scope">
+            <button className="pin-tabs__scope" onClick={() => setStep("scope")}>
+              ‹ {scope === "all" ? "All hosts" : SCOPES.find((s) => s.id === scope)?.label}
+            </button>
+          </Tip>
           <button
             className={`pin-tab ${pinIdx === 0 ? "pin-tab--active" : ""}`}
             onClick={() => setPinIdx(0)}
@@ -152,15 +151,15 @@ function FinderModal({ onClose }: { onClose: () => void }) {
             All pins ({scopeRoots.length})
           </button>
           {scopeRoots.map((r, i) => (
-            <button
-              key={rootKey(r)}
-              className={`pin-tab ${pinIdx === i + 1 ? "pin-tab--active" : ""}`}
-              title={r.root}
-              onClick={() => setPinIdx(i + 1)}
-            >
-              {r.tag}
-              {scope === "all" ? ` · ${r.kind}` : ""}
-            </button>
+            <Tip key={rootKey(r)} label={r.root}>
+              <button
+                className={`pin-tab ${pinIdx === i + 1 ? "pin-tab--active" : ""}`}
+                onClick={() => setPinIdx(i + 1)}
+              >
+                {r.tag}
+                {scope === "all" ? ` · ${r.kind}` : ""}
+              </button>
+            </Tip>
           ))}
         </div>
         <input

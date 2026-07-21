@@ -100,12 +100,13 @@ export function StatusBar() {
 
   return (
     <footer className="statusbar">
+      {/* The four panel blocks label themselves — no tooltip. */}
       <span
         className="statusbar__item statusbar__item--button statusbar__panel-btn"
         onClick={() => useAppStore.getState().toggleSidebar()}
-        title="Toggle the explorer (Ctrl+B)"
       >
-        <IconFolder size={13} /> EXPLORER
+        <IconFolder size={13} />
+        <span className="statusbar__panel-label">EXPLORER</span>
       </span>
 
       {(vcsRepos.length > 0 || localConnId) && (
@@ -114,9 +115,9 @@ export function StatusBar() {
           <span
             className="statusbar__item statusbar__item--button statusbar__panel-btn"
             onClick={() => toggleScm()}
-            title="Toggle Source Control"
           >
-            <IconBranch size={13} /> SC
+            <IconBranch size={13} />
+            <span className="statusbar__panel-label">SC</span>
           </span>
         </>
       )}
@@ -125,10 +126,12 @@ export function StatusBar() {
       <span
         className="statusbar__item statusbar__item--button statusbar__panel-btn"
         onClick={() => toggleTerminal()}
-        title="Toggle the terminal panel (Ctrl+`) — Ports/Containers/Forwarding live on its top bar"
       >
-        <IconTerminalGlyph size={13} /> TERMINAL
-        {bellInPanel && <IconBell size={10} className="statusbar__panelbell" />}
+        <IconTerminalGlyph size={13} />
+        <span className="statusbar__panel-label">
+          TERMINAL
+          {bellInPanel && <IconBell size={10} className="statusbar__panelbell" />}
+        </span>
       </span>
 
       {(!uiConfig.disableChat || terminals.some((t) => t.inChat)) && (
@@ -137,16 +140,20 @@ export function StatusBar() {
           <span
             className="statusbar__item statusbar__item--button statusbar__panel-btn"
             onClick={() => toggleChat()}
-            title="Toggle CHAT — a terminal column for Claude Code or any CLI"
           >
-            <IconChatBubble size={13} /> CHAT
-            {bellInChat && <IconBell size={10} className="statusbar__panelbell" />}
+            <IconChatBubble size={13} />
+            <span className="statusbar__panel-label">
+              CHAT
+              {bellInChat && <IconBell size={10} className="statusbar__panelbell" />}
+            </span>
           </span>
         </>
       )}
 
-      {/* Connection dots, sectioned: WSL first, then remotes — a section only
-          exists while something is connected. State spells out on hover. */}
+      {/* Connected hosts, always listed (they matter). Each carries an ISSUE
+          LIGHT: near-invisible while the host is fine, colored the moment
+          something happens — a light that brightens is calmer than one that
+          suddenly appears. The explorer host bars keep their full state dots. */}
       {wsls.length > 0 && (
         <>
           <span className="statusbar__sep" />
@@ -157,7 +164,9 @@ export function StatusBar() {
               label={`${w.conn.name} ${w.state} (${w.conn.user}@${w.conn.host})`}
             >
               <span className="statusbar__item statusbar__host">
-                <span className={`dot dot--${w.state}`} />
+                <span
+                  className={`dot ${w.state === "connected" ? "dot--fine" : `dot--${w.state}`}`}
+                />
                 {w.conn.user}
               </span>
             </Tip>
@@ -174,7 +183,9 @@ export function StatusBar() {
               label={`${r.conn.name} ${r.state} (${r.conn.user}@${r.conn.host})`}
             >
               <span className="statusbar__item statusbar__host">
-                <span className={`dot dot--${r.state}`} />
+                <span
+                  className={`dot ${r.state === "connected" ? "dot--fine" : `dot--${r.state}`}`}
+                />
                 {r.conn.user}@{r.conn.host}
               </span>
             </Tip>
@@ -187,46 +198,45 @@ export function StatusBar() {
       <TransferProgressBar variant="status" />
 
       {activeRepo?.status && (
-        <span
-          className="statusbar__item statusbar__branch"
-          title={`${activeRepo.label} · ${activeRepo.status.ref}`}
-        >
-          <IconBranch size={12} /> {activeRepo.status.ref}
-          {activeRepo.status.ahead ? ` ↑${activeRepo.status.ahead}` : ""}
-          {activeRepo.status.behind ? ` ↓${activeRepo.status.behind}` : ""}
-        </span>
+        <Tip label={`${activeRepo.label} · ${activeRepo.status.ref}`}>
+          <span className="statusbar__item statusbar__branch">
+            <IconBranch size={12} /> {activeRepo.status.ref}
+            {activeRepo.status.ahead ? ` ↑${activeRepo.status.ahead}` : ""}
+            {activeRepo.status.behind ? ` ↓${activeRepo.status.behind}` : ""}
+          </span>
+        </Tip>
       )}
 
       {active && (
         <>
-          <span
-            className="statusbar__item statusbar__path"
-            title={activeHost ? `${activeHost}: ${active.path}` : active.path}
-          >
-            {/* Non-local files carry their host up front (local stays plain) —
-                two hosts' identical paths stop looking alike. */}
-            {activeHost && (
-              <span
-                className="statusbar__pathhost"
-                style={activeHostColor ? { color: activeHostColor } : undefined}
-              >
-                {activeHost}:
-              </span>
-            )}
-            {active.path}
-          </span>
+          <Tip label={activeHost ? `${activeHost}: ${active.path}` : active.path}>
+            <span className="statusbar__item statusbar__path">
+              {/* Non-local files carry their host up front (local stays plain) —
+                  two hosts' identical paths stop looking alike. */}
+              {activeHost && (
+                <span
+                  className="statusbar__pathhost"
+                  style={activeHostColor ? { color: activeHostColor } : undefined}
+                >
+                  {activeHost}:
+                </span>
+              )}
+              {active.path}
+            </span>
+          </Tip>
           <span className="statusbar__item">
             Ln {active.cursor.line}, Col {active.cursor.column}
           </span>
           {eolSwitchable ? (
             <span className="statusbar__eol">
-              <span
-                className="statusbar__item statusbar__item--button"
-                title="Change line endings (converts the file; save to keep it)"
-                onClick={() => setEolMenu((v) => !v)}
-              >
-                {active.lineEnding}
-              </span>
+              <Tip label="Change line endings">
+                <span
+                  className="statusbar__item statusbar__item--button"
+                  onClick={() => setEolMenu((v) => !v)}
+                >
+                  {active.lineEnding}
+                </span>
+              </Tip>
               {eolMenu && (
                 <>
                   <div className="menu-backdrop" onClick={() => setEolMenu(false)} />
@@ -254,14 +264,15 @@ export function StatusBar() {
       )}
 
       <span className="statusbar__sep" />
-      <span
-        className="statusbar__item statusbar__item--button statusbar__bell"
-        onClick={() => setBellOpen(!bellOpen)}
-        title="Notifications — every toast lands here after it fades"
-      >
-        <IconBell size={13} />
-        {noticeUnread > 0 && <span className="statusbar__attn" />}
-      </span>
+      <Tip label="Notifications">
+        <span
+          className="statusbar__item statusbar__item--button statusbar__bell"
+          onClick={() => setBellOpen(!bellOpen)}
+        >
+          <IconBell size={13} />
+          {noticeUnread > 0 && <span className="statusbar__attn" />}
+        </span>
+      </Tip>
       {bellOpen && (
         <>
           <div className="menu-backdrop" onClick={() => setBellOpen(false)} />
@@ -277,13 +288,11 @@ export function StatusBar() {
                   Clear all
                 </button>
               )}
-              <button
-                className="icon-btn"
-                title="Close"
-                onClick={() => setBellOpen(false)}
-              >
-                <IconClose size={11} />
-              </button>
+              <Tip label="Close">
+                <button className="icon-btn" onClick={() => setBellOpen(false)}>
+                  <IconClose size={11} />
+                </button>
+              </Tip>
             </div>
             {noticeLog.length === 0 ? (
               <div className="bell-pop__empty">
@@ -296,15 +305,16 @@ export function StatusBar() {
                     {/* Selectable AND one-click copyable — error texts get
                         pasted into searches and bug reports. */}
                     <span className="bell-pop__text">{n.text}</span>
-                    <button
-                      className="icon-btn bell-pop__copy"
-                      title="Copy message"
-                      onClick={() =>
-                        void navigator.clipboard.writeText(n.text).catch(() => {})
-                      }
-                    >
-                      <IconCopy size={12} />
-                    </button>
+                    <Tip label="Copy message">
+                      <button
+                        className="icon-btn bell-pop__copy"
+                        onClick={() =>
+                          void navigator.clipboard.writeText(n.text).catch(() => {})
+                        }
+                      >
+                        <IconCopy size={12} />
+                      </button>
+                    </Tip>
                     <span className="bell-pop__time">
                       <RelativeTime at={n.time} title={null} />
                     </span>

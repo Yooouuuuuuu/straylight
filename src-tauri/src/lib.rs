@@ -129,6 +129,20 @@ fn windows_build_number() -> u32 {
     }
 }
 
+/// Close the web inspector if the browser opened it (debug WebView2 handles
+/// Ctrl+Shift+I at the browser level before the page sees the key, so the
+/// CHAT toggle also fires this to keep DevTools locked; packaged builds have
+/// no inspector at all).
+#[tauri::command]
+fn ui_close_devtools(window: tauri::WebviewWindow) {
+    #[cfg(any(debug_assertions, feature = "devtools"))]
+    if window.is_devtools_open() {
+        window.close_devtools();
+    }
+    #[cfg(not(any(debug_assertions, feature = "devtools")))]
+    let _ = window;
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::Builder::from_env(
@@ -148,6 +162,7 @@ pub fn run() {
             ssh::connection::ssh_disconnect,
             ssh::connection::ssh_reconnect,
             ssh::connection::ssh_trust_host,
+            ui_close_devtools,
             transport::local_connect,
             transport::list_drives,
             transport::fs_find,

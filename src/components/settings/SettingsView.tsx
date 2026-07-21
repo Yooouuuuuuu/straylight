@@ -17,11 +17,11 @@ import {
 } from "../../lib/settings";
 import { useAppStore } from "../../store/appStore";
 import { IconUndo } from "../icons";
+import { Tip } from "../Tooltip";
 
 const CONFIRM_LABELS: Record<string, string> = {
   exit: "Closing the app",
   "unpin-folder": "Unpinning a folder",
-  "track-repo": "Adding a repository to Source Control",
   "remove-repo": "Removing a repository",
   "vcs-update": "Merging the fetched upstream (Update)",
   "vcs-push": "Pushing to the remote",
@@ -127,14 +127,16 @@ export function SettingsView() {
       </div>
 
       <h3 className="app-tab__section">Interface</h3>
+      <Tip
+        label={
+          hasNonLocal
+            ? "Disconnect all WSL/remote hosts first"
+            : "Hides every non-local surface"
+        }
+      >
       <label
         className="settings-row settings-row--check"
         style={hasNonLocal ? { cursor: "not-allowed", opacity: 0.65 } : undefined}
-        title={
-          hasNonLocal
-            ? "Disconnect all WSL/remote hosts first — local-only can't hide live connections"
-            : "Hides the explorer's L/W/R section toggles and every non-local surface"
-        }
         onClick={() => {
           if (hasNonLocal) {
             useAppStore
@@ -161,15 +163,18 @@ export function SettingsView() {
         />
         Local only
       </label>
+      </Tip>
+      <Tip
+        label={
+          hasChatResidents
+            ? "Return (−) or close CHAT's terminals first"
+            : "Removes the CHAT column entirely"
+        }
+      >
       <label
         className="settings-row settings-row--check"
         style={
           hasChatResidents ? { cursor: "not-allowed", opacity: 0.65 } : undefined
-        }
-        title={
-          hasChatResidents
-            ? "Return (−) or close the terminals living in CHAT first"
-            : "Removes the CHAT column entirely — the status-bar button and the move-to-CHAT buttons on terminals"
         }
         onClick={() => {
           if (hasChatResidents) {
@@ -197,6 +202,7 @@ export function SettingsView() {
         />
         Disable CHAT
       </label>
+      </Tip>
 
       <h3 className="app-tab__section">Confirmations</h3>
       <div className="app-tab__hint">Checked = ask first; unchecked = just do it.</div>
@@ -220,9 +226,9 @@ export function SettingsView() {
       </div>
       {allCommands().map((c) => (
         <div key={c.id} className="settings-row">
-          <span className="settings-row__label" title={c.id}>
-            {c.title}
-          </span>
+          <Tip label={c.id}>
+            <span className="settings-row__label">{c.title}</span>
+          </Tip>
           <button
             className={`kbd-btn ${recording === c.id ? "kbd-btn--recording" : ""}`}
             onClick={() => setRecording(c.id)}
@@ -234,13 +240,11 @@ export function SettingsView() {
               : (commandKeyLabel(c.id) ?? "unbound")}
           </button>
           {keybindingOverrides[c.id] && (
-            <button
-              className="icon-btn"
-              title="Reset to default"
-              onClick={() => setKeybinding(c.id, null)}
-            >
-              <IconUndo size={13} />
-            </button>
+            <Tip label="Reset to default">
+              <button className="icon-btn" onClick={() => setKeybinding(c.id, null)}>
+                <IconUndo size={13} />
+              </button>
+            </Tip>
           )}
         </div>
       ))}

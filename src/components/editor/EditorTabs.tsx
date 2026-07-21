@@ -10,6 +10,7 @@ import { tabHostColor } from "../../lib/hostColors";
 import { TAB_DRAG_MIME, useAppStore } from "../../store/appStore";
 import { FileIcon } from "../filetree/FileIcons";
 import { IconClose } from "../icons";
+import { Tip } from "../Tooltip";
 
 export function EditorTabs({ groupId }: { groupId: number }) {
   const allTabs = useAppStore((s) => s.tabs);
@@ -126,13 +127,6 @@ export function EditorTabs({ groupId }: { groupId: number }) {
               closeTab(tab.id);
             }
           }}
-          title={
-            tab.kind === "diff"
-              ? `${tab.path} (changes)`
-              : tab.kind === "merge"
-                ? `${tab.path} (merge)`
-                : tab.path
-          }
         >
           <span
             className="editor-tab__icon"
@@ -144,7 +138,7 @@ export function EditorTabs({ groupId }: { groupId: number }) {
                   }
                 : undefined
             }
-            title={tab.pinned ? "Pinned — click the icon to unpin" : undefined}
+            title={tab.pinned ? "Pinned — click to unpin" : undefined}
           >
             {tab.pinned && (
               <svg
@@ -183,12 +177,22 @@ export function EditorTabs({ groupId }: { groupId: number }) {
               <FileIcon name={tab.name} isDir={false} isOpen={false} />
             )}
           </span>
-          <span
-            className={`editor-tab__name ${tab.previewTab ? "editor-tab__name--preview" : ""}`}
+          <Tip
+            label={
+              tab.kind === "diff"
+                ? `${tab.path} (changes)`
+                : tab.kind === "merge"
+                  ? `${tab.path} (merge)`
+                  : tab.path
+            }
           >
-            {tab.name}
-            {tab.kind === "diff" ? " (changes)" : tab.kind === "merge" ? " (merge)" : ""}
-          </span>
+            <span
+              className={`editor-tab__name ${tab.previewTab ? "editor-tab__name--preview" : ""}`}
+            >
+              {tab.name}
+              {tab.kind === "diff" ? " (changes)" : tab.kind === "merge" ? " (merge)" : ""}
+            </span>
+          </Tip>
           {tab.pinned ? (
             // Pinned tabs have no close button, but a dirty pinned tab still
             // needs its unsaved dot — same slot, non-interactive.
@@ -201,19 +205,20 @@ export function EditorTabs({ groupId }: { groupId: number }) {
               </span>
             ) : null
           ) : (
-            <button
-              className="editor-tab__close"
-              title="Close"
-              onClick={(event) => {
-                event.stopPropagation();
-                closeTab(tab.id);
-              }}
-            >
-              <span className="editor-tab__dot" />
-              <span className="editor-tab__x">
-                <IconClose size={12} />
-              </span>
-            </button>
+            <Tip label="Close">
+              <button
+                className="editor-tab__close"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  closeTab(tab.id);
+                }}
+              >
+                <span className="editor-tab__dot" />
+                <span className="editor-tab__x">
+                  <IconClose size={12} />
+                </span>
+              </button>
+            </Tip>
           )}
         </div>
         );

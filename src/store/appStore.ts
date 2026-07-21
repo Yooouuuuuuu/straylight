@@ -122,16 +122,24 @@ interface GroupsSlice {
   activeTabId: string | null;
 }
 
-/** Recompute the group bookkeeping after any tab/group change: drops emptied
- *  groups (keeping at least one), repairs each group's active tab, and focuses
- *  `focusId` (undefined = keep the current focus if still valid). */
+/** Recompute the group bookkeeping after any tab/group change: repairs each
+ *  group's active tab and focuses `focusId` (undefined = keep the current
+ *  focus if still valid). Group lifecycle: a group that LOSES its last tab
+ *  (close, drag away) closes itself; a group created empty on purpose
+ *  (Ctrl+\, Ctrl+2/3) persists — it shows the app icon and its own ✕, and
+ *  only `closeGroup` (or gaining-then-losing tabs) removes it. */
 function groupsPatch(
   s: GroupsSlice,
   tabs: EditorTab[],
   focusId?: string | null,
 ): GroupsSlice {
   const present = new Set(tabs.map(gidOf));
-  let editorGroups = s.editorGroups.filter((g) => present.has(g));
+  const hadTabs = new Set(s.tabs.map(gidOf));
+  // Keep groups that still hold tabs, or never held any (intentional empties);
+  // drop the ones this change just emptied.
+  let editorGroups = s.editorGroups.filter(
+    (g) => present.has(g) || !hadTabs.has(g),
+  );
   for (const g of present) {
     if (!editorGroups.includes(g)) editorGroups.push(g);
   }
@@ -720,6 +728,12 @@ interface AppState {
   /** Each group's active tab. `activeTabId` mirrors the focused group's. */
   groupActive: Record<number, string | null>;
   setActiveGroup: (gid: number) => void;
+  /** Create a new EMPTY group after the active one and focus it (Ctrl+2/3 on
+   *  the next index, or Ctrl+\ with a single file). Null at the cap. */
+  addEmptyGroup: () => number | null;
+  /** Remove an EMPTY group (the pane's ✕). No-op for the last group or one
+   *  that still holds tabs. */
+  closeGroup: (gid: number) => void;
   /** Move a tab into a new group — right of its own, or at the far right. */
   splitRight: (tabId: string, opts?: { end?: boolean }) => void;
   /** Move a tab into an existing group. */
@@ -1535,6 +1549,44 @@ export const useAppStore = create<AppState>()((set, get) => ({
       return { activeGroupId: gid, activeTabId: s.groupActive[gid] ?? null };
     }),
 
+  addEmptyGroup: () => {
+    let created: number | null = null;
+    set((s) => {
+      if (s.editorGroups.length >= MAX_EDITOR_GROUPS) return {};
+      const gid = Math.max(0, ...s.editorGroups) + 1;
+      created = gid;
+      const editorGroups = [...s.editorGroups];
+      const at = editorGroups.indexOf(s.activeGroupId);
+      editorGroups.splice(at < 0 ? editorGroups.length : at + 1, 0, gid);
+      return { editorGroups, activeGroupId: gid, activeTabId: null };
+    });
+    return created;
+  },
+
+  closeGroup: (gid) =>
+    set((s) => {
+      if (
+        !s.editorGroups.includes(gid) ||
+        s.editorGroups.length <= 1 ||
+        s.tabs.some((t) => (t.groupId ?? 0) === gid)
+      ) {
+        return {};
+      }
+      const editorGroups = s.editorGroups.filter((g) => g !== gid);
+      let activeGroupId = s.activeGroupId;
+      if (activeGroupId === gid) {
+        const oldIdx = s.editorGroups.indexOf(gid);
+        activeGroupId =
+          editorGroups[Math.max(0, Math.min(oldIdx - 1, editorGroups.length - 1))] ??
+          editorGroups[0];
+      }
+      return {
+        editorGroups,
+        activeGroupId,
+        activeTabId: s.groupActive[activeGroupId] ?? null,
+      };
+    }),
+
   splitRight: (tabId, opts = {}) =>
     set((s) => {
       const tab = s.tabs.find((t) => t.id === tabId);
@@ -1830,8 +1882,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   setLogTabBackend: (connId, root, backend) =>
     set((s) => ({
+      // Matched by the tab's own fields (not a rebuilt id string) so the
+      // patch can't silently drift from the id format.
       tabs: s.tabs.map((t) =>
-        t.id === `log::${connId}::${root}` ? { ...t, vcsBackend: backend } : t,
+        t.kind === "log" && t.connId === connId && t.path === root
+          ? { ...t, vcsBackend: backend }
+          : t,
       ),
     })),
 

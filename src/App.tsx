@@ -52,6 +52,7 @@ import { VcsConfirmDialog } from "./components/vcs/VcsConfirmDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { TabSwitcher } from "./components/TabSwitcher";
 import { StartupAskDialog } from "./components/StartupAskDialog";
+import { TextContextMenu } from "./components/TextContextMenu";
 import { Finder } from "./components/Finder";
 import { SearchInFiles } from "./components/SearchInFiles";
 import { ToastStack } from "./components/Toast";
@@ -337,17 +338,10 @@ export default function App() {
     };
   }, []);
 
-  // Suppress WebView2's native context menu (重新整理/列印/檢查…) everywhere
-  // except text fields — Monaco, xterm, and the file tree bring their own menus.
-  useEffect(() => {
-    const onContextMenu = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target?.closest("input, textarea, [contenteditable=true]")) return;
-      e.preventDefault();
-    };
-    window.addEventListener("contextmenu", onContextMenu);
-    return () => window.removeEventListener("contextmenu", onContextMenu);
-  }, []);
+  // The native WebView2 context menu (重新整理/列印/檢查…) never shows —
+  // TextContextMenu owns right-click app-wide: the six-entry edit menu on
+  // text fields and the file editor, nothing elsewhere (xterm and the file
+  // tree bring their own menus and preventDefault before it).
 
   // The history panel sits on top of the explorer in the sidebar column (the
   // explorer is usually idle while browsing history, and this keeps the editor
@@ -502,6 +496,7 @@ export default function App() {
       <DiscardDialog />
       <VcsConfirmDialog />
       <StartupAskDialog />
+      <TextContextMenu />
       <CommandPalette />
       <TabSwitcher />
       <Finder />

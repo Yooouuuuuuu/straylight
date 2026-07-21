@@ -19,6 +19,7 @@ import { autoConnectHosts, draftsConfig, updateSettings } from "../../lib/settin
 import { remoteHostKey, useAppStore } from "../../store/appStore";
 import { useVcsStore } from "../../store/vcsStore";
 import { IconClose } from "../icons";
+import { Tip } from "../Tooltip";
 
 function fmtBytes(b: number): string {
   if (b < 1024) return `${b} B`;
@@ -60,9 +61,11 @@ export function DraftsView() {
       </label>
       {[...draftHosts.entries()].map(([host, g]) => (
         <div key={host} className="settings-row">
-          <span className="settings-row__label" title={host}>
-            {host} — {g.count} draft{g.count === 1 ? "" : "s"} · {fmtBytes(g.bytes)}
-          </span>
+          <Tip label={host}>
+            <span className="settings-row__label">
+              {host} — {g.count} draft{g.count === 1 ? "" : "s"} · {fmtBytes(g.bytes)}
+            </span>
+          </Tip>
           <button
             className="btn btn--ghost"
             onClick={() =>
@@ -146,9 +149,11 @@ export function PinsView() {
       {[...pinsByHost.entries()].map(([host, paths]) => (
         <div key={host}>
           <div className="settings-row">
-            <span className="settings-row__label" title={host}>
-              {host} — {paths.length} pinned
-            </span>
+            <Tip label={host}>
+              <span className="settings-row__label">
+                {host} — {paths.length} pinned
+              </span>
+            </Tip>
             <button
               className="btn btn--ghost"
               onClick={() => paths.forEach((p) => unpinEverywhere(host, p))}
@@ -158,16 +163,19 @@ export function PinsView() {
           </div>
           {paths.map((p) => (
             <div key={p} className="settings-row">
-              <span className="settings-row__label mono" title={p}>
-                &nbsp;&nbsp;⌖ {basename(p)}
-              </span>
-              <button
-                className="icon-btn"
-                title={`Unpin ${p}`}
-                onClick={() => unpinEverywhere(host, p)}
-              >
-                <IconClose size={12} />
-              </button>
+              <Tip label={p}>
+                <span className="settings-row__label mono">
+                  &nbsp;&nbsp;⌖ {basename(p)}
+                </span>
+              </Tip>
+              <Tip label="Unpin">
+                <button
+                  className="icon-btn"
+                  onClick={() => unpinEverywhere(host, p)}
+                >
+                  <IconClose size={12} />
+                </button>
+              </Tip>
             </div>
           ))}
         </div>
@@ -216,21 +224,22 @@ export function AutoConnectView() {
       </div>
       {hosts.map((key) => (
         <div key={key} className="settings-row">
-          <span className="settings-row__label mono" title={key}>
+          <span className="settings-row__label mono">
             {key.startsWith("wsl:") ? "WSL — " : "SSH — "}
             {key}
           </span>
-          <button
-            className="icon-btn"
-            title={`Ask again for ${key}`}
-            onClick={() =>
-              void updateSettings({
-                autoConnect: autoConnectHosts.filter((h) => h !== key),
-              })
-            }
-          >
-            <IconClose size={12} />
-          </button>
+          <Tip label="Remove — ask again at launch">
+            <button
+              className="icon-btn"
+              onClick={() =>
+                void updateSettings({
+                  autoConnect: autoConnectHosts.filter((h) => h !== key),
+                })
+              }
+            >
+              <IconClose size={12} />
+            </button>
+          </Tip>
         </div>
       ))}
       {hosts.length === 0 && (

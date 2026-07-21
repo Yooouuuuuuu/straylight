@@ -13,6 +13,20 @@ export const SECTION_LOCAL = "var(--section-local)";
 export const SECTION_WSL = "var(--section-wsl)";
 export const SECTION_REMOTE = "var(--section-remote)";
 
+/** Tooltip for a host's issue light, per connection state. */
+export function connStateTip(state: string): string {
+  switch (state) {
+    case "connected":
+      return "Connected";
+    case "connecting":
+      return "Connecting…";
+    case "reconnecting":
+      return "Reconnecting — retries until you disconnect";
+    default:
+      return "Disconnected — reconnect from the host bar";
+  }
+}
+
 /** A remote's default slot in the ramp (its position in the remotes list). */
 function remoteSlot(hostKey: string): number {
   const idx = useAppStore

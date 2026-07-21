@@ -9,6 +9,7 @@ import { hostColorForConnKey, SECTION_LOCAL, SECTION_WSL } from "../../lib/hostC
 import { portList, type PortInfo } from "../../lib/ipc";
 import { panelsConfig, updateSettings } from "../../lib/settings";
 import { remoteHostKey, useAppStore } from "../../store/appStore";
+import { Tip } from "../Tooltip";
 
 interface Row extends PortInfo {
   connId: string;
@@ -109,28 +110,33 @@ export function PortsView() {
       <div className="ports-view__head">
         <span className="ports-view__controls">
           {hosts.map((h) => (
-            <label key={h.key} className="ports-view__host-toggle" title={`Monitor ${h.host}`}>
+            <Tip key={h.key} label={`Monitor ${h.host}`}>
+              <label className="ports-view__host-toggle">
+                <input
+                  type="checkbox"
+                  checked={!ignored.has(h.key)}
+                  onChange={() => toggleHost(h.key)}
+                />
+                <span style={{ color: h.color }}>{h.host}</span>
+              </label>
+            </Tip>
+          ))}
+          <Tip label="Hide well-known/system ports (<1024, RDP, mDNS…)">
+            <label className="ports-view__host-toggle">
               <input
                 type="checkbox"
-                checked={!ignored.has(h.key)}
-                onChange={() => toggleHost(h.key)}
+                checked={hideSystem}
+                onChange={(e) =>
+                  void updateSettings({
+                    panels: { ...panelsConfig, hideSystemPorts: e.target.checked },
+                  })
+                }
               />
-              <span style={{ color: h.color }}>{h.host}</span>
+              hide system ports
             </label>
-          ))}
-          <label className="ports-view__host-toggle" title="Hide well-known/system ports (<1024, RDP, mDNS…)">
-            <input
-              type="checkbox"
-              checked={hideSystem}
-              onChange={(e) =>
-                void updateSettings({
-                  panels: { ...panelsConfig, hideSystemPorts: e.target.checked },
-                })
-              }
-            />
-            hide system ports
-          </label>
-          <label className="ports-view__host-toggle" title="Poll interval while this tab is open (seconds, saved to settings.json)">
+          </Tip>
+          <Tip label="Poll interval while this tab is open">
+          <label className="ports-view__host-toggle">
             every
             <input
               type="number"
@@ -146,6 +152,7 @@ export function PortsView() {
             />
             s
           </label>
+          </Tip>
         </span>
         {checkedAt && (
           <span className="ports-view__stamp">
@@ -178,9 +185,9 @@ export function PortsView() {
               <td className="mono">{r.pid ?? "—"}</td>
               <td>
                 {r.connId !== localConnId && (
+                  <Tip label="Forward to 127.0.0.1">
                   <button
                     className="btn btn--ghost"
-                    title="Forward this port to 127.0.0.1"
                     onClick={() => {
                       setForwardPrefill({ connId: r.connId, port: r.port });
                       setTerminalView("forwarding");
@@ -188,6 +195,7 @@ export function PortsView() {
                   >
                     Forward
                   </button>
+                  </Tip>
                 )}
               </td>
             </tr>

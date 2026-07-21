@@ -10,6 +10,7 @@ import {
   type ForwardInfo,
 } from "../lib/ipc";
 import { useAppStore } from "../store/appStore";
+import { Tip } from "./Tooltip";
 
 interface Conn {
   connId: string;
@@ -178,9 +179,9 @@ export function ForwardingView() {
                       127.0.0.1:{f.localPort} → {f.remoteHost}:{f.remotePort}
                     </span>
                     {f.lastError && (
-                      <span className="ports-item__err" title={f.lastError}>
-                        {f.lastError}
-                      </span>
+                      <Tip label={f.lastError}>
+                        <span className="ports-item__err">{f.lastError}</span>
+                      </Tip>
                     )}
                   </div>
                   <span className="ports-item__conn">{labelFor(f.connId)}</span>

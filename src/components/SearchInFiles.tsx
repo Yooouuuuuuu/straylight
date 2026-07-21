@@ -21,6 +21,7 @@ import {
 } from "../lib/searchScope";
 import { useAppStore } from "../store/appStore";
 import { ScopePicker } from "./ScopePicker";
+import { Tip } from "./Tooltip";
 
 type Hit = SearchRoot & SearchMatch;
 type RootState = "searching" | "done" | "failed";
@@ -153,13 +154,11 @@ function SearchModal({ onClose }: { onClose: () => void }) {
     >
       <div className="search-panel" role="dialog" aria-modal="true">
         <div className="pin-tabs">
-          <button
-            className="pin-tabs__scope"
-            title="Change scope"
-            onClick={() => setStep("scope")}
-          >
-            ‹ {scope === "all" ? "All hosts" : SCOPES.find((s) => s.id === scope)?.label}
-          </button>
+          <Tip label="Change scope">
+            <button className="pin-tabs__scope" onClick={() => setStep("scope")}>
+              ‹ {scope === "all" ? "All hosts" : SCOPES.find((s) => s.id === scope)?.label}
+            </button>
+          </Tip>
           <button
             className={`pin-tab ${pinIdx === 0 ? "pin-tab--active" : ""}`}
             onClick={() => setPinIdx(0)}
@@ -167,15 +166,15 @@ function SearchModal({ onClose }: { onClose: () => void }) {
             All pins ({scopeRoots.length})
           </button>
           {scopeRoots.map((r, i) => (
-            <button
-              key={rootKey(r)}
-              className={`pin-tab ${pinIdx === i + 1 ? "pin-tab--active" : ""}`}
-              title={r.root}
-              onClick={() => setPinIdx(i + 1)}
-            >
-              {r.tag}
-              {scope === "all" ? ` · ${r.kind}` : ""}
-            </button>
+            <Tip key={rootKey(r)} label={r.root}>
+              <button
+                className={`pin-tab ${pinIdx === i + 1 ? "pin-tab--active" : ""}`}
+                onClick={() => setPinIdx(i + 1)}
+              >
+                {r.tag}
+                {scope === "all" ? ` · ${r.kind}` : ""}
+              </button>
+            </Tip>
           ))}
         </div>
         <div className="search-panel__head">
@@ -232,24 +231,23 @@ function SearchModal({ onClose }: { onClose: () => void }) {
                 : "";
               return (
                 <div className="search-group" key={`${f.connId}:${f.root}:${f.path}`}>
-                  <div className="search-group__file" title={f.path}>
-                    <span className="search-group__name">{basename(f.path)}</span>
-                    <span className="search-group__dir">
-                      {dir ? `${dir} · ` : ""}
-                      {f.tag}
-                    </span>
-                    <span className="search-group__num">{g.hits.length}</span>
-                  </div>
-                  {g.hits.map((h, i) => (
-                    <div
-                      className="search-hit"
-                      key={i}
-                      onClick={() => openHit(h)}
-                      title="Open at this line"
-                    >
-                      <span className="search-hit__line">{h.line}</span>
-                      <span className="search-hit__text">{h.text}</span>
+                  <Tip label={f.path}>
+                    <div className="search-group__file">
+                      <span className="search-group__name">{basename(f.path)}</span>
+                      <span className="search-group__dir">
+                        {dir ? `${dir} · ` : ""}
+                        {f.tag}
+                      </span>
+                      <span className="search-group__num">{g.hits.length}</span>
                     </div>
+                  </Tip>
+                  {g.hits.map((h, i) => (
+                    <Tip key={i} label="Open at this line">
+                      <div className="search-hit" onClick={() => openHit(h)}>
+                        <span className="search-hit__line">{h.line}</span>
+                        <span className="search-hit__text">{h.text}</span>
+                      </div>
+                    </Tip>
                   ))}
                 </div>
               );

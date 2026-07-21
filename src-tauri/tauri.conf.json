@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Straylight",
-  "version": "0.9.10",
+  "version": "0.9.11",
   "identifier": "dev.straylight.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -23,7 +23,8 @@
         "transparent": false,
         "center": true,
         "backgroundColor": "#282A36",
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "devtools": false
       }
     ],
     "security": {

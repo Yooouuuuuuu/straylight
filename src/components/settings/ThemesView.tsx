@@ -22,6 +22,7 @@ import {
 } from "../../lib/themes";
 import { useAppStore } from "../../store/appStore";
 import { IconChevron, IconClose } from "../icons";
+import { Tip } from "../Tooltip";
 
 const SECTIONS: {
   key: "colors" | "editor" | "terminalLocal" | "terminalWsl" | "terminalRemote";
@@ -78,13 +79,14 @@ export function ThemesView() {
           <button className="btn btn--ghost" onClick={() => void applyTheme(name)}>
             Use
           </button>
-          <button
-            className="icon-btn icon-btn--danger"
-            title={`Delete "${name}"`}
-            onClick={() => void deleteTheme(name)}
-          >
-            <IconClose size={12} />
-          </button>
+          <Tip label={`Delete "${name}"`}>
+            <button
+              className="icon-btn icon-btn--danger"
+              onClick={() => void deleteTheme(name)}
+            >
+              <IconClose size={12} />
+            </button>
+          </Tip>
         </div>
       ))}
 
@@ -106,18 +108,20 @@ export function ThemesView() {
             {isOpen && (
               <div className="theme-cards">
                 {Object.entries(effective).map(([key, value]) => (
-                  <label key={key} className="theme-card" title={`${key}: ${value}`}>
-                    <input
-                      type="color"
-                      value={HEX_RE.test(value) ? value.toLowerCase() : "#000000"}
-                      onChange={(e) =>
-                        void updateSettings({
-                          [sec.key]: { ...effective, [key]: e.target.value },
-                        })
-                      }
-                    />
-                    <span className="theme-card__name">{key}</span>
-                  </label>
+                  <Tip key={key} label={`${key}: ${value}`}>
+                    <label className="theme-card">
+                      <input
+                        type="color"
+                        value={HEX_RE.test(value) ? value.toLowerCase() : "#000000"}
+                        onChange={(e) =>
+                          void updateSettings({
+                            [sec.key]: { ...effective, [key]: e.target.value },
+                          })
+                        }
+                      />
+                      <span className="theme-card__name">{key}</span>
+                    </label>
+                  </Tip>
                 ))}
               </div>
             )}

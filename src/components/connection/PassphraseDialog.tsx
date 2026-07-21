@@ -7,6 +7,7 @@ import { useDialogKeys } from "../../hooks/useDialogKeys";
 import { useAppStore } from "../../store/appStore";
 import { basename } from "../../lib/format";
 import { IconClose } from "../icons";
+import { Tip } from "../Tooltip";
 
 export function PassphraseDialog() {
   const prompt = useAppStore((s) => s.passphrasePrompt);
@@ -44,9 +45,11 @@ export function PassphraseDialog() {
       >
         <div className="modal__header">
           <span className="modal__title">Unlock SSH key</span>
-          <button className="icon-btn" onClick={close} title="Close">
-            <IconClose />
-          </button>
+          <Tip label="Close">
+            <button className="icon-btn" onClick={close}>
+              <IconClose />
+            </button>
+          </Tip>
         </div>
         <div className="modal__body">
           <div className="modal__section">

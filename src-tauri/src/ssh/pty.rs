@@ -150,6 +150,13 @@ async fn open_ssh_pty(
                 }
             }
         }
+        // Actively CLOSE the channel, bounded. EOF alone leaves an interactive
+        // PTY shell running server-side, and a dropped channel never sends
+        // CHANNEL_CLOSE — so every closed terminal would permanently hold one
+        // of sshd's session slots (MaxSessions, default 10) until the whole
+        // connection died. CHANNEL_CLOSE makes sshd HUP the shell and free the
+        // slot immediately.
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), channel.close()).await;
         let _ = task_app.emit(
             "pty-output",
             PtyOutput { pty_id: task_id.clone(), data: Vec::new() },

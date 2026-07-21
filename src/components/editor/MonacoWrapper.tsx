@@ -55,6 +55,9 @@ export function MonacoWrapper({ groupId }: { groupId: number }) {
       // VS Code's pinned block/function headers at the top while scrolling.
       // Falls back to folding/indentation where no symbol provider exists.
       stickyScroll: { enabled: true },
+      // The app's own six-entry menu (TextContextMenu) takes over — a richer
+      // editor menu is future work.
+      contextmenu: false,
     });
     editorRef.current = editor;
     const unregister = registerGroupEditor(editor);
@@ -116,6 +119,15 @@ export function MonacoWrapper({ groupId }: { groupId: number }) {
     }
 
     editor.setModel(acquireModel(tab));
+    // A truncated (>50 MB) view is READ-ONLY: editing a partial file is wasted
+    // work (saving it would amputate the tail, so saving is blocked anyway) —
+    // no mainstream editor lets you edit a truncated view (G4 decision).
+    editor.updateOptions({
+      readOnly: !!tab.truncated,
+      readOnlyMessage: {
+        value: "Read-only — only the first 50 MB of this file is shown.",
+      },
+    });
     shownTabRef.current = activeTabId;
     const state = viewStatesRef.current.get(activeTabId);
     if (state) editor.restoreViewState(state);
@@ -126,14 +138,18 @@ export function MonacoWrapper({ groupId }: { groupId: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTabId]);
 
-  // Deliberate focus hand-offs (double click, Enter, quick open, tab click).
+  // Deliberate focus hand-offs (double click, Enter, quick open, tab click,
+  // Ctrl+1..3). Every group's wrapper sees the bump — only the ACTIVE group's
+  // may answer, or the last-mounted split steals the focus every time.
   const focusSeq = useAppStore((s) => s.editorFocusSeq);
   const lastFocusSeq = useRef(focusSeq);
   useEffect(() => {
     if (focusSeq === lastFocusSeq.current) return;
     lastFocusSeq.current = focusSeq;
-    editorRef.current?.focus();
-  }, [focusSeq]);
+    if (useAppStore.getState().activeGroupId === groupId) {
+      editorRef.current?.focus();
+    }
+  }, [focusSeq, groupId]);
 
   // Reveal a target line once its file's model is active (from search results).
   const revealTarget = useAppStore((s) => s.revealTarget);

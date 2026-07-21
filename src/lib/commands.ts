@@ -13,6 +13,7 @@ import { saveActiveFile } from "./saveFile";
 import { settingsFilePath, updateSettings } from "./settings";
 import { closeAllTabs, closeSavedTabs } from "./tabActions";
 import { keyLabelFor } from "./shortcuts";
+import { cycleTerminalPanelTab } from "./terminalTabs";
 import { pickTerminalTarget } from "./terminalTarget";
 import { focusExplorer } from "./treeNav";
 import { currentZoom, zoomBy, applyZoom } from "./zoom";
@@ -29,6 +30,34 @@ export interface Command {
 
 const app = () => useAppStore.getState();
 const vcs = () => useVcsStore.getState();
+
+/** Ctrl+1..3, VS Code-style: focus the nth group; asking for the NEXT index
+ *  creates a new empty group (with one group, Ctrl+2 creates, Ctrl+3 is
+ *  locked until a second exists). */
+function focusEditorGroup(n: number): void {
+  const s = app();
+  const gid = s.editorGroups[n];
+  if (gid !== undefined) {
+    s.setActiveGroup(gid);
+    s.requestEditorFocus();
+  } else if (n === s.editorGroups.length) {
+    s.addEmptyGroup();
+  }
+}
+
+/** Ctrl+\: split half/half. More than one file here → the active file moves
+ *  to the new split; a single (or no) file stays put and the new split opens
+ *  EMPTY (app icon + its own close button). */
+function splitRightSmart(): void {
+  const s = app();
+  const inGroup = s.tabs.filter((t) => (t.groupId ?? 0) === s.activeGroupId);
+  if (inGroup.length > 1 && s.activeTabId) {
+    s.splitRight(s.activeTabId);
+    s.requestEditorFocus(); // land the cursor in the new split
+  } else {
+    s.addEmptyGroup();
+  }
+}
 
 async function setZoomAndPersist(factor: number | null): Promise<void> {
   const applied = factor === null ? await zoomBy(0) : await applyZoom(factor);
@@ -80,11 +109,7 @@ export function allCommands(): Command[] {
     {
       id: "editor.splitRight",
       title: "Editor: Split Right",
-      run: () => {
-        const s = app();
-        if (s.activeTabId) s.splitRight(s.activeTabId);
-        else s.pushNotice("warn", "No active tab to split.");
-      },
+      run: splitRightSmart,
     },
     {
       id: "explorer.copyPath",
@@ -156,8 +181,22 @@ export function allCommands(): Command[] {
         }
       },
     },
-    { id: "terminal.next", title: "Terminal: Next", run: () => app().cycleTerminal(1) },
-    { id: "terminal.previous", title: "Terminal: Previous", run: () => app().cycleTerminal(-1) },
+    {
+      id: "terminal.next",
+      title: "Terminal: Next Tab (hosts, then tools)",
+      run: () => {
+        app().setTerminalVisible(true);
+        cycleTerminalPanelTab(1);
+      },
+    },
+    {
+      id: "terminal.previous",
+      title: "Terminal: Previous Tab (hosts, then tools)",
+      run: () => {
+        app().setTerminalVisible(true);
+        cycleTerminalPanelTab(-1);
+      },
+    },
     {
       id: "terminal.showContainers",
       title: "Terminal: Show Containers",
@@ -170,6 +209,27 @@ export function allCommands(): Command[] {
     { id: "view.portForwarding", title: "View: Port Forwarding…", run: () => { app().setTerminalView("forwarding"); app().setTerminalVisible(true); } },
     { id: "view.toggleSidebar", title: "View: Toggle Sidebar", run: () => app().toggleSidebar() },
     { id: "view.toggleSourceControl", title: "View: Toggle Source Control", run: () => vcs().toggleScm() },
+    { id: "view.toggleChat", title: "View: Toggle CHAT", run: () => app().toggleChat() },
+    {
+      id: "view.togglePanel",
+      title: "View: Toggle Panel",
+      run: () => app().setTerminalVisible(!app().terminalVisible),
+    },
+    {
+      id: "editor.focusGroup1",
+      title: "Editor: Focus Group 1",
+      run: () => focusEditorGroup(0),
+    },
+    {
+      id: "editor.focusGroup2",
+      title: "Editor: Focus Group 2",
+      run: () => focusEditorGroup(1),
+    },
+    {
+      id: "editor.focusGroup3",
+      title: "Editor: Focus Group 3",
+      run: () => focusEditorGroup(2),
+    },
     { id: "view.zoomIn", title: "View: Zoom In", run: () => setZoomAndPersist(currentZoom() + 0.1) },
     { id: "view.zoomOut", title: "View: Zoom Out", run: () => setZoomAndPersist(currentZoom() - 0.1) },
     { id: "view.zoomReset", title: "View: Zoom Reset", run: () => setZoomAndPersist(1) },

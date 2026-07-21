@@ -29,6 +29,7 @@ import {
   IconTransfer,
   IconTunnel,
 } from "../icons";
+import { Tip } from "../Tooltip";
 
 const GROUP_MIME = "application/x-straylight-termgroup";
 const TERM_MIME = "application/x-straylight-termentry";
@@ -197,6 +198,9 @@ export function TerminalPanel() {
   return (
     <div
       className={`terminal-panel terminal-panel--grouped${terminalView !== "terminals" ? " terminal-panel--toolmode" : ""}`}
+      // Focusable so the panel-tab cycle (Ctrl+PageDown/Up) can park the
+      // keyboard here after switching to a tool view (no xterm to focus).
+      tabIndex={-1}
     >
       <div className="termgroup__bar">
         {groups.map((g) => (
@@ -254,13 +258,14 @@ export function TerminalPanel() {
           )}
         {panelsConfig.transfers &&
           tool("transfers", <IconTransfer size={13} />, "Transfers", null)}
-        <button
-          className="icon-btn termgroup__collapse panel-head__hide"
-          title="Hide terminal (Ctrl+`)"
-          onClick={() => setTerminalVisible(false)}
-        >
-          <IconPanelHide size={14} />
-        </button>
+        <Tip label="Hide TERMINAL (Ctrl+`)">
+          <button
+            className="icon-btn termgroup__collapse panel-head__hide"
+            onClick={() => setTerminalVisible(false)}
+          >
+            <IconPanelHide size={14} />
+          </button>
+        </Tip>
       </div>
 
       <div className="terminal-panel__split">
@@ -334,31 +339,30 @@ export function TerminalPanel() {
               } as React.CSSProperties
             }
           >
-            <div
-              className="terminal-sidebar__grip"
-              title="Drag to resize — all the way right leaves just the icons"
-              onMouseDown={startListDrag}
-            />
+            <Tip label="Drag to resize">
+              <div className="terminal-sidebar__grip" onMouseDown={startListDrag} />
+            </Tip>
             <div className="terminal-sidebar__actions">
-              <button
-                className="icon-btn"
-                title={
+              <Tip
+                label={
                   activeGroup === localConnId
                     ? "New pwsh terminal (Ctrl+Shift+`)"
-                    : "New terminal in this group (Ctrl+Shift+`)"
+                    : "New terminal (Ctrl+Shift+`)"
                 }
-                onClick={() => newTerminal()}
               >
-                <IconPlus size={14} />
-              </button>
-              {activeGroup === localConnId && (
-                <button
-                  className="icon-btn terminal-new__caret"
-                  title="Select a shell…"
-                  onClick={() => setMenuOpen((v) => !v)}
-                >
-                  <IconChevron size={12} dir="down" />
+                <button className="icon-btn" onClick={() => newTerminal()}>
+                  <IconPlus size={14} />
                 </button>
+              </Tip>
+              {activeGroup === localConnId && (
+                <Tip label="Select a shell…">
+                  <button
+                    className="icon-btn terminal-new__caret"
+                    onClick={() => setMenuOpen((v) => !v)}
+                  >
+                    <IconChevron size={12} dir="down" />
+                  </button>
+                </Tip>
               )}
               {menuOpen && (
                 <>
@@ -390,7 +394,6 @@ export function TerminalPanel() {
                   role="tab"
                   aria-selected={t.id === activeTerminalId}
                   className={`terminal-entry${t.id === activeTerminalId ? " terminal-entry--active" : ""}${belled[t.id] ? " terminal-entry--bell" : ""}`}
-                  title={termDisplayName(t)}
                   draggable={renaming?.id !== t.id}
                   onDragStart={(e) => e.dataTransfer.setData(TERM_MIME, t.id)}
                   onDragOver={(e) => {
@@ -438,39 +441,43 @@ export function TerminalPanel() {
                           }}
                         />
                       ) : (
-                        <span
-                          className="terminal-entry__label"
-                          onDoubleClick={(e) => {
-                            e.stopPropagation();
-                            setRenaming({ id: t.id, value: termDisplayName(t) });
-                          }}
-                        >
-                          {termDisplayName(t)}
-                        </span>
+                        <Tip label={termDisplayName(t)}>
+                          <span
+                            className="terminal-entry__label"
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              setRenaming({ id: t.id, value: termDisplayName(t) });
+                            }}
+                          >
+                            {termDisplayName(t)}
+                          </span>
+                        </Tip>
                       )}
                       {(!uiConfig.disableChat ||
                         terminals.some((x) => x.inChat)) && (
+                        <Tip label="Move to CHAT (shell keeps running)">
+                          <button
+                            className="terminal-entry__close terminal-entry__move"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              moveTerminalToChat(t.id);
+                            }}
+                          >
+                            <IconToChat size={12} />
+                          </button>
+                        </Tip>
+                      )}
+                      <Tip label="Close terminal">
                         <button
-                          className="terminal-entry__close terminal-entry__move"
-                          title="Move to CHAT (the shell keeps running)"
+                          className="terminal-entry__close terminal-entry__kill"
                           onClick={(e) => {
                             e.stopPropagation();
-                            moveTerminalToChat(t.id);
+                            closeTerminal(t.id);
                           }}
                         >
-                          <IconToChat size={12} />
+                          <IconClose size={11} />
                         </button>
-                      )}
-                      <button
-                        className="terminal-entry__close terminal-entry__kill"
-                        title="Close terminal"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          closeTerminal(t.id);
-                        }}
-                      >
-                        <IconClose size={11} />
-                      </button>
+                      </Tip>
                     </>
                   )}
                 </div>

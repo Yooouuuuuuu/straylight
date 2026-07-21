@@ -6,12 +6,15 @@ import { useEffect } from "react";
 import { refreshApp } from "../lib/appRefresh";
 import { allCommands } from "../lib/commands";
 import { openFindIn } from "../lib/editorModels";
+import { closeDevtools } from "../lib/ipc";
 import { saveActiveFile } from "../lib/saveFile";
 import { matchShortcut } from "../lib/shortcuts";
+import { cycleTerminalPanelTab } from "../lib/terminalTabs";
 import { adjustTerminalFontSize } from "../lib/themes";
 import { focusTerminal } from "../lib/terminalFocus";
 import { focusExplorer } from "../lib/treeNav";
 import { useAppStore } from "../store/appStore";
+import { useVcsStore } from "../store/vcsStore";
 
 export function useKeyboard() {
   useEffect(() => {
@@ -201,9 +204,11 @@ export function useKeyboard() {
         }
         case "nextTerminal":
         case "prevTerminal": {
-          // Focus in the CHAT column cycles its residents (the dots); in the
-          // panel it cycles the panel ring, as ever.
-          const dir = action === "nextTerminal" ? 1 : -1;
+          // "Next tab of whatever I'm in": CHAT cycles its residents; the
+          // terminal panel cycles its tabs (host groups, then tool views);
+          // anywhere else it's the editor's next/previous tab (VS Code's
+          // Ctrl+PageDown).
+          const dir = (action === "nextTerminal" ? 1 : -1) as 1 | -1;
           if (target?.closest(".chat-panel")) {
             const residents = store.terminals.filter((t) => t.inChat);
             if (residents.length > 1) {
@@ -218,10 +223,50 @@ export function useKeyboard() {
               store.setChatActive(next.id);
               event.preventDefault();
             }
-          } else if (store.terminals.some((t) => !t.inChat)) {
-            store.cycleTerminal(dir as 1 | -1);
+          } else if (target?.closest(".terminal-panel")) {
+            cycleTerminalPanelTab(dir);
+            event.preventDefault();
+          } else if (store.tabs.length > 1) {
+            store.cycleTab(dir);
             event.preventDefault();
           }
+          break;
+        }
+        case "toggleSourceControl":
+          useVcsStore.getState().toggleScm();
+          event.preventDefault();
+          break;
+        case "toggleChat":
+          store.toggleChat();
+          // Debug WebView2 opens DevTools on Ctrl+Shift+I at the browser
+          // level (preventDefault can't stop it) — slam them shut.
+          void closeDevtools().catch(() => {});
+          event.preventDefault();
+          break;
+        case "togglePanel":
+          // Pure show/hide (VS Code's Ctrl+J) — wins even from the terminal.
+          store.setTerminalVisible(!store.terminalVisible);
+          event.preventDefault();
+          break;
+        case "splitRight":
+          if (!inTerminal) {
+            void allCommands().find((c) => c.id === "editor.splitRight")?.run();
+            event.preventDefault();
+          }
+          break;
+        case "focusGroup1":
+        case "focusGroup2":
+        case "focusGroup3": {
+          // VS Code's Ctrl+1..3: focus (or create the next) editor group —
+          // the way back to the editor without hiding the terminal.
+          const id =
+            action === "focusGroup1"
+              ? "editor.focusGroup1"
+              : action === "focusGroup2"
+                ? "editor.focusGroup2"
+                : "editor.focusGroup3";
+          void allCommands().find((c) => c.id === id)?.run();
+          event.preventDefault();
           break;
         }
         case "toggleSidebar":
@@ -234,10 +279,18 @@ export function useKeyboard() {
           event.preventDefault();
           break;
         case "closeFile":
-          // Ctrl+W must not close a tab while the terminal is focused.
-          if (!inTerminal && store.activeTabId) {
-            store.closeTab(store.activeTabId);
-            event.preventDefault();
+          // Ctrl+W / Ctrl+F4 must not close a tab while the terminal is
+          // focused. Closing the LAST file also closes its split
+          // (groupsPatch); on a focused EMPTY split it closes the split.
+          if (!inTerminal) {
+            if (store.activeTabId) {
+              store.closeTab(store.activeTabId);
+              event.preventDefault();
+            } else if (store.editorGroups.length > 1) {
+              store.closeGroup(store.activeGroupId);
+              store.requestEditorFocus();
+              event.preventDefault();
+            }
           }
           break;
         case "findInFile": {

@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { PALETTE, paletteName } from "../../lib/connectionColor";
 import { clipboardShortcut } from "../../lib/fileOps";
 import { basename, dirname } from "../../lib/format";
-import { remoteColor } from "../../lib/hostColors";
+import { connStateTip, remoteColor } from "../../lib/hostColors";
 import { sshConfigPath } from "../../lib/ipc";
 import { openFileByPath } from "../../lib/openFile";
 import { uiConfig } from "../../lib/settings";
@@ -24,6 +24,7 @@ import { ConnectionManager } from "../connection/ConnectionManager";
 import { WslSection } from "../connection/WslSection";
 import { FolderBrowser } from "../FolderBrowser";
 import { RootTree } from "../filetree/RootTree";
+import { Tip } from "../Tooltip";
 import {
   IconExternal,
   IconEye,
@@ -158,27 +159,29 @@ export function Sidebar() {
                 ["remote", "R", "var(--section-remote)"],
               ] as const
             ).map(([key, letter, color]) => (
-              <button
+              <Tip
                 key={key}
-                className={`section-toggle ${sections[key] ? "" : "section-toggle--off"}`}
-                style={sections[key] ? { color } : undefined}
-                title={
-                  sections[key]
-                    ? `Hide the ${letter === "L" ? "Local" : letter === "W" ? "WSL" : "Remote"} section (connections stay)`
-                    : `Show the ${letter === "L" ? "Local" : letter === "W" ? "WSL" : "Remote"} section`
-                }
-                onClick={() => toggleSection(key)}
+                label={`${sections[key] ? "Hide" : "Show"} the ${
+                  letter === "L" ? "Local" : letter === "W" ? "WSL" : "Remote"
+                } section`}
               >
-                {letter}
-              </button>
+                <button
+                  className={`section-toggle ${sections[key] ? "" : "section-toggle--off"}`}
+                  style={sections[key] ? { color } : undefined}
+                  onClick={() => toggleSection(key)}
+                >
+                  {letter}
+                </button>
+              </Tip>
             ))}
-          <button
-            className="icon-btn panel-head__hide"
-            title="Minimize the explorer (Ctrl+B, or the status bar, to bring it back)"
-            onClick={() => useAppStore.getState().setSidebarVisible(false)}
-          >
-            <IconPanelHide size={14} />
-          </button>
+          <Tip label="Minimize EXPLORER (Ctrl+B)">
+            <button
+              className="icon-btn panel-head__hide"
+              onClick={() => useAppStore.getState().setSidebarVisible(false)}
+            >
+              <IconPanelHide size={14} />
+            </button>
+          </Tip>
         </div>
       </div>
 
@@ -207,51 +210,53 @@ export function Sidebar() {
           className="host-tools"
           style={{ "--host-color": "var(--section-local)" } as React.CSSProperties}
         >
-          <button
-            className="icon-btn"
-            title="Pin a local folder"
-            disabled={!localConnId}
-            onClick={openLocalFolder}
-          >
-            <IconPlus />
-          </button>
-          <button
-            className={`icon-btn ${showHiddenLocal ? "icon-btn--active" : ""}`}
-            title={showHiddenLocal ? "Hide hidden files" : "Show hidden files"}
-            onClick={() => toggleHiddenLocal()}
-          >
-            {showHiddenLocal ? <IconEye /> : <IconEyeOff />}
-          </button>
-          <button
-            className="icon-btn"
-            title="New file"
-            disabled={!localConnId || !localNewParent}
-            onClick={() => {
-              if (localConnId && localNewParent)
-                openNewEntry(localConnId, localNewParent, false);
-            }}
-          >
-            <IconFilePlus />
-          </button>
-          <button
-            className="icon-btn"
-            title="New folder"
-            disabled={!localConnId || !localNewParent}
-            onClick={() => {
-              if (localConnId && localNewParent)
-                openNewEntry(localConnId, localNewParent, true);
-            }}
-          >
-            <IconFolderPlus />
-          </button>
+          <Tip label="Pin a folder">
+            <button
+              className="icon-btn"
+              disabled={!localConnId}
+              onClick={openLocalFolder}
+            >
+              <IconPlus />
+            </button>
+          </Tip>
+          <Tip label={showHiddenLocal ? "Hide hidden files" : "Show hidden files"}>
+            <button
+              className={`icon-btn ${showHiddenLocal ? "icon-btn--active" : ""}`}
+              onClick={() => toggleHiddenLocal()}
+            >
+              {showHiddenLocal ? <IconEye /> : <IconEyeOff />}
+            </button>
+          </Tip>
+          <Tip label="New file">
+            <button
+              className="icon-btn"
+              disabled={!localConnId || !localNewParent}
+              onClick={() => {
+                if (localConnId && localNewParent)
+                  openNewEntry(localConnId, localNewParent, false);
+              }}
+            >
+              <IconFilePlus />
+            </button>
+          </Tip>
+          <Tip label="New folder">
+            <button
+              className="icon-btn"
+              disabled={!localConnId || !localNewParent}
+              onClick={() => {
+                if (localConnId && localNewParent)
+                  openNewEntry(localConnId, localNewParent, true);
+              }}
+            >
+              <IconFolderPlus />
+            </button>
+          </Tip>
           <span className="host-tools__spacer" />
-          <button
-            className="icon-btn"
-            title="Refresh local"
-            onClick={() => refreshLocal()}
-          >
-            <IconRefresh />
-          </button>
+          <Tip label="Refresh">
+            <button className="icon-btn" onClick={() => refreshLocal()}>
+              <IconRefresh />
+            </button>
+          </Tip>
         </div>
         {localConnId && pinnedFolders.length > 0 ? (
           pinnedFolders.map((path, index) => (
@@ -286,9 +291,9 @@ export function Sidebar() {
         <>
         <div className="sidebar__section-head sidebar__section-head--remote">
           <span className="sidebar__section-label">Remote</span>
+          <Tip label="Edit ~/.ssh/config">
           <button
             className="icon-btn sidebar__section-action"
-            title="Edit ~/.ssh/config in the editor"
             onClick={() =>
               void (async () => {
                 try {
@@ -304,14 +309,16 @@ export function Sidebar() {
           >
             <IconExternal size={13} />
           </button>
+          </Tip>
           {remotes.length > 0 && remotes.length < 3 && (
-            <button
-              className={`icon-btn ${connectOpen ? "icon-btn--active" : ""}`}
-              title="Connect a new server (up to 3)"
-              onClick={() => setConnectOpen((o) => !o)}
-            >
-              <IconPlug size={13} />
-            </button>
+            <Tip label="Connect a new server">
+              <button
+                className={`icon-btn ${connectOpen ? "icon-btn--active" : ""}`}
+                onClick={() => setConnectOpen((o) => !o)}
+              >
+                <IconPlug size={13} />
+              </button>
+            </Tip>
           )}
         </div>
         {(remotes.length === 0 || connectOpen) && <ConnectionManager />}
@@ -324,7 +331,6 @@ export function Sidebar() {
             <div
               className="host-bar"
               style={{ "--host-color": remoteColor(hostColors, conn) } as React.CSSProperties}
-              title={`${conn.name} (${key}) — right-click: host color`}
               onContextMenu={(e) => {
                 e.preventDefault();
                 setHostMenu((o) => (o === conn.connId ? null : conn.connId));
@@ -334,96 +340,112 @@ export function Sidebar() {
                 <div className="color-menu">
                   <span className="color-menu__label">{key}</span>
                   {[...HOST_COLOR_RAMP, ...PALETTE].map((c) => (
+                    <Tip key={c} label={c.startsWith("var(") ? paletteName(c) : c}>
+                      <button
+                        className="color-menu__swatch"
+                        style={{ background: c }}
+                        onClick={() => {
+                          setHostColor(key, c);
+                          setHostMenu(null);
+                        }}
+                      />
+                    </Tip>
+                  ))}
+                  <Tip label="Back to the default color">
                     <button
-                      key={c}
-                      className="color-menu__swatch"
-                      style={{ background: c }}
-                      title={c.startsWith("var(") ? paletteName(c) : c}
+                      className="color-menu__reset"
                       onClick={() => {
-                        setHostColor(key, c);
+                        setHostColor(key, null);
                         setHostMenu(null);
                       }}
-                    />
-                  ))}
-                  <button
-                    className="color-menu__reset"
-                    title="Back to the default host color"
-                    onClick={() => {
-                      setHostColor(key, null);
-                      setHostMenu(null);
-                    }}
-                  >
-                    Auto
-                  </button>
+                    >
+                      Auto
+                    </button>
+                  </Tip>
                 </div>
               )}
-              <span className={`dot dot--${r.state}`} />
-              <span className="host-bar__label" title={key}>
-                {conn.user}@{conn.host}
-              </span>
+              <Tip label={`${key} — right-click: host color`}>
+                <span className="host-bar__label">
+                  {conn.user}@{conn.host}
+                </span>
+              </Tip>
               {r.state === "disconnected" && (
-                <button
-                  className="icon-btn"
-                  title="Reconnect"
-                  onClick={() => void reconnect(conn.connId)}
-                >
-                  <IconRefresh />
-                </button>
+                <Tip label="Reconnect">
+                  <button
+                    className="icon-btn"
+                    onClick={() => void reconnect(conn.connId)}
+                  >
+                    <IconRefresh />
+                  </button>
+                </Tip>
               )}
-              <button
-                className="icon-btn icon-btn--danger sidebar__section-action"
-                title={`Disconnect ${conn.name}`}
-                onClick={() => void disconnect(conn.connId)}
-              >
-                <IconUnplug />
-              </button>
+              <Tip label="Disconnect">
+                <button
+                  className="icon-btn icon-btn--danger sidebar__section-action"
+                  onClick={() => void disconnect(conn.connId)}
+                >
+                  <IconUnplug />
+                </button>
+              </Tip>
             </div>
             <div
               className="host-tools"
               style={{ "--host-color": remoteColor(hostColors, conn) } as React.CSSProperties}
             >
-              <button
-                className="icon-btn"
-                title="Pin a folder"
-                onClick={() => openRemoteFolder(conn.connId, conn.name)}
-              >
-                <IconPlus />
-              </button>
-              <button
-                className={`icon-btn ${r.showHidden ? "icon-btn--active" : ""}`}
-                title={r.showHidden ? "Hide hidden files" : "Show hidden files"}
-                onClick={() => toggleHiddenRemote(conn.connId)}
-              >
-                {r.showHidden ? <IconEye /> : <IconEyeOff />}
-              </button>
-              <button
-                className="icon-btn"
-                title="New file"
-                disabled={!newParent}
-                onClick={() => {
-                  if (newParent) openNewEntry(conn.connId, newParent, false);
-                }}
-              >
-                <IconFilePlus />
-              </button>
-              <button
-                className="icon-btn"
-                title="New folder"
-                disabled={!newParent}
-                onClick={() => {
-                  if (newParent) openNewEntry(conn.connId, newParent, true);
-                }}
-              >
-                <IconFolderPlus />
-              </button>
+              <Tip label="Pin a folder">
+                <button
+                  className="icon-btn"
+                  onClick={() => openRemoteFolder(conn.connId, conn.name)}
+                >
+                  <IconPlus />
+                </button>
+              </Tip>
+              <Tip label={r.showHidden ? "Hide hidden files" : "Show hidden files"}>
+                <button
+                  className={`icon-btn ${r.showHidden ? "icon-btn--active" : ""}`}
+                  onClick={() => toggleHiddenRemote(conn.connId)}
+                >
+                  {r.showHidden ? <IconEye /> : <IconEyeOff />}
+                </button>
+              </Tip>
+              <Tip label="New file">
+                <button
+                  className="icon-btn"
+                  disabled={!newParent}
+                  onClick={() => {
+                    if (newParent) openNewEntry(conn.connId, newParent, false);
+                  }}
+                >
+                  <IconFilePlus />
+                </button>
+              </Tip>
+              <Tip label="New folder">
+                <button
+                  className="icon-btn"
+                  disabled={!newParent}
+                  onClick={() => {
+                    if (newParent) openNewEntry(conn.connId, newParent, true);
+                  }}
+                >
+                  <IconFolderPlus />
+                </button>
+              </Tip>
               <span className="host-tools__spacer" />
-              <button
-                className="icon-btn"
-                title={`Refresh ${conn.name}`}
-                onClick={() => refreshRemote(conn.connId)}
-              >
-                <IconRefresh />
-              </button>
+              {/* Issue light: near-invisible while fine, colored on trouble
+                  (same rule as the status bar). */}
+              <Tip label={connStateTip(r.state)}>
+                <span
+                  className={`dot ${r.state === "connected" ? "dot--fine" : `dot--${r.state}`}`}
+                />
+              </Tip>
+              <Tip label="Refresh">
+                <button
+                  className="icon-btn"
+                  onClick={() => refreshRemote(conn.connId)}
+                >
+                  <IconRefresh />
+                </button>
+              </Tip>
             </div>
             {r.pins.length > 0 ? (
               r.pins.map((path, index) => (
