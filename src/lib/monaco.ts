@@ -13,6 +13,9 @@ import CssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
 import HtmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
 import TsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 
+import { openExternal } from "./ipc";
+import { buildMonacoTheme } from "./themes";
+
 declare global {
   interface Window {
     MonacoEnvironment?: monaco.Environment;
@@ -20,52 +23,6 @@ declare global {
 }
 
 export const FALLBACK_THEME = "straylight";
-
-const fallbackTheme: monaco.editor.IStandaloneThemeData = {
-  base: "vs-dark",
-  inherit: true,
-  rules: [
-    { token: "", foreground: "F0E7E9" },
-    { token: "comment", foreground: "7A5F66", fontStyle: "italic" },
-    { token: "keyword", foreground: "FF4D6D" },
-    { token: "string", foreground: "5CE626" },
-    { token: "number", foreground: "FF00FF" },
-    { token: "type", foreground: "FFB454", fontStyle: "italic" },
-    { token: "function", foreground: "FF7A9C" },
-    { token: "variable", foreground: "F0E7E9" },
-    { token: "constant", foreground: "FF00FF" },
-    { token: "operator", foreground: "FF4D6D" },
-    { token: "delimiter", foreground: "F0E7E9" },
-    { token: "tag", foreground: "FF4D6D" },
-    { token: "attribute.name", foreground: "FF7A9C" },
-    { token: "attribute.value", foreground: "5CE626" },
-    { token: "regexp", foreground: "FF00FF" },
-  ],
-  colors: {
-    "editor.background": "#151013",
-    "editor.foreground": "#F0E7E9",
-    "editor.lineHighlightBackground": "#221418",
-    "editor.selectionBackground": "#46232C",
-    "editorCursor.foreground": "#F30100",
-    "editorWhitespace.foreground": "#46232C",
-    "editorLineNumber.foreground": "#7A5F66",
-    "editorLineNumber.activeForeground": "#F0E7E9",
-    "editor.findMatchBackground": "#9E6A03",
-    "editor.findMatchHighlightBackground": "#5C4308",
-    "editorWidget.background": "#0F0B0D",
-    "editorWidget.border": "#46232C",
-    "editorSuggestWidget.background": "#0F0B0D",
-    "editorSuggestWidget.border": "#46232C",
-    "editorSuggestWidget.selectedBackground": "#46232C",
-    "editorGutter.background": "#151013",
-    "editorIndentGuide.background1": "#221418",
-    "editorIndentGuide.activeBackground1": "#46232C",
-    "scrollbarSlider.background": "#46232C80",
-    "scrollbarSlider.hoverBackground": "#46232CBB",
-    "scrollbarSlider.activeBackground": "#7A5F66",
-    "minimap.background": "#0F0B0D",
-  },
-};
 
 let initialized = false;
 
@@ -95,7 +52,25 @@ export function setupMonaco(): typeof monaco {
     },
   };
 
-  monaco.editor.defineTheme(FALLBACK_THEME, fallbackTheme);
+  // Ctrl/Cmd-click on a link: Monaco shows the "follow link" hint, but the
+  // WebView2 has no working window.open to an external browser, so the click
+  // did nothing. Hand http(s) links to the OS default browser; anything else
+  // (mailto:, file:, custom schemes) is left unhandled on purpose.
+  monaco.editor.registerLinkOpener({
+    open(resource) {
+      const url = resource.toString(true);
+      if (/^https?:\/\//i.test(url)) {
+        void openExternal(url);
+        return true;
+      }
+      return false;
+    },
+  });
+
+  // Built from EDITOR_DEFAULTS via the same function the live theme uses (at
+  // bootstrap the settings sections are empty, so it yields the Straylight
+  // defaults) — one source of truth, no drift with the real theme.
+  monaco.editor.defineTheme(FALLBACK_THEME, buildMonacoTheme());
   // The global default; the theme layer may override it with the custom theme
   // built from settings.json. Editors must NOT pass `theme:` at create time —
   // that would reset the global theme every time one mounts.

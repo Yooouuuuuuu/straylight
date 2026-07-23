@@ -9,7 +9,9 @@ import { hostColorForConnKey } from "../../lib/hostColors";
 import { focusTerminal } from "../../lib/terminalFocus";
 import { mountTerminalIn, parkTerminal } from "../../lib/terminalSlots";
 import {
+  chatSections,
   cleanOscTitle,
+  connectedChatHosts,
   remoteHostKey,
   termDisplayName,
   useAppStore,
@@ -20,9 +22,11 @@ import {
   IconMinus,
   IconPanelHide,
   IconPlus,
+  IconLayers,
   IconToBar,
 } from "../icons";
 import { Tip } from "../Tooltip";
+import { ChatAgentMenu } from "./ChatAgentMenu";
 
 export function ChatPanel() {
   const terminals = useAppStore((s) => s.terminals);
@@ -36,15 +40,32 @@ export function ChatPanel() {
   const dockOrder = useAppStore((s) => s.dockOrder);
   const stepDock = useAppStore((s) => s.stepDock);
   const chatPos = dockOrder.indexOf("chat");
-  const hostColors = useAppStore((s) => s.hostColors);
   const busy = useAppStore((s) => s.busy);
   const ptyDead = useAppStore((s) => s.ptyDead);
   const localConnId = useAppStore((s) => s.localConnId);
   const wsls = useAppStore((s) => s.wsls);
   const remotes = useAppStore((s) => s.remotes);
+  const focusView = useAppStore((s) => s.focusView);
+  const chatHostOrder = useAppStore((s) => s.chatHostOrder);
+  const chatPurposes = useAppStore((s) => s.chatPurposes);
+  const addPurpose = useAppStore((s) => s.addPurpose);
+  const renamePurpose = useAppStore((s) => s.renamePurpose);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [purposeRenaming, setPurposeRenaming] = useState<{
+    id: string;
+    value: string;
+  } | null>(null);
+  const [dotMenu, setDotMenu] = useState<{
+    termId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const commitPurposeRename = () => {
+    if (purposeRenaming) renamePurpose(purposeRenaming.id, purposeRenaming.value);
+    setPurposeRenaming(null);
+  };
   const hostRef = useRef<HTMLDivElement>(null);
 
   const residents = terminals.filter((t) => t.inChat);
@@ -52,13 +73,16 @@ export function ChatPanel() {
     residents.find((t) => t.id === chatActiveId) ?? residents[0] ?? null;
   const activeId = active?.id ?? null;
 
-  // Reparent the active resident's live xterm into the column.
+  // Reparent the active resident's live xterm into the column — unless the
+  // focus view is open, which owns it then (they'd fight over the one DOM
+  // node otherwise). Re-runs on the focusView flip so ownership hands back
+  // cleanly on exit.
   useEffect(() => {
-    if (!activeId || !hostRef.current) return;
+    if (focusView || !activeId || !hostRef.current) return;
     mountTerminalIn(activeId, hostRef.current);
     focusTerminal(activeId);
     return () => parkTerminal(activeId);
-  }, [activeId]);
+  }, [activeId, focusView]);
 
   const hostKeyOf = (connId: string): string => {
     if (connId === localConnId) return "local";
@@ -78,46 +102,10 @@ export function ChatPanel() {
   return (
     <div className="chat-panel">
       <div className="chat-panel__head">
-        <div className="chat-panel__dots" role="tablist">
-          {residents.map((t) => {
-            // Host color is only the outline; the fill is the lifecycle, and
-            // it only runs while a TOOL is in charge of the terminal — i.e.
-            // it announced itself via the terminal title (Claude Code, vim…).
-            // A bare shell prompt has only path-noise titles (filtered by
-            // cleanOscTitle) and stays blank. Picked (on screen) fills white,
-            // covering whatever the state is.
-            const inTool = !!cleanOscTitle(t.oscTitle);
-            const state = ptyDead[t.id]
-              ? "dead"
-              : !inTool
-                ? "idle"
-                : busy[t.id]
-                  ? "running"
-                  : "ready";
-            return (
-              <Tip key={t.id} label={termDisplayName(t)}>
-                <button
-                  role="tab"
-                  aria-selected={t.id === activeId}
-                  className={`chat-dot chat-dot--${state}${t.id === activeId ? " chat-dot--picked" : ""}`}
-                  style={
-                    {
-                      "--dot-color": hostColorForConnKey(
-                        hostColors,
-                        hostKeyOf(t.connId),
-                      ),
-                    } as React.CSSProperties
-                  }
-                  onClick={() => setChatActive(t.id)}
-                >
-                  <span className="chat-dot__mark" />
-                </button>
-              </Tip>
-            );
-          })}
-          <span className="chat-panel__spacer" />
+        {/* Line 1: the controls. */}
+        <div className="chat-panel__bar">
           <span className="chat-panel__newwrap">
-            <Tip label="New terminal in CHAT">
+            <Tip label="New session">
               <button className="icon-btn" onClick={() => setMenuOpen((v) => !v)}>
                 <IconPlus size={13} />
               </button>
@@ -149,6 +137,18 @@ export function ChatPanel() {
               </>
             )}
           </span>
+          <Tip label="New group">
+            <button
+              className="icon-btn"
+              onClick={() => {
+                const id = addPurpose();
+                setPurposeRenaming({ id, value: "" });
+              }}
+            >
+              <IconLayers size={14} />
+            </button>
+          </Tip>
+          <span className="chat-panel__spacer" />
           <Tip label="Move left">
             <button
               className="icon-btn"
@@ -167,7 +167,7 @@ export function ChatPanel() {
               <IconToBar size={13} dir="right" />
             </button>
           </Tip>
-          <Tip label="Hide CHAT">
+          <Tip label="Hide Sessions">
             <button
               className="icon-btn panel-head__hide"
               onClick={() => setChatVisible(false)}
@@ -175,6 +175,92 @@ export function ChatPanel() {
               <IconPanelHide size={14} />
             </button>
           </Tip>
+        </div>
+
+        {/* Line 2: the dot clusters — purpose groups first, then host groups,
+            wrapping to more lines when they overflow. Drag a dot into a group
+            (or back to its host); right-click for the same. */}
+        <div className="chat-panel__dots" role="tablist">
+          {chatSections(
+            terminals,
+            chatPurposes,
+            connectedChatHosts({ localConnId, wsls, remotes, chatHostOrder }),
+          ).map((section) => {
+            const color =
+              section.kind === "purpose"
+                ? section.color
+                : hostColorForConnKey(hostKeyOf(section.connId));
+            return (
+              <div
+                className={`chat-panel__cluster${section.kind === "purpose" ? " chat-panel__cluster--purpose" : ""}`}
+                key={section.kind === "purpose" ? `p:${section.id}` : `h:${section.connId}`}
+                style={{ "--cluster-color": color } as React.CSSProperties}
+              >
+                {/* A purpose pill is labeled with its name — click to rename
+                    (empty groups are still visible, ready to drop into). */}
+                {section.kind === "purpose" &&
+                  (purposeRenaming?.id === section.id ? (
+                    <input
+                      className="chat-panel__prename"
+                      autoFocus
+                      spellCheck={false}
+                      value={purposeRenaming.value}
+                      placeholder={section.name}
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) =>
+                        setPurposeRenaming({
+                          id: section.id,
+                          value: e.target.value,
+                        })
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitPurposeRename();
+                        else if (e.key === "Escape") setPurposeRenaming(null);
+                      }}
+                      onBlur={commitPurposeRename}
+                    />
+                  ) : (
+                    <span
+                      className="chat-panel__pname"
+                      onClick={() =>
+                        setPurposeRenaming({
+                          id: section.id,
+                          value: section.name,
+                        })
+                      }
+                    >
+                      {section.name}
+                    </span>
+                  ))}
+                {section.terminals.map((t) => {
+                  const inTool = !!cleanOscTitle(t.oscTitle);
+                  const state = ptyDead[t.id]
+                    ? "dead"
+                    : !inTool
+                      ? "idle"
+                      : busy[t.id]
+                        ? "running"
+                        : "ready";
+                  return (
+                    <Tip key={t.id} label={termDisplayName(t)}>
+                      <button
+                        role="tab"
+                        aria-selected={t.id === activeId}
+                        className={`chat-dot chat-dot--${state}${t.id === activeId ? " chat-dot--picked" : ""}`}
+                        onClick={() => setChatActive(t.id)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setDotMenu({ termId: t.id, x: e.clientX, y: e.clientY });
+                        }}
+                      >
+                        <span className="chat-dot__mark" />
+                      </button>
+                    </Tip>
+                  );
+                })}
+              </div>
+            );
+          })}
         </div>
         {active && (
           <div className="chat-panel__name">
@@ -204,8 +290,10 @@ export function ChatPanel() {
               <Tip label={termDisplayName(active)}>
                 <span
                   className="chat-panel__title"
+                  // Host color as TEXT is mixed toward the foreground so dark
+                  // identities (Local's crimson) stay legible (see FocusView).
                   style={{
-                    color: hostColorForConnKey(hostColors, hostKeyOf(active.connId)),
+                    color: `color-mix(in srgb, ${hostColorForConnKey(hostKeyOf(active.connId))} 62%, var(--fg-primary))`,
                   }}
                   onDoubleClick={() => setRenaming(termDisplayName(active))}
                 >
@@ -244,6 +332,14 @@ export function ChatPanel() {
             Press ＋ above, or send a terminal here from the panel below.
           </p>
         </div>
+      )}
+      {dotMenu && (
+        <ChatAgentMenu
+          termId={dotMenu.termId}
+          x={dotMenu.x}
+          y={dotMenu.y}
+          onClose={() => setDotMenu(null)}
+        />
       )}
     </div>
   );

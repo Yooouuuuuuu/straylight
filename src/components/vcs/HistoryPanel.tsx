@@ -14,7 +14,7 @@ export function HistoryPanel() {
   const closeHistory = useVcsStore((s) => s.closeHistory);
   const repos = useVcsStore((s) => s.repos);
   const openLogTab = useAppStore((s) => s.openLogTab);
-  const hostColors = useAppStore((s) => s.hostColors);
+  useAppStore((s) => s.remotes); // host colors are positional — re-render on reorder
 
   const repo =
     historyRepo != null
@@ -74,7 +74,7 @@ export function HistoryPanel() {
       <Tip label={repo.root}>
         <div
           className="history-panel__repo"
-          style={{ borderLeftColor: hostColorForConnKey(hostColors, repo.connKey) }}
+          style={{ borderLeftColor: hostColorForConnKey(repo.connKey) }}
         >
           {repo.label}
         </div>

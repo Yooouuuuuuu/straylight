@@ -22,8 +22,8 @@ export function EditorTabs({ groupId }: { groupId: number }) {
   const pinTab = useAppStore((s) => s.pinTab);
   const openTabMenu = useAppStore((s) => s.openTabMenu);
   const moveTabToPosition = useAppStore((s) => s.moveTabToPosition);
-  // Subscribed so tab markers re-render when hosts/colors change.
-  useAppStore((s) => s.hostColors);
+  // Subscribed so tab markers re-render when hosts change (colors are
+  // positional — a remote swap reorders s.remotes).
   useAppStore((s) => s.remotes);
   useAppStore((s) => s.wsls);
   /** Tab currently hovered by a tab drag (insertion indicator). */

@@ -21,7 +21,11 @@ import {
 import { isPassthroughShortcut } from "../lib/shortcuts";
 import {
   registerTerminalFocus,
+  registerTerminalInput,
+  registerTerminalText,
   unregisterTerminalFocus,
+  unregisterTerminalInput,
+  unregisterTerminalText,
 } from "../lib/terminalFocus";
 import {
   registerTerminalSlot,
@@ -57,6 +61,8 @@ export function useTerminal(
   command: string[] | null = null,
   id = "",
   initialInput: string | null = null,
+  scriptedInput: { text: string; delayMs: number }[] | null = null,
+  locked = false,
 ) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -78,6 +84,7 @@ export function useTerminal(
     let ptyId: string | null = null;
     let unlisten: UnlistenFn | null = null;
     const encoder = new TextEncoder();
+    const scriptTimers: number[] = [];
 
     // ConPTY (Windows local & WSL terminals) needs xterm's windows-pty
     // heuristics, or resize reflow drops/duplicates scrollback lines. SSH
@@ -90,14 +97,6 @@ export function useTerminal(
     const windowsPty = isWindowsConpty
       ? ({ backend: "conpty", buildNumber: winBuild } as const)
       : undefined;
-    // Each shell kind has its own settings section (terminalLocal /
-    // terminalWsl / terminalRemote).
-    const scope =
-      connId === appState.localConnId
-        ? "local"
-        : connId === appState.wsl?.connId
-          ? "wsl"
-          : "remote";
     const font = currentTermFont();
 
     const term = new Terminal({
@@ -106,7 +105,9 @@ export function useTerminal(
       lineHeight: 1.1,
       cursorBlink: true,
       allowProposedApi: true,
-      theme: currentTermTheme(scope),
+      // One scheme for every shell; the host's identity colors the cursor +
+      // selection (terminalHostColor).
+      theme: currentTermTheme(connId),
       scrollback: 5000,
       windowsPty,
     });
@@ -116,9 +117,21 @@ export function useTerminal(
     term.open(host);
     termRef.current = term;
     // Re-themed (and refit on font changes) live when settings.json changes.
-    registerTerminal(term, { scope, refit: () => fit.fit() });
+    registerTerminal(term, { connId, refit: () => fit.fit() });
     fitRef.current = fit;
     if (id) registerTerminalFocus(id, () => term.focus());
+    // Serialize the buffer (last ~400 lines) on demand — the usage probe reads
+    // this to tell a rendered /usage panel from a "command not found".
+    if (id)
+      registerTerminalText(id, () => {
+        const buf = term.buffer.active;
+        const from = Math.max(0, buf.length - 400);
+        let out = "";
+        for (let i = from; i < buf.length; i++) {
+          out += (buf.getLine(i)?.translateToString(true) ?? "") + "\n";
+        }
+        return out;
+      });
 
     // Let our app shortcuts (toggle/new/next/prev terminal, etc.) reach the
     // window handler instead of being sent to the shell.
@@ -166,14 +179,36 @@ export function useTerminal(
     // mid-burst (Claude rings, then keeps rendering the response and prompt
     // box), so trailing chunks would wipe the green milliseconds after it lit.
     // The bell clears when the user types instead (onData below).
+    // "busy" = output flowing (any redraw counts). "thinking" = busy that has
+    // been SUSTAINED — output must keep coming for BOTH a chunk count AND a
+    // time span within one active window. A tool streaming a response clears
+    // both; a one-shot repaint (focus / resize / Ctrl+±) is a fast burst that
+    // clears neither, so thinking never flickers on interaction. (The finish
+    // time is stamped when the spell ends / on the BEL, not here.)
+    const THINK_CHUNKS = 14;
+    const THINK_SUSTAIN_MS = 1500;
     let busyTimer: ReturnType<typeof setTimeout> | undefined;
+    let chunkCount = 0;
+    let busyStart = 0;
     const markBusy = () => {
       if (!id) return;
       const st = useAppStore.getState();
-      if (!st.busy[id]) st.setBusy(id, true);
+      const now = Date.now();
+      if (!st.busy[id]) {
+        st.setBusy(id, true);
+        busyStart = now;
+      }
+      chunkCount += 1;
+      if (chunkCount >= THINK_CHUNKS && now - busyStart > THINK_SUSTAIN_MS) {
+        st.setThinking(id, true);
+      }
       clearTimeout(busyTimer);
       busyTimer = setTimeout(() => {
-        useAppStore.getState().setBusy(id, false);
+        chunkCount = 0;
+        busyStart = 0;
+        const s = useAppStore.getState();
+        s.setBusy(id, false);
+        s.setThinking(id, false);
         // Output just stopped — the command that ran likely changed files.
         // WSL/remote trees have no watcher, so freshen them here (throttled;
         // local is covered by the real watcher).
@@ -190,7 +225,9 @@ export function useTerminal(
         markBusy();
       } else if (id) {
         clearTimeout(busyTimer);
+        chunkCount = 0;
         useAppStore.getState().setBusy(id, false);
+        useAppStore.getState().setThinking(id, false);
         useAppStore.getState().setPtyDead(id, true);
       }
     }).then((un) => {
@@ -217,6 +254,27 @@ export function useTerminal(
         if (initialInput) {
           void ptyWrite(openedId, encoder.encode(`${initialInput}\r`));
         }
+        // Let external actions (the usage probe's Esc + /usage refresh) write
+        // into this live PTY by id.
+        if (id) {
+          registerTerminalInput(id, (data) => {
+            if (!disposed && ptyId) {
+              void ptyWrite(ptyId, encoder.encode(data));
+            }
+          });
+        }
+        // Timed keystrokes (the usage probe's claude / trust-prompt enters /
+        // /usage) — delays measured from PTY-open, generous for slow machines.
+        // Cancelled with the terminal.
+        for (const step of scriptedInput ?? []) {
+          scriptTimers.push(
+            window.setTimeout(() => {
+              if (!disposed && ptyId) {
+                void ptyWrite(ptyId, encoder.encode(step.text));
+              }
+            }, step.delayMs),
+          );
+        }
       })
       .catch((error) => {
         term.writeln(`\r\n\x1b[31mFailed to open terminal: ${error}\x1b[0m`);
@@ -224,6 +282,8 @@ export function useTerminal(
       });
 
     const dataSub = term.onData((data) => {
+      // A locked terminal (usage probe) is display-only — drop the keyboard.
+      if (locked) return;
       // Typing into the shell takes your turn — the "done" green clears here
       // (and only here), not on focus and not on the shell's own output.
       if (id && useAppStore.getState().belled[id]) {
@@ -247,8 +307,10 @@ export function useTerminal(
       if (!id) return;
       const st = useAppStore.getState();
       clearTimeout(busyTimer);
+      chunkCount = 0;
       st.setBusy(id, false);
-      st.markBell(id);
+      st.setThinking(id, false);
+      st.markBell(id); // stamps finishedAt + belled (unread / your turn)
       // A bell is also a completion signal (Claude finishing a task that
       // edited files) — same tree freshen as the idle transition.
       refreshTreesOnIdle(connId);
@@ -287,6 +349,7 @@ export function useTerminal(
       disposed = true;
       clearTimeout(fitTimer);
       clearTimeout(busyTimer);
+      for (const t of scriptTimers) clearTimeout(t);
       if (id) useAppStore.getState().setBusy(id, false);
       observer.disconnect();
       host.removeEventListener("contextmenu", onContextMenu);
@@ -297,6 +360,8 @@ export function useTerminal(
       if (unlisten) unlisten();
       if (ptyId) void ptyClose(ptyId);
       if (id) unregisterTerminalFocus(id);
+      if (id) unregisterTerminalInput(id);
+      if (id) unregisterTerminalText(id);
       unregisterTerminal(term);
       termRef.current = null;
       fitRef.current = null;

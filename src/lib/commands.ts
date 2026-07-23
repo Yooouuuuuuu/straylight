@@ -13,6 +13,7 @@ import { saveActiveFile } from "./saveFile";
 import { settingsFilePath, updateSettings } from "./settings";
 import { closeAllTabs, closeSavedTabs } from "./tabActions";
 import { keyLabelFor } from "./shortcuts";
+import { toggleFocusView } from "./focusMode";
 import { cycleTerminalPanelTab } from "./terminalTabs";
 import { pickTerminalTarget } from "./terminalTarget";
 import { focusExplorer } from "./treeNav";
@@ -215,6 +216,7 @@ export function allCommands(): Command[] {
       title: "View: Toggle Panel",
       run: () => app().setTerminalVisible(!app().terminalVisible),
     },
+    { id: "view.focusView", title: "View: Toggle Focus View", run: toggleFocusView },
     {
       id: "editor.focusGroup1",
       title: "Editor: Focus Group 1",

@@ -11,26 +11,31 @@ export function TransferProgressBar({ variant }: { variant: "panel" | "status" }
   const cancel = useAppStore((s) => s.cancelActiveTransfer);
   if (!t) return null;
 
-  const pct =
-    t.totalBytes > 0
-      ? Math.min(100, (t.doneBytes / t.totalBytes) * 100)
-      : t.totalFiles > 0
-        ? Math.min(100, (t.doneFiles / t.totalFiles) * 100)
-        : 0;
+  // The size may not be known yet: when you commit before the confirm sheet's
+  // scan finishes, the copy starts right away and the total fills in alongside
+  // it — until then the bar shows what's copied so far, "calculating".
+  const known = t.totalBytes > 0 || t.totalFiles > 0;
 
-  const detail =
-    t.totalFiles === 0
-      ? "Preparing…" // before the first event (size pre-pass)
-      : [
-          t.totalFiles > 1
-            ? `file ${Math.min(t.doneFiles + 1, t.totalFiles)}/${t.totalFiles}`
-            : "",
-          t.totalBytes > 0
-            ? `${formatSize(t.doneBytes)} / ${formatSize(t.totalBytes)}`
-            : "",
-        ]
-          .filter(Boolean)
-          .join(" · ");
+  const pct = !known
+    ? 0
+    : t.totalBytes > 0
+      ? Math.min(100, (t.doneBytes / t.totalBytes) * 100)
+      : Math.min(100, (t.doneFiles / t.totalFiles) * 100);
+
+  const detail = !known
+    ? t.doneBytes > 0
+      ? `${formatSize(t.doneBytes)} · calculating total…`
+      : "Starting…"
+    : [
+        t.totalFiles > 1
+          ? `file ${Math.min(t.doneFiles + 1, t.totalFiles)}/${t.totalFiles}`
+          : "",
+        t.totalBytes > 0
+          ? `${formatSize(t.doneBytes)} / ${formatSize(t.totalBytes)}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
 
   if (variant === "status") {
     return (

@@ -143,6 +143,80 @@ fn ui_close_devtools(window: tauri::WebviewWindow) {
     let _ = window;
 }
 
+/// Reveal a LOCAL path in the OS file manager (Explorer/Finder/…), selecting
+/// the item. Used by the "Reveal in file manager" action on local files.
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // explorer /select,<path> selects the file in a new window. The path
+        // MUST use backslashes — with forward slashes Explorer ignores /select
+        // and just opens the default folder. raw_arg keeps our quotes verbatim
+        // (Command would otherwise re-quote the whole /select,… token) so paths
+        // with spaces still resolve. explorer exits non-zero even on success,
+        // so we only care that it spawned.
+        let win = path.replace('/', "\\");
+        std::process::Command::new("explorer.exe")
+            .raw_arg(format!("/select,\"{win}\""))
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    {
+        // No universal "select" on Linux — open the containing folder.
+        let dir = std::path::Path::new(&path)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from(&path));
+        std::process::Command::new("xdg-open")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Open an http(s) URL in the user's default browser. Backs the editor's
+/// Ctrl-click link handler — Monaco shows the "follow link" hint, but the
+/// WebView2 has no working `window.open` to an external browser. Restricted to
+/// http(s) so the OS is never handed a file path or a custom-scheme URL.
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("refusing to open a non-http(s) URL".to_string());
+    }
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer.exe")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::Builder::from_env(
@@ -163,6 +237,8 @@ pub fn run() {
             ssh::connection::ssh_reconnect,
             ssh::connection::ssh_trust_host,
             ui_close_devtools,
+            reveal_path,
+            open_external,
             transport::local_connect,
             transport::list_drives,
             transport::fs_find,
@@ -177,6 +253,7 @@ pub fn run() {
             transport::fs_move,
             transport::fs_copy,
             transport::fs_transfer_batch,
+            transport::fs_transfer_measure,
             transport::fs_transfer_cancel,
             transport::fs_transfer_check,
             transport::fs_entry_meta,

@@ -4,11 +4,11 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
+use tokio::io::{AsyncReadExt, AsyncWrite};
 
 use crate::transport::{
     any_basename, copy_variant, decode_text, looks_binary, sort_entries, DirListing, FileContent,
-    FileEntry, FileStat, FileTransport, WriteResult, BINARY_SNIFF, MAX_READ_BYTES,
+    FileEntry, FileStat, FileTransport, TransferSource, WriteResult, BINARY_SNIFF, MAX_READ_BYTES,
 };
 
 pub struct LocalTransport;
@@ -308,7 +308,7 @@ impl FileTransport for LocalTransport {
         Ok(dest.to_string_lossy().into_owned())
     }
 
-    async fn open_read(&self, path: &str) -> Result<Pin<Box<dyn AsyncRead + Send>>, String> {
+    async fn open_read(&self, path: &str) -> Result<Pin<Box<dyn TransferSource>>, String> {
         let file = tokio::fs::File::open(path)
             .await
             .map_err(|e| format!("could not open {path}: {e}"))?;

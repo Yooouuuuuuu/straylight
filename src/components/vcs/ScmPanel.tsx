@@ -225,8 +225,9 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   const [amendMode, setAmendMode] = useState(false);
   const [branchOpen, setBranchOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
-  // Frame color = whose machine this repo lives on (host identity, not per-repo).
-  const hostColors = useAppStore((s) => s.hostColors);
+  // Frame color = whose machine this repo lives on (host identity, not
+  // per-repo; positional — re-render on remote reorder).
+  useAppStore((s) => s.remotes);
   const moveRepo = useVcsStore((s) => s.moveRepo);
 
   const st = repo.status;
@@ -322,7 +323,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
     <div
       className={`repo-card ${dropPos ? `repo-card--drop-${dropPos}` : ""}`}
       data-repo-id={`${repo.connKey}::${repo.root}`}
-      style={{ borderColor: hostColorForConnKey(hostColors, repo.connKey) }}
+      style={{ "--host-color": hostColorForConnKey(repo.connKey) } as React.CSSProperties}
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes("application/x-straylight-repo")) {
           e.preventDefault();

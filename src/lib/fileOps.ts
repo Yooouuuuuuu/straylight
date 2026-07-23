@@ -1,10 +1,62 @@
-/** File-tree operations: rename, create, delete, copy path. Each updates open
- *  tabs and refreshes the tree as needed. */
+/** File-tree operations: rename, create, delete, copy path, download. Each
+ *  updates open tabs and refreshes the tree as needed. */
 import { basename, dirname } from "./format";
-import { fsCopy, fsCreate, fsMove, fsRemove, fsRename } from "./ipc";
+import {
+  fsCopy,
+  fsCreate,
+  fsMove,
+  fsRemove,
+  fsRename,
+  fsTransferBatch,
+} from "./ipc";
 import { openFileByPath } from "./openFile";
+import { downloadConfig } from "./settings";
 import { useAppStore } from "../store/appStore";
 import { useVcsStore } from "../store/vcsStore";
+
+/** Download remote/WSL files to the local machine — to the configured folder
+ *  (settings `download.dir`), or the OS Downloads folder when unset. No
+ *  prompt; a toast reports the result. Shared by the explorer and quick-open. */
+export async function downloadToLocal(
+  connId: string,
+  paths: string[],
+): Promise<void> {
+  const store = useAppStore.getState();
+  if (!store.localConnId || paths.length === 0) return;
+  try {
+    let dest = downloadConfig.dir.trim();
+    if (!dest) {
+      const { downloadDir } = await import("@tauri-apps/api/path");
+      dest = await downloadDir();
+    }
+    const now = Date.now();
+    const outcome = await fsTransferBatch(
+      `dl-${now}`,
+      connId,
+      paths,
+      store.localConnId,
+      dest,
+      true,
+    );
+    const parts: string[] = [];
+    if (outcome.skippedLinks)
+      parts.push(
+        `${outcome.skippedLinks} linked folder${outcome.skippedLinks === 1 ? "" : "s"}`,
+      );
+    if (outcome.skippedErrors)
+      parts.push(
+        `${outcome.skippedErrors} unreadable item${outcome.skippedErrors === 1 ? "" : "s"}`,
+      );
+    const skipped = parts.length ? ` (${parts.join(", ")} skipped)` : "";
+    const where = downloadConfig.dir.trim() ? dest : "Downloads";
+    store.pushNotice(
+      "info",
+      `Downloaded ${paths.length} item(s) to ${where}.${skipped}`,
+    );
+  } catch (e) {
+    store.pushNotice("error", `Download failed: ${String(e)}`);
+  }
+}
 
 export async function commitRename(
   connId: string,
@@ -112,6 +164,53 @@ export async function pasteInto(connId: string, destDir: string): Promise<void> 
     });
   } catch (error) {
     store.pushNotice("error", `Couldn't paste: ${String(error)}`);
+  }
+}
+
+/** Move or copy nodes into `destDir` on the SAME connection — the drag-and-drop
+ *  equivalent of cut/copy + paste (same `fsMove`/`fsCopy`). Skips a no-op move
+ *  (already in the folder) and an into-itself drop, refreshes the tree, and
+ *  selects the last item that landed. */
+export async function dropIntoDir(
+  mode: "move" | "copy",
+  connId: string,
+  nodes: { path: string; name: string; isDir: boolean }[],
+  destDir: string,
+): Promise<void> {
+  const store = useAppStore.getState();
+  const vcs = useVcsStore.getState();
+  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
+  const dest = norm(destDir);
+  let landed: { path: string; isDir: boolean } | null = null;
+
+  for (const node of nodes) {
+    const src = norm(node.path);
+    if (mode === "move" && norm(dirname(node.path)) === dest) continue; // already here
+    if (node.isDir && (dest === src || dest.startsWith(src + "/"))) {
+      store.pushNotice("error", `Can't ${mode} "${node.name}" into itself.`);
+      continue;
+    }
+    try {
+      const newPath =
+        mode === "move"
+          ? await fsMove(connId, node.path, destDir)
+          : await fsCopy(connId, node.path, destDir);
+      if (mode === "move") store.applyRename(connId, node.path, newPath); // follow open tabs
+      vcs.onFileChanged(connId, newPath);
+      if (mode === "move") vcs.onFileChanged(connId, node.path);
+      landed = { path: newPath, isDir: node.isDir };
+    } catch (e) {
+      store.pushNotice("error", `Couldn't ${mode} "${node.name}": ${String(e)}`);
+    }
+  }
+  store.refreshConn(connId);
+  if (landed) {
+    store.setSelected({
+      connId,
+      path: landed.path,
+      name: basename(landed.path),
+      isDir: landed.isDir,
+    });
   }
 }
 

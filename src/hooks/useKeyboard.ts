@@ -6,7 +6,9 @@ import { useEffect } from "react";
 import { refreshApp } from "../lib/appRefresh";
 import { allCommands } from "../lib/commands";
 import { openFindIn } from "../lib/editorModels";
+import { toggleFocusView } from "../lib/focusMode";
 import { closeDevtools } from "../lib/ipc";
+import { chatSections, connectedChatHosts } from "../store/appStore";
 import { saveActiveFile } from "../lib/saveFile";
 import { matchShortcut } from "../lib/shortcuts";
 import { cycleTerminalPanelTab } from "../lib/terminalTabs";
@@ -19,6 +21,45 @@ import { useVcsStore } from "../store/vcsStore";
 export function useKeyboard() {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      const store = useAppStore.getState();
+
+      // Focus view (F11), Windows Terminal-style digits: Ctrl+Shift+1..9 = a
+      // new agent on the Nth host of the HOSTS block (WT: new tab, profile
+      // N); Ctrl+Alt+1..9 = jump to the Nth agent in visual order (WT:
+      // switch to tab N). Handled before shortcut matching — digit combos
+      // aren't in the shortcut table.
+      if (
+        store.focusView &&
+        event.ctrlKey &&
+        event.shiftKey !== event.altKey && // exactly one of them
+        /^Digit[1-9]$/.test(event.code)
+      ) {
+        const n = Number(event.code.slice(5)) - 1;
+        if (event.shiftKey) {
+          const connId = connectedChatHosts(store)[n];
+          if (connId) {
+            const label =
+              connId === store.localConnId
+                ? "pwsh"
+                : (store.wsls.find((w) => w.conn.connId === connId)?.conn
+                    .name ??
+                  store.remotes.find((r) => r.conn.connId === connId)?.conn
+                    .name ??
+                  "shell");
+            store.openTerminalInChat(connId, label);
+          }
+        } else {
+          const t = chatSections(
+            store.terminals,
+            store.chatPurposes,
+            connectedChatHosts(store),
+          ).flatMap((g) => g.terminals)[n];
+          if (t) store.setChatActive(t.id);
+        }
+        event.preventDefault();
+        return;
+      }
+
       const action = matchShortcut(event);
 
       // Any modifier combo of F5 (Ctrl+F5, Shift+F5, …) must never reach the
@@ -31,11 +72,75 @@ export function useKeyboard() {
       if (!action) return;
 
       const target = event.target as HTMLElement | null;
-      const inTerminal = !!target?.closest(".terminal-host");
+      // The focus view's pane hosts a reparented xterm — it IS a terminal.
+      const inTerminal = !!target?.closest(".terminal-host, .focus-view__pane");
       const inEditable = !!target?.closest(
-        "input, textarea, [contenteditable=true], .monaco-host, .terminal-host",
+        "input, textarea, [contenteditable=true], .monaco-host, .terminal-host, .focus-view__pane",
       );
-      const store = useAppStore.getState();
+
+      // FOCUS VIEW (F11) has its own tiny keymap — nothing may touch the
+      // normal layout hiding underneath. Ctrl+Tab / Ctrl+PageDown/Up cycle
+      // the agents, Ctrl+Shift+` starts one on the shown agent's host, the
+      // terminal font zoom keeps working, F11 exits (capture listener); every
+      // other app shortcut is swallowed. Shell keys reach the terminal as
+      // ever — only OUR shortcuts are filtered here.
+      if (store.focusView) {
+        // VISUAL order — hosts as sectioned, then each host's agents.
+        const residents = chatSections(
+          store.terminals,
+          store.chatPurposes,
+          connectedChatHosts(store),
+        ).flatMap((g) => g.terminals);
+        switch (action) {
+          case "nextTab":
+          case "prevTab":
+          case "nextTerminal":
+          case "prevTerminal": {
+            const dir =
+              action === "nextTab" || action === "nextTerminal" ? 1 : -1;
+            if (residents.length > 1) {
+              const cur = residents.findIndex(
+                (t) => t.id === store.chatActiveId,
+              );
+              const next =
+                residents[
+                  (Math.max(cur, 0) + dir + residents.length) %
+                    residents.length
+                ];
+              store.setChatActive(next.id);
+            }
+            event.preventDefault();
+            return;
+          }
+          case "newTerminal": {
+            // On the shown agent's host; the first agent falls back to local.
+            const shown =
+              residents.find((t) => t.id === store.chatActiveId) ??
+              residents[0];
+            const connId = shown?.connId ?? store.localConnId;
+            if (connId) {
+              const label =
+                connId === store.localConnId
+                  ? "pwsh"
+                  : (store.wsls.find((w) => w.conn.connId === connId)?.conn
+                      .name ??
+                    store.remotes.find((r) => r.conn.connId === connId)?.conn
+                      .name ??
+                    "shell");
+              store.openTerminalInChat(connId, label);
+            }
+            event.preventDefault();
+            return;
+          }
+          case "zoomIn":
+          case "zoomOut":
+          case "zoomReset":
+            break; // terminal font sizing — fine in the focus view
+          default:
+            event.preventDefault();
+            return;
+        }
+      }
 
       switch (action) {
         case "saveFile":
@@ -318,7 +423,22 @@ export function useKeyboard() {
       }
     }
 
+    // F11 must fire from ANY focus — Monaco and the tree consume keys they
+    // don't know before those bubble to the window handler, so the focus view
+    // listens at the CAPTURE phase and wins everywhere.
+    function onKeyDownCapture(event: KeyboardEvent) {
+      if (matchShortcut(event) === "focusView") {
+        toggleFocusView();
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }
+
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDownCapture, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keydown", onKeyDownCapture, true);
+    };
   }, []);
 }

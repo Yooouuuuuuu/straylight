@@ -65,31 +65,29 @@ export interface Settings {
    *  move-to-CHAT button on terminal entries; honored only while no terminal
    *  lives in the CHAT panel. */
   ui?: { localOnly?: boolean; disableChat?: boolean };
+  /** Where the explorer/quick-open "Download" action drops files. Empty = your
+   *  OS Downloads folder; either way it downloads on click, no prompt. */
+  download?: { dir?: string };
   // ---- theme.json sections ----
   colors?: Record<string, string>;
   editor?: Record<string, string>;
-  /** One explicit color section per shell kind — no inheritance between them;
-   *  missing sections/keys fall back to the built-in (Straylight) defaults. */
-  terminalLocal?: Record<string, string>;
-  terminalWsl?: Record<string, string>;
-  terminalRemote?: Record<string, string>;
+  /** ONE terminal scheme for every shell — hosts are told apart by identity
+   *  color (see `terminalHostColor`), not by per-scope schemes. */
+  terminal?: Record<string, string>;
+  /** Paint each terminal's cursor + selection in its HOST's identity color
+   *  (the 5 section slots) instead of the scheme's own. Default true. */
+  terminalHostColor?: boolean;
   /** The theme library: name → full color sections. Quick-theme copies an
    *  entry over the live sections; saving adds one; delete lines to remove. */
   themes?: Record<string, ThemeData>;
 }
 
-export type ThemeData = Pick<
-  Settings,
-  "colors" | "editor" | "terminalLocal" | "terminalWsl" | "terminalRemote"
->;
+export type ThemeData = Pick<Settings, "colors" | "editor" | "terminal">;
 
-const THEME_SECTION_KEYS = [
-  "colors",
-  "editor",
-  "terminalLocal",
-  "terminalWsl",
-  "terminalRemote",
-] as const;
+const THEME_SECTION_KEYS = ["colors", "editor", "terminal"] as const;
+/** Retired section keys (the per-scope terminal split) — merged into
+ *  `terminal` and stripped from settings.json by the migration. */
+const OLD_TERMINAL_KEYS = ["terminalLocal", "terminalWsl", "terminalRemote"];
 
 /** Which top-level keys belong to the hidden library file (theme.json);
  *  everything else — including the live color sections — is settings.json. */
@@ -104,6 +102,8 @@ export const CONFIRM_IDS = [
   "vcs-push",
   "vcs-stash-pop",
   "vcs-amend-pushed",
+  "usage-check",
+  "close-agent",
 ];
 
 const PANEL_DEFAULTS = {
@@ -127,6 +127,8 @@ function settingsTemplate(): Settings {
     drafts: { enabled: true },
     panels: { ...PANEL_DEFAULTS },
     ui: { localOnly: false, disableChat: false },
+    download: { dir: "" },
+    terminalHostColor: true,
   };
 }
 
@@ -145,24 +147,26 @@ export const UI_COLOR_DEFAULTS: Record<string, string> = {
   "bg-tertiary": "#241a1e",
   "bg-selected": "#3a2228",
   "fg-primary": "#f0e7e9",
-  "fg-secondary": "#8a6f76",
-  cyan: "#ff7a9c",
+  "fg-secondary": "#957a84",
+  cyan: "#48b3ac",
   green: "#5ce626",
   orange: "#ff6a3d",
   pink: "#ff00ff",
-  purple: "#e0446a",
+  purple: "#9a73d1",
   red: "#f30100",
   yellow: "#ffb454",
   "tree-root": "#f0e7e9",
   "tree-dir": "#f0e7e9",
-  "icon-folder": "#e0446a",
+  "icon-folder": "#d76b83",
   "icon-folder-open": "#ff7a9c",
   pin: "#ff00ff",
   "section-fg": "#f5e6e8",
-  "section-local": "#f30100",
-  "section-wsl": "#ff0180",
-  "section-remote": "#ff00ff",
-  titlebar: "#af011c",
+  "section-local": "#af011c",
+  "section-wsl": "#cf1f8f",
+  "section-remote": "#9b46d4",
+  "section-remote-2": "#6a5ce6",
+  "section-remote-3": "#3f86e6",
+  titlebar: "#1a1216",
   "titlebar-fg": "#f5e6e8",
   border: "#3a2228",
   "border-focus": "#af011c",
@@ -171,7 +175,7 @@ export const UI_COLOR_DEFAULTS: Record<string, string> = {
   success: "#5ce626",
   warning: "#ffb454",
   error: "#f30100",
-  info: "#ff7a9c",
+  info: "#48b3ac",
   accent: "#af011c",
 };
 
@@ -181,9 +185,9 @@ let themeFile: string | null = null;
 
 /** Editor/terminal sections, held for the theme layer to consume. */
 export let editorColors: Record<string, string> = {};
-export let terminalLocalColors: Record<string, string> = {};
-export let terminalWslColors: Record<string, string> = {};
-export let terminalRemoteColors: Record<string, string> = {};
+export let terminalColors: Record<string, string> = {};
+/** Host identity color on every terminal's cursor + selection (default on). */
+export let terminalHostColorConfig = true;
 export let terminalFontConfig: { family?: string; size?: number } = {};
 /** The live `colors` section (for "save current theme"). */
 export let uiColors: Record<string, string> = {};
@@ -206,6 +210,8 @@ export let uiConfig: { localOnly: boolean; disableChat: boolean } = {
   localOnly: false,
   disableChat: false,
 };
+/** Download destination (settings `download.dir`); "" = OS Downloads folder. */
+export let downloadConfig: { dir: string } = { dir: "" };
 let confirms: Record<string, boolean> = {};
 
 /** Snapshot of the confirm flags (for the settings UI). */
@@ -404,6 +410,10 @@ async function loadAndApply(): Promise<void> {
   // UI reduction switches. Both gates live at the render sites (uiConfig
   // keeps the raw wish) — wishing the impossible gets flagged so the no-op
   // is explained.
+  downloadConfig = {
+    dir: typeof s.download?.dir === "string" ? s.download.dir : "",
+  };
+
   const ui = s.ui ?? {};
   if (s.ui !== undefined && (typeof s.ui !== "object" || s.ui === null)) {
     issues.push(
@@ -441,18 +451,25 @@ async function loadAndApply(): Promise<void> {
     }
   }
 
-  // The live color sections (bottom of settings.json). Legacy pre-split
-  // `terminal` seeds missing scopes; older two-file layouts fall back to the
-  // sections still sitting in theme.json until migration rewrites them.
+  // The live color sections (bottom of settings.json). Files not yet migrated
+  // may still carry the retired per-scope terminal split — first one wins
+  // under the single section until migration rewrites the file.
   const src = (k: keyof Settings) => (s[k] ?? t[k]) as Record<string, string> | undefined;
   uiColors = src("colors") ?? {};
   applyUiColors(uiColors, issues);
   editorColors = src("editor") ?? {};
-  const legacyTerminal =
-    (s as { terminal?: Record<string, string> }).terminal ?? {};
-  terminalLocalColors = src("terminalLocal") ?? legacyTerminal;
-  terminalWslColors = src("terminalWsl") ?? legacyTerminal;
-  terminalRemoteColors = src("terminalRemote") ?? legacyTerminal;
+  const oldSplit = OLD_TERMINAL_KEYS.map(
+    (k) => (s as Record<string, unknown>)[k] as Record<string, string> | undefined,
+  ).find((v) => v && typeof v === "object");
+  terminalColors = src("terminal") ?? oldSplit ?? {};
+  terminalHostColorConfig = true;
+  if (s.terminalHostColor !== undefined) {
+    if (typeof s.terminalHostColor === "boolean") {
+      terminalHostColorConfig = s.terminalHostColor;
+    } else {
+      issues.push("terminalHostColor: must be true or false");
+    }
+  }
 
   // The theme library (hidden file; lightly validated — entries = objects).
   savedThemes = {};
@@ -528,12 +545,19 @@ async function migrateAndSeed(): Promise<void> {
   // layout ← sections already here). Confirms merge per-key so new dialog ids
   // appear over time.
   const templS = settingsTemplate();
-  const legacy = (s.data as { terminal?: Record<string, string> }).terminal ?? {};
+  // Retired per-scope split (terminalLocal/Wsl/Remote): the first non-empty
+  // section seeds the single `terminal`, and the old keys are dropped.
+  const oldSplit = OLD_TERMINAL_KEYS.map(
+    (k) => (s.data as Record<string, unknown>)[k] as Record<string, string> | undefined,
+  ).find((v) => v && typeof v === "object");
   const settingsOut: Settings = {
     ...templS,
     ...Object.fromEntries(
       Object.entries(s.data).filter(
-        ([k]) => !THEME_KEYS.has(k) && k !== "terminal" && !THEME_SECTION_KEYS.includes(k as never),
+        ([k]) =>
+          !THEME_KEYS.has(k) &&
+          !OLD_TERMINAL_KEYS.includes(k) &&
+          !THEME_SECTION_KEYS.includes(k as never),
       ),
     ),
     confirms: { ...templS.confirms, ...(s.data.confirms ?? {}) },
@@ -541,7 +565,7 @@ async function migrateAndSeed(): Promise<void> {
   for (const key of THEME_SECTION_KEYS) {
     settingsOut[key] = {
       ...(templ[key] ?? {}),
-      ...(key.startsWith("terminal") ? legacy : {}),
+      ...(key === "terminal" ? (oldSplit ?? {}) : {}),
       ...(t.data[key] ?? {}),
       ...(s.data[key] ?? {}),
     };

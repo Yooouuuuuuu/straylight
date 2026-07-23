@@ -91,6 +91,15 @@ pub struct WriteResult {
     pub modified: i64,
 }
 
+/// A source handle for a streamed transfer: read for the copy, plus AsyncWrite
+/// purely so `shutdown()` can issue the close explicitly. russh-sftp's `File`
+/// only fires a *no-wait* close on `Drop`, which falls behind under a many-file
+/// copy and exhausts the server's SFTP handle table ("handle limit reached");
+/// an awaited `shutdown()` per file keeps exactly one read handle open at a
+/// time. (A no-op for local files, whose fd closes synchronously on drop.)
+pub trait TransferSource: AsyncRead + AsyncWrite + Send {}
+impl<T: AsyncRead + AsyncWrite + Send> TransferSource for T {}
+
 /// The file operations every transport (SFTP, local) implements.
 #[async_trait::async_trait]
 pub trait FileTransport: Send + Sync {
@@ -135,9 +144,11 @@ pub trait FileTransport: Send + Sync {
     /// (`name copy`, `name copy 2`, …) on a name collision. Returns the new path.
     async fn copy_to(&self, path: &str, dest_dir: &str) -> Result<String, String>;
 
-    /// Open a file for streaming reads (cross-connection transfers).
+    /// Open a file for streaming reads (cross-connection transfers). The handle
+    /// carries AsyncWrite too so the copy can `shutdown()` it — see
+    /// [`TransferSource`] for why an awaited close matters.
     async fn open_read(&self, path: &str)
-        -> Result<Pin<Box<dyn AsyncRead + Send>>, String>;
+        -> Result<Pin<Box<dyn TransferSource>>, String>;
 
     /// Open `path` for streaming writes, creating it or truncating an existing one.
     async fn open_write(&self, path: &str)
@@ -374,6 +385,10 @@ pub struct TransferOutcome {
     /// Symlinked directories skipped during the walk (never descended — a
     /// link cycle would recurse forever); surfaced in the completion toast.
     skipped_links: usize,
+    /// Entries skipped because the source couldn't be stat'd or listed (a
+    /// dangling symlink, a broken submodule gitlink, a vanished path). One bad
+    /// entry no longer aborts the whole batch — it's skipped and reported here.
+    skipped_errors: usize,
 }
 
 /// Shared progress + cancellation state threaded (by `&`) through the copy
@@ -383,12 +398,17 @@ struct Progress {
     app: AppHandle,
     id: String,
     cancel: Arc<AtomicBool>,
-    total_bytes: u64,
-    total_files: usize,
+    // Atomic so a measure running *alongside* the copy can fill the total in
+    // mid-flight — when the copy starts before its size is known, the bar shows
+    // "N copied · calculating…" until this lands.
+    total_bytes: AtomicU64,
+    total_files: AtomicUsize,
     done_bytes: AtomicU64,
     done_files: AtomicUsize,
     /// Symlinked directories skipped by the walk (reported in the outcome).
     skipped_links: AtomicUsize,
+    /// Entries skipped because the source stat/list failed (reported too).
+    skipped_errors: AtomicUsize,
     last_emit: std::sync::Mutex<Instant>,
 }
 
@@ -399,6 +419,18 @@ impl Progress {
 
     fn skip_link(&self) {
         self.skipped_links.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn skip_error(&self) {
+        self.skipped_errors.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Publish the measured total (once known) and push a frame so the bar
+    /// switches from "calculating…" to a real denominator right away.
+    fn set_total(&self, bytes: u64, files: usize) {
+        self.total_bytes.store(bytes, Ordering::Relaxed);
+        self.total_files.store(files, Ordering::Relaxed);
+        self.emit("", true);
     }
 
     fn add_bytes(&self, n: u64, current: &str) {
@@ -427,9 +459,9 @@ impl Progress {
             TransferProgress {
                 id: self.id.clone(),
                 done_bytes: self.done_bytes.load(Ordering::Relaxed),
-                total_bytes: self.total_bytes,
+                total_bytes: self.total_bytes.load(Ordering::Relaxed),
                 done_files: self.done_files.load(Ordering::Relaxed),
-                total_files: self.total_files,
+                total_files: self.total_files.load(Ordering::Relaxed),
                 current: current.to_string(),
             },
         );
@@ -445,13 +477,23 @@ fn measure<'a>(
     path: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<(u64, usize), String>> + Send + 'a>> {
     Box::pin(async move {
-        let meta = src.stat(path).await?;
+        // Tolerant: an unreadable path (dangling link, broken gitlink) counts
+        // as nothing rather than aborting the batch — the copy walk skips and
+        // reports it the same way, so the totals still match what's copied.
+        let meta = match src.stat(path).await {
+            Ok(m) => m,
+            Err(_) => return Ok((0, 0)),
+        };
         if !meta.is_dir {
             return Ok((meta.size, 1));
         }
+        let entries = match src.list_dir(path).await {
+            Ok(listing) => listing.entries,
+            Err(_) => return Ok((0, 0)),
+        };
         let mut bytes = 0u64;
         let mut files = 0usize;
-        for entry in src.list_dir(path).await?.entries {
+        for entry in entries {
             if entry.is_symlink && entry.is_dir {
                 continue; // skipped by the copy walk too
             }
@@ -482,6 +524,12 @@ pub async fn fs_transfer_batch(
     dest_conn_id: String,
     dest_dir: String,
     rename_on_conflict: bool,
+    // Size already measured by the UI's pre-flight (the confirm sheet's
+    // `fs_measure`). When present, the copy skips its own measure pass so a
+    // deep tree isn't walked twice; when absent (or the user committed before
+    // the scan finished) the copy measures itself as before.
+    total_bytes: Option<u64>,
+    total_files: Option<usize>,
 ) -> Result<TransferOutcome, String> {
     let src = state.transport(&src_conn_id).await?;
     let dest = state.transport(&dest_conn_id).await?;
@@ -503,6 +551,7 @@ pub async fn fs_transfer_batch(
         dest.as_ref(),
         &dest_dir,
         rename_on_conflict,
+        total_bytes.zip(total_files),
     )
     .await;
 
@@ -532,33 +581,68 @@ async fn run_transfer(
     dest: &dyn FileTransport,
     dest_dir: &str,
     rename_on_conflict: bool,
+    precomputed_total: Option<(u64, usize)>,
 ) -> Result<TransferOutcome, String> {
-    let mut total_bytes = 0u64;
-    let mut total_files = 0usize;
-    for p in src_paths {
-        let (b, f) = measure(src, p).await?;
-        total_bytes += b;
-        total_files += f;
-    }
-
     let prog = Progress {
         app: app.clone(),
         id: id.to_string(),
         cancel,
-        total_bytes,
-        total_files,
+        total_bytes: AtomicU64::new(0),
+        total_files: AtomicUsize::new(0),
         done_bytes: AtomicU64::new(0),
         done_files: AtomicUsize::new(0),
         skipped_links: AtomicUsize::new(0),
+        skipped_errors: AtomicUsize::new(0),
         last_emit: std::sync::Mutex::new(Instant::now()),
     };
-    prog.emit("", true); // 0% up front so the bar appears immediately
 
-    for p in src_paths {
-        if prog.cancelled() {
-            break;
+    // If the UI already measured (waited on the confirm sheet's scan), seed the
+    // total so the bar shows a denominator from the first frame. Otherwise the
+    // user committed early: start copying NOW and measure ALONGSIDE, so the bar
+    // reads "N copied · calculating…" until the total lands — never a blocking
+    // pre-pass.
+    let need_measure = match precomputed_total {
+        Some((b, f)) => {
+            prog.set_total(b, f);
+            false
         }
-        transfer_entry(src, p, dest, dest_dir, rename_on_conflict, true, &prog).await?;
+        None => true,
+    };
+    prog.emit("", true); // show the bar immediately
+
+    let copy = async {
+        for p in src_paths {
+            if prog.cancelled() {
+                break;
+            }
+            transfer_entry(src, p, dest, dest_dir, rename_on_conflict, true, &prog).await?;
+        }
+        Ok::<(), String>(())
+    };
+
+    if need_measure {
+        let measure_total = async {
+            let mut total_bytes = 0u64;
+            let mut total_files = 0usize;
+            for p in src_paths {
+                if prog.cancelled() {
+                    return Ok::<(), String>(());
+                }
+                let (b, f) = measure(src, p).await?;
+                total_bytes += b;
+                total_files += f;
+            }
+            prog.set_total(total_bytes, total_files);
+            Ok(())
+        };
+        // Single task, cooperatively scheduled: the two walks just take turns on
+        // the SFTP session lock (measure is metadata-only, so it finishes early
+        // in the copy). A measure error is non-fatal — the copy carries the run.
+        let (measured, copied) = tokio::join!(measure_total, copy);
+        let _ = measured;
+        copied?;
+    } else {
+        copy.await?;
     }
 
     let cancelled = prog.cancelled();
@@ -568,7 +652,37 @@ async fn run_transfer(
         bytes: prog.done_bytes.load(Ordering::Relaxed),
         cancelled,
         skipped_links: prog.skipped_links.load(Ordering::Relaxed),
+        skipped_errors: prog.skipped_errors.load(Ordering::Relaxed),
     })
+}
+
+/// Size of a pending transfer, measured with the copy walk's *exact* rules, so
+/// the confirm sheet's number and the progress bar's total agree — symlinked
+/// dirs excluded (they're never descended), unreadable entries tolerated. The
+/// UI hands this back to `fs_transfer_batch` as `total_*` so a deep tree isn't
+/// walked twice. (Distinct from `fs_measure`/`PropertiesInfo`, which counts a
+/// symlinked dir as one entry for the Properties tally.)
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferSize {
+    files: usize,
+    bytes: u64,
+}
+
+#[tauri::command]
+pub async fn fs_transfer_measure(
+    state: State<'_, AppState>,
+    conn_id: String,
+    paths: Vec<String>,
+) -> Result<TransferSize, String> {
+    let src = state.transport(&conn_id).await?;
+    let (mut bytes, mut files) = (0u64, 0usize);
+    for p in &paths {
+        let (b, f) = measure(src.as_ref(), p).await?;
+        bytes += b;
+        files += f;
+    }
+    Ok(TransferSize { files, bytes })
 }
 
 /// Aggregate size + counts for the Properties dialog (recursive over a selection).
@@ -617,12 +731,22 @@ fn measure_props<'a>(
     path: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<(usize, usize, u64), String>> + Send + 'a>> {
     Box::pin(async move {
-        let meta = src.stat(path).await?;
+        // Tolerant like `measure`: an unreadable entry contributes nothing
+        // rather than failing the whole tally (Properties + the transfer
+        // pre-flight size both call this).
+        let meta = match src.stat(path).await {
+            Ok(m) => m,
+            Err(_) => return Ok((0, 0, 0)),
+        };
         if !meta.is_dir {
             return Ok((1, 0, meta.size));
         }
+        let entries = match src.list_dir(path).await {
+            Ok(listing) => listing.entries,
+            Err(_) => return Ok((0, 0, 0)),
+        };
         let (mut files, mut folders, mut bytes) = (0usize, 0usize, 0u64);
-        for entry in src.list_dir(path).await?.entries {
+        for entry in entries {
             if entry.is_dir && !entry.is_symlink {
                 folders += 1;
                 let (f, d, b) = measure_props(src, &entry.path).await?;
@@ -665,7 +789,20 @@ fn transfer_entry<'a>(
         if prog.cancelled() {
             return Ok(());
         }
-        let meta = src.stat(src_path).await?;
+        // Tolerant: a source entry we can't stat (dangling link, broken
+        // gitlink) is skipped and reported, not fatal — matches `measure`, so
+        // one bad entry never aborts the batch.
+        let meta = match src.stat(src_path).await {
+            Ok(m) => m,
+            Err(e) => {
+                // The toast only reports a count (a folder of broken links could
+                // be a wall of names); the paths land in the log for when you
+                // need to know exactly what was skipped.
+                log::warn!("transfer: skipping unreadable {src_path}: {e}");
+                prog.skip_error();
+                return Ok(());
+            }
+        };
         let base = any_basename(src_path);
         let mut name = base.to_string();
         let mut dest_path = dest.join(dest_dir, &name);
@@ -682,9 +819,18 @@ fn transfer_entry<'a>(
             }
         }
         if meta.is_dir {
-            // Create (or reuse) the destination folder, then recurse.
+            // Create (or reuse) the destination folder, then recurse. If the
+            // source dir can't be listed, skip it (reported) rather than abort.
             let _ = dest.create_entry(dest_dir, &name, true).await;
-            for entry in src.list_dir(src_path).await?.entries {
+            let entries = match src.list_dir(src_path).await {
+                Ok(listing) => listing.entries,
+                Err(e) => {
+                    log::warn!("transfer: skipping unlistable {src_path}: {e}");
+                    prog.skip_error();
+                    return Ok(());
+                }
+            };
+            for entry in entries {
                 if prog.cancelled() {
                     break;
                 }
@@ -692,6 +838,7 @@ fn transfer_entry<'a>(
                 // (`ln -s . self`) would recurse forever. Symlinks to files
                 // still copy as regular files, like same-connection copies.
                 if entry.is_symlink && entry.is_dir {
+                    log::info!("transfer: skipping symlinked dir {}", entry.path);
                     prog.skip_link();
                     continue;
                 }
@@ -745,6 +892,13 @@ async fn stream_file(
         }
         prog.add_bytes(n as u64, name);
     }
+
+    // Close the read handle explicitly (awaited) in every exit path — success,
+    // cancel, or error. russh-sftp's `Drop` only fires a no-wait close, which
+    // lags a many-file copy until the server's handle table fills; an awaited
+    // shutdown keeps one read handle open at a time. (No-op for local files.)
+    reader.shutdown().await.ok();
+    drop(reader);
 
     // A failed final flush means bytes never landed — that's an error, not a
     // completed copy.

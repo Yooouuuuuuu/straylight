@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { formatSize, formatTimestamp } from "../../lib/format";
 import type { FileEntry } from "../../lib/ipc";
+import { canDropInto } from "../../lib/treeDrag";
 import { repoColorForPath, useVcsStore } from "../../store/vcsStore";
 import { vcsClass, vcsLetter } from "../../lib/vcsDecorations";
 import { IconBranch, IconChevron } from "../icons";
@@ -92,6 +93,8 @@ export function FileNode({
   onContextMenu,
   onCommitRename,
   onCancelRename,
+  onDragStartNode,
+  onDropInto,
 }: {
   connId: string;
   entry: FileEntry;
@@ -106,8 +109,13 @@ export function FileNode({
   onContextMenu: (x: number, y: number) => void;
   onCommitRename: (name: string) => void;
   onCancelRename: () => void;
+  /** Drag started on this row — the tree records the drag set (selection). */
+  onDragStartNode: () => void;
+  /** A same-host drag was dropped on this folder — open Move/Copy at (x, y). */
+  onDropInto: (x: number, y: number) => void;
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
+  const [dropOver, setDropOver] = useState(false);
   // VCS decoration for this path (tracked repos publish a normalized map).
   // Ignored state is inherited: anything inside an ignored directory dims too
   // (git collapses fully-ignored dirs to a single entry).
@@ -160,8 +168,54 @@ export function FileNode({
   return (
     <div
       ref={rowRef}
-      className={`file-node ${active ? "file-node--active" : ""}`}
+      className={`file-node ${active ? "file-node--active" : ""} ${
+        dropOver ? "file-node--dropinto" : ""
+      }`}
       style={{ paddingLeft: 6 + depth * 14 }}
+      draggable={!renaming}
+      onDragStart={
+        renaming
+          ? undefined
+          : (e) => {
+              onDragStartNode();
+              e.dataTransfer.effectAllowed = "copyMove";
+              e.dataTransfer.setData("text/plain", entry.name);
+            }
+      }
+      onDragOver={
+        entry.isDir
+          ? (e) => {
+              if (canDropInto(connId, entry.path)) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (!dropOver) setDropOver(true);
+              } else {
+                e.dataTransfer.dropEffect = "none";
+              }
+            }
+          : undefined
+      }
+      onDragLeave={
+        entry.isDir
+          ? (e) => {
+              // Ignore moves between the row's own children (name span, etc.).
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                setDropOver(false);
+              }
+            }
+          : undefined
+      }
+      onDrop={
+        entry.isDir
+          ? (e) => {
+              e.preventDefault();
+              setDropOver(false);
+              if (canDropInto(connId, entry.path)) {
+                onDropInto(e.clientX, e.clientY);
+              }
+            }
+          : undefined
+      }
       onClick={renaming ? undefined : handleClick}
       onDoubleClick={renaming ? undefined : handleDoubleClick}
       // Middle-click = open permanently (double-click semantics), VS Code

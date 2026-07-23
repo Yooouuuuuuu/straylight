@@ -13,20 +13,138 @@ history of design changes — lives in the docs: the decision ledger in
 
 ### Planned
 
-- **F11 focus view + agent rail** (next up) — hide every panel for a
-  full-width editor; a slim left rail keeps the CHAT agents one click away
-  (full names, host colors, a bell when one wants attention). F11 restores
-  the exact layout.
-- **Color/contrast sweep** — all themed controls in one pass (incl. the
-  multi-WSL connection surfaces flagged 2026-07-14); reuse existing theme
-  slots first.
-- **Revisit where password entry lives** — the current centered connect modal vs.
-  an inline field (e.g. on the "Connect to a server" button).
-- **Version control, later:** per-hunk staging, blame.
 - **Auto-update** — ships with 0.10 (updater keypair + GitHub Releases).
-- **Containers, later:** file browsing inside containers, logs, start/stop.
-- **Transfer polish (later):** drag directly between the sidebar trees, OS
-  drag-in/out, and multi cut/copy/paste in the explorer.
+
+## [0.9.12] - 2026-07-24
+
+The color era: the whole app became themeable to the bone, the Straylight
+identity was designed for real (dark and light), and six built-in themes each
+speak their own host language — alongside the F11 focus workspace and a round
+of explorer/transfer power features.
+
+### Added
+
+- **Focus view (F11): a full-window CHAT workspace.** F11 (or the ⛶
+  title-bar button) overlays the whole body — the editor is never involved —
+  with the agents listed on the left, GROUPED BY HOST (host name in its
+  color; drag headers to reorder hosts, drag agents within a host), and the
+  selected agent's live terminal filling the right (the same shell as the
+  CHAT column — reparented, never restarted). At the list's bottom, a HOSTS
+  block shows every connected host with its issue light and a ＋ for a new
+  agent there; clicking a host runs the Claude usage check — a read-only,
+  list-hidden probe that starts `claude`, waits behind a loading screen, and
+  opens `/usage` (re-click refreshes it with Esc + `/usage`, no re-ask;
+  first run confirms, skippable, and the toggle lives in Preferences →
+  Confirmations). Probes close when the view exits. The notification bell
+  moves to the HOSTS header and the status bar hides while focused. Its own keymap —
+  Ctrl+Tab hold-to-browse, Ctrl+PageDown/Up cycle, Ctrl+Shift+` /
+  Ctrl+Shift+N new agent (Windows Terminal's digits), Ctrl+Alt+N jump to
+  agent N — and every other app shortcut is inert, so the layout underneath
+  can't be touched. The CHAT column's dots match the grouping: one
+  host-colored pill per host, the lifecycle dots inside.
+- **Transfers: a confirm sheet before the copy.** Dropping or pasting between
+  the two panes opens a small sheet — source → destination, the items, and a
+  size that fills in while the source is scanned. Copy is enabled from the first
+  frame, so a deep tree never blocks the decision; commit early and the progress
+  bar shows the total once the walk lands. The measured size is reused by the
+  copy so a big tree isn't walked twice. Only one transfer runs at a time — a
+  second drop now says so with a toast instead of doing nothing.
+- **Right-click menu in Quick Open (Ctrl+P).** Finder rows now offer Open, Copy,
+  Copy Path, Download (remote/WSL), Reveal in file manager (local), and
+  Properties — the explorer's actions, without leaving the search.
+- **Reveal in file manager.** Local files gain a "Reveal in file manager" action
+  that opens the OS file manager with the item selected — in both the explorer
+  right-click menu (under Copy Path) and the Ctrl+P menu.
+- **Download folder is configurable.** Preferences → General → Download folder
+  sets where Download sends files (empty = your OS Downloads folder); applies to
+  both the explorer Download and the new quick-open Download.
+- **Drag to move or copy within a host.** Drag file(s) or folder(s) onto another
+  folder in the same host's explorer (or onto its root) and pick **Move here** /
+  **Copy here** — the same operations as cut/copy + paste, just on a drag. Same
+  host only (cross-host copies stay in the Transfers tool), and a folder can't be
+  dropped into itself.
+
+### Changed
+
+- **The Straylight look, fine-tuned and promoted to the default.** A full
+  palette pass toward 1.0: `#AF011C` carries the brand on chrome (dark title
+  bar with a whisper of crimson underline), pure red is reserved for errors
+  and attention, and cool accents (teal info, violet) rest the eye. Hosts read
+  as one warm→cool spectrum — Local crimson, WSL magenta, remotes
+  violet→indigo→blue. The editor's syntax softened (no more pure-magenta
+  literals), find matches got a bright amber border, and the section bars
+  calmed. A WCAG contrast audit closed the pass: muted text and code comments
+  brightened to ≥4.5/≈3.9 ratios, the character under a host-colored terminal
+  cursor now picks whichever of fg/bg reads best on that host's color, and
+  host colors used *as text* (the Sessions title, the F11 HOSTS list) mix
+  toward the foreground so even the dark crimson stays legible. All of it is
+  the shipped default now.
+- **The theme lineup: six, each earning its place.** Straylight (dark,
+  default) and the new **Straylight Light** — the identity on warm paper,
+  crimson chrome, semantics re-anchored for light — plus Dracula, Nord,
+  Solarized Light, and the new **Catppuccin Latte**. Straylight Crimson and
+  Neon retired (the default *is* the crimson identity now, done right). The
+  carried-over themes gained the new contract — per-remote host slots and
+  their own find-match colors — with their authentic palettes kept;
+  legibility-only touch-ups where muted text was used for real UI reading.
+  Every theme designs its own host identities with the same grammar: Local +
+  WSL as a near pair, remotes as their own family, all five distinguishable —
+  Straylight's crimson/magenta + violet→indigo→blue, Dracula's purple/pink +
+  cyan→green→yellow, Nord's frost pair + aurora ramp, Solarized's blue/cyan +
+  warm ramp, Latte's mauve/blue + teal→green→peach. Theme credits live in
+  THIRD_PARTY_NOTICES.md (all MIT).
+- **One terminal scheme + host identity.** The three per-scope terminal
+  sections (`terminalLocal/Wsl/Remote`) collapsed into a single `terminal`
+  scheme — Catppuccin Mocha's soft ANSI set on the warm Straylight background
+  — and a new `terminalHostColor` setting (default on, Preferences →
+  Interface) paints each terminal's cursor + selection in its host's identity
+  color instead, including per-remote. Old settings migrate automatically.
+- **Host colors are fixed slots.** The five host colors are theme slots
+  (Local / WSL / Remote 1-3), edited in the Theme UI like any other color —
+  the per-host color override menu is gone. Right-clicking a remote's host
+  bar now offers "Make this Remote N": the host swaps position with the one
+  holding that slot, taking its place and its color.
+- **Connections at a glance.** Small diagonal strokes in the title bar, over
+  the explorer's W and R toggles, tally the attached WSL and remote sessions:
+  neutral = connected, pulsing amber = connecting/reconnecting, steady red =
+  disconnected. The L/W/R toggles gained breathing room to match.
+- **Every UI color follows the theme now.** Colors that were baked into the
+  stylesheet or code — merge-conflict highlights, error/danger tints, the
+  repo-backend badges, editor banners, the commit graph, the remote host-color
+  ramp, the tool-view frame — were hardcoded (mostly leftover Dracula values)
+  and ignored the active theme. They now resolve from theme slots (translucent
+  ones via `color-mix`), so switching themes recolors the whole window. The
+  Monaco bootstrap theme no longer duplicates the editor defaults (one source,
+  no drift), the `--info` default that disagreed between the CSS and the JS is
+  aligned, and the two modal scrims share one `--overlay` token. Structural
+  black drop-shadows stay fixed by design.
+- **Download copies straight to its folder, no prompt.** Both the explorer and
+  quick-open Download send files to the configured Download folder (default:
+  your OS Downloads) without asking each time.
+
+### Fixed
+
+- **Transfers no longer leak SFTP file handles.** Each file streamed from a
+  remote/WSL source left its read handle open (russh-sftp closes them only via a
+  fire-and-forget drop that lags a many-file copy), so a large tree eventually
+  hit `handle limit reached` — and once the session's handle table was full,
+  the explorer and Transfers panel went dead until reconnect. The copy now
+  closes each read handle explicitly (awaited), keeping one open at a time; the
+  same fix covers same-connection recursive copy (explorer paste on a remote).
+- **A transfer no longer aborts on one unreadable entry.** A dangling symlink or
+  broken submodule gitlink used to fail the whole batch during the size pre-pass
+  (`could not stat … No such file`); such entries are now skipped and counted
+  (`N unreadable items skipped` in the completion toast, with each path recorded
+  in the log) while everything else copies. The size pre-pass and Properties
+  tolerate them the same way, so one bad entry never takes the rest down with it.
+- **"Reveal in file manager" selects the file on Windows.** The path is
+  normalized to backslashes — forward slashes made Explorer ignore `/select` and
+  just open the default folder — and quoted so paths with spaces resolve.
+- **The status-bar transfer readout no longer clips its text.** The box was
+  widened so the route label and byte/file progress fit without being cut off.
+- **Ctrl-click on a link in the editor opens it.** Monaco showed the "follow
+  link" hint but the WebView2 has no working `window.open`, so clicks did
+  nothing; http(s) links now open in your default browser.
 
 ## [0.9.11] - 2026-07-22
 

@@ -1,7 +1,8 @@
-/** Host identity colors. Local and WSL take their section colors (theme keys);
- *  remote hosts take a persisted per-host color (right-click the host bar),
- *  defaulting to the ramp. Everything host-scoped — the host bar, VC card
- *  frames, file-tab markers, the title-bar tint — reads these. */
+/** Host identity colors — FIXED theme slots, one per host: Local and WSL take
+ *  their section slots; remotes take the ramp slot for their position in the
+ *  remotes list (1st/2nd/3rd). No per-host overrides: editing what the five
+ *  colors look like happens in the Theme UI; right-clicking a remote's host
+ *  bar swaps its POSITION (and so its slot) with another remote. */
 import {
   HOST_COLOR_RAMP,
   remoteHostKey,
@@ -27,7 +28,7 @@ export function connStateTip(state: string): string {
   }
 }
 
-/** A remote's default slot in the ramp (its position in the remotes list). */
+/** A remote's slot in the ramp (its position in the remotes list). */
 function remoteSlot(hostKey: string): number {
   const idx = useAppStore
     .getState()
@@ -35,24 +36,16 @@ function remoteSlot(hostKey: string): number {
   return Math.max(0, idx) % HOST_COLOR_RAMP.length;
 }
 
-/** The identity color for a connected remote (custom, else ramp by slot). */
-export function remoteColor(
-  hostColors: Record<string, string>,
-  remote: RemoteConnection,
-): string {
-  const key = remoteHostKey(remote);
-  return hostColors[key] ?? HOST_COLOR_RAMP[remoteSlot(key)];
+/** The identity color for a remote — its ramp slot, by position. */
+export function remoteColor(remote: RemoteConnection): string {
+  return HOST_COLOR_RAMP[remoteSlot(remoteHostKey(remote))];
 }
 
-/** Color for a VC connKey ("local" | "wsl:<distro>" | "user@host:port").
- *  WSL distros can be recolored per distro (right-click their host bar). */
-export function hostColorForConnKey(
-  hostColors: Record<string, string>,
-  connKey: string,
-): string {
+/** Color for a VC connKey ("local" | "wsl:<distro>" | "user@host:port"). */
+export function hostColorForConnKey(connKey: string): string {
   if (connKey === "local") return SECTION_LOCAL;
-  if (connKey.startsWith("wsl:")) return hostColors[connKey] ?? SECTION_WSL;
-  return hostColors[connKey] ?? HOST_COLOR_RAMP[remoteSlot(connKey)];
+  if (connKey.startsWith("wsl:")) return SECTION_WSL;
+  return HOST_COLOR_RAMP[remoteSlot(connKey)];
 }
 
 /** Marker color for a tab's connection — null for local (local tabs stay
@@ -61,8 +54,8 @@ export function tabHostColor(connId: string): string | null {
   const s = useAppStore.getState();
   if (!connId || connId === s.localConnId) return null;
   const wsl = s.wsls.find((w) => w.conn.connId === connId);
-  if (wsl) return s.hostColors[`wsl:${wsl.conn.name}`] ?? SECTION_WSL;
+  if (wsl) return SECTION_WSL;
   const remote = s.remotes.find((r) => r.conn.connId === connId);
-  if (remote) return remoteColor(s.hostColors, remote.conn);
+  if (remote) return remoteColor(remote.conn);
   return null;
 }

@@ -13,12 +13,10 @@ import {
   IconBell,
   IconBranch,
   IconChatBubble,
-  IconClose,
-  IconCopy,
   IconFolder,
   IconTerminalGlyph,
 } from "../icons";
-import { RelativeTime } from "../RelativeTime";
+import { BellPop } from "../BellPop";
 import { Tip } from "../Tooltip";
 import { TransferProgressBar } from "../transfer/TransferProgressBar";
 
@@ -42,11 +40,9 @@ export function StatusBar() {
   const chatVisible = useAppStore((s) => s.chatVisible);
   const terminals = useAppStore((s) => s.terminals);
   const belled = useAppStore((s) => s.belled);
-  const noticeLog = useAppStore((s) => s.noticeLog);
   const noticeUnread = useAppStore((s) => s.noticeUnread);
   const bellOpen = useAppStore((s) => s.bellOpen);
   const setBellOpen = useAppStore((s) => s.setBellOpen);
-  const clearNoticeLog = useAppStore((s) => s.clearNoticeLog);
 
   // A bell in a HIDDEN home badges that home's button — visible homes show it
   // on the entry/dot itself.
@@ -143,7 +139,7 @@ export function StatusBar() {
           >
             <IconChatBubble size={13} />
             <span className="statusbar__panel-label">
-              CHAT
+              SESSIONS
               {bellInChat && <IconBell size={10} className="statusbar__panelbell" />}
             </span>
           </span>
@@ -273,58 +269,7 @@ export function StatusBar() {
           {noticeUnread > 0 && <span className="statusbar__attn" />}
         </span>
       </Tip>
-      {bellOpen && (
-        <>
-          <div className="menu-backdrop" onClick={() => setBellOpen(false)} />
-          <div className="bell-pop">
-            <div className="bell-pop__head">
-              <span>Notifications</span>
-              <span className="bell-pop__spacer" />
-              {noticeLog.length > 0 && (
-                <button
-                  className="bell-pop__clear"
-                  onClick={() => clearNoticeLog()}
-                >
-                  Clear all
-                </button>
-              )}
-              <Tip label="Close">
-                <button className="icon-btn" onClick={() => setBellOpen(false)}>
-                  <IconClose size={11} />
-                </button>
-              </Tip>
-            </div>
-            {noticeLog.length === 0 ? (
-              <div className="bell-pop__empty">
-                Nothing yet — toasts land here after they fade.
-              </div>
-            ) : (
-              <div className="bell-pop__list">
-                {noticeLog.map((n) => (
-                  <div key={n.id} className={`bell-pop__item bell-pop__item--${n.kind}`}>
-                    {/* Selectable AND one-click copyable — error texts get
-                        pasted into searches and bug reports. */}
-                    <span className="bell-pop__text">{n.text}</span>
-                    <Tip label="Copy message">
-                      <button
-                        className="icon-btn bell-pop__copy"
-                        onClick={() =>
-                          void navigator.clipboard.writeText(n.text).catch(() => {})
-                        }
-                      >
-                        <IconCopy size={12} />
-                      </button>
-                    </Tip>
-                    <span className="bell-pop__time">
-                      <RelativeTime at={n.time} title={null} />
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </>
-      )}
+      <BellPop variant="status" />
     </footer>
   );
 }

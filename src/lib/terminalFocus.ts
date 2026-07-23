@@ -17,3 +17,43 @@ export function focusTerminal(id: string | null): void {
   const focus = registry.get(id);
   if (focus) requestAnimationFrame(focus);
 }
+
+/** Sibling registry: write raw bytes into an already-open PTY by terminal id
+ *  (the usage probe's refresh sends Esc + /usage to the live claude). Backed
+ *  by useTerminal once its PTY is up; a no-op before then. */
+const inputs = new Map<string, (data: string) => void>();
+
+export function registerTerminalInput(
+  id: string,
+  send: (data: string) => void,
+): void {
+  inputs.set(id, send);
+}
+
+export function unregisterTerminalInput(id: string): void {
+  inputs.delete(id);
+}
+
+export function sendTerminalInput(id: string, data: string): boolean {
+  const send = inputs.get(id);
+  if (!send) return false;
+  send(data);
+  return true;
+}
+
+/** Read a terminal's current on-screen + scrollback text by id (the usage
+ *  probe checks it to confirm `/usage` actually rendered vs. a "command not
+ *  found" from a host without Claude Code). Empty string if unknown. */
+const texts = new Map<string, () => string>();
+
+export function registerTerminalText(id: string, read: () => string): void {
+  texts.set(id, read);
+}
+
+export function unregisterTerminalText(id: string): void {
+  texts.delete(id);
+}
+
+export function readTerminalText(id: string): string {
+  return texts.get(id)?.() ?? "";
+}

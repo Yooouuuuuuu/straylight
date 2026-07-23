@@ -4,9 +4,7 @@
 import { useState } from "react";
 
 import {
-  terminalLocalColors,
-  terminalRemoteColors,
-  terminalWslColors,
+  terminalColors,
   editorColors,
   UI_COLOR_DEFAULTS,
   uiColors,
@@ -25,16 +23,14 @@ import { IconChevron, IconClose } from "../icons";
 import { Tip } from "../Tooltip";
 
 const SECTIONS: {
-  key: "colors" | "editor" | "terminalLocal" | "terminalWsl" | "terminalRemote";
+  key: "colors" | "editor" | "terminal";
   title: string;
   defaults: Record<string, string>;
   live: () => Record<string, string>;
 }[] = [
   { key: "colors", title: "UI colors", defaults: UI_COLOR_DEFAULTS, live: () => uiColors },
   { key: "editor", title: "Editor", defaults: EDITOR_DEFAULTS, live: () => editorColors },
-  { key: "terminalLocal", title: "Terminal — local", defaults: TERMINAL_DEFAULTS, live: () => terminalLocalColors },
-  { key: "terminalWsl", title: "Terminal — WSL", defaults: TERMINAL_DEFAULTS, live: () => terminalWslColors },
-  { key: "terminalRemote", title: "Terminal — remote", defaults: TERMINAL_DEFAULTS, live: () => terminalRemoteColors },
+  { key: "terminal", title: "Terminal", defaults: TERMINAL_DEFAULTS, live: () => terminalColors },
 ];
 
 const HEX_RE = /^#[0-9a-f]{6}$/i;

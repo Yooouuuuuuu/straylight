@@ -4,6 +4,7 @@
  * overrides in settings.json). Defaults follow VS Code / OS conventions; users
  * remap by id via `"keybindings": { "search.inFiles": "ctrl+alt+f" }`.
  */
+import { useAppStore } from "../store/appStore";
 
 export type ShortcutAction =
   | "saveFile"
@@ -36,7 +37,8 @@ export type ShortcutAction =
   | "togglePanel"
   | "focusGroup1"
   | "focusGroup2"
-  | "focusGroup3";
+  | "focusGroup3"
+  | "focusView";
 
 export interface Shortcut {
   /** Stable command id (the contract) — palette + overrides reference this. */
@@ -96,6 +98,8 @@ export const SHORTCUTS: Shortcut[] = [
   // VS Code's Ctrl+J: pure show/hide of the panel — it wins over the shell
   // (VS Code also steals Ctrl+J from the terminal for this).
   { id: "view.togglePanel", action: "togglePanel", key: "j", ctrl: true, description: "Show/hide the terminal panel", label: "Ctrl+J" },
+  // Focus view: every side panel folds away; F11 again restores the layout.
+  { id: "view.focusView", action: "focusView", key: "F11", description: "Toggle the focus view", label: "F11" },
   // VS Code's way back to the editor without hiding the terminal.
   { id: "editor.focusGroup1", action: "focusGroup1", key: "1", ctrl: true, description: "Focus editor group 1", label: "Ctrl+1" },
   { id: "editor.focusGroup2", action: "focusGroup2", key: "2", ctrl: true, description: "Focus editor group 2", label: "Ctrl+2" },
@@ -218,9 +222,31 @@ const TERMINAL_ACTIONS: ShortcutAction[] = [
   "focusGroup1",
   "focusGroup2",
   "focusGroup3",
+  "focusView",
 ];
 
 export function isPassthroughShortcut(event: KeyboardEvent): boolean {
+  // Focus view (F11): Ctrl+Shift+1..9 spawns an agent on the Nth host,
+  // Ctrl+Alt+1..9 jumps to the Nth agent — the window handler owns those
+  // digits there.
+  if (
+    useAppStore.getState().focusView &&
+    event.ctrlKey &&
+    event.shiftKey !== event.altKey &&
+    /^Digit[1-9]$/.test(event.code)
+  ) {
+    return true;
+  }
   const s = findShortcut(event);
-  return s !== null && TERMINAL_ACTIONS.includes(s.action) && !s.noTerminal;
+  if (s === null || s.noTerminal) return false;
+  if (TERMINAL_ACTIONS.includes(s.action)) return true;
+  // Focus view: agent cycling also rides Ctrl+Tab — the window handler owns
+  // it there (its keymap swallows everything else anyway).
+  if (
+    (s.action === "nextTab" || s.action === "prevTab") &&
+    useAppStore.getState().focusView
+  ) {
+    return true;
+  }
+  return false;
 }

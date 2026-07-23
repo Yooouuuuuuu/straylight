@@ -209,10 +209,127 @@ export interface TerminalSession {
   command: string[] | null;
   /** Typed into the shell once it opens (e.g. `podman exec -it … /bin/sh`). */
   initialInput?: string | null;
+  /** Timed keystrokes after open (delays from PTY-open) — the usage probe's
+   *  `claude`, trust-prompt enters, `/clear`, `/usage`. */
+  scriptedInput?: { text: string; delayMs: number }[];
+  /** Keyboard input is dropped (a display-only terminal, e.g. the usage
+   *  probe — nothing can be typed into it). */
+  locked?: boolean;
+  /** A usage-check probe: closed automatically when the focus view exits. */
+  usageProbe?: boolean;
   epoch: number;
   /** Lives in the CHAT column instead of the panel (the shell survives the
    *  move — its DOM is reparented, never remounted). */
   inChat?: boolean;
+}
+
+/** Every connected host in the CHAT ordering: ranked by `chatHostOrder`,
+ *  unranked hosts keeping the canonical order (local, WSLs, remotes). Drives
+ *  the focus view's HOSTS block and the Ctrl+Shift+N host digits. */
+export function connectedChatHosts(s: {
+  localConnId: string | null;
+  wsls: { conn: { connId: string } }[];
+  remotes: { conn: { connId: string } }[];
+  chatHostOrder: string[];
+}): string[] {
+  const all: string[] = [];
+  if (s.localConnId) all.push(s.localConnId);
+  for (const w of s.wsls) all.push(w.conn.connId);
+  for (const r of s.remotes) all.push(r.conn.connId);
+  const rank = (id: string) => {
+    const i = s.chatHostOrder.indexOf(id);
+    return i < 0 ? s.chatHostOrder.length : i;
+  };
+  return all.sort((a, b) => rank(a) - rank(b));
+}
+
+/** Group the CHAT residents by host — hosts in the EXPLICIT `orderedHosts`
+ *  order (from {@link connectedChatHosts}: canonical local/WSL/remote, plus
+ *  the drag overrides), terminals within a host in their list order. Only
+ *  hosts with agents appear. Usage probes are EXCLUDED (they live behind the
+ *  host button, not in the list). Ordering does NOT depend on which terminal
+ *  opened first, so closing early terminals never reshuffles the hosts.
+ *  Shared by the CHAT panel's dot clusters and the focus view's list. */
+export function chatHostGroups(
+  terminals: TerminalSession[],
+  orderedHosts: string[],
+): { connId: string; terminals: TerminalSession[] }[] {
+  return orderedHosts
+    .map((connId) => ({
+      connId,
+      terminals: terminals.filter(
+        (t) => t.inChat && !t.usageProbe && t.connId === connId,
+      ),
+    }))
+    .filter((g) => g.terminals.length > 0);
+}
+
+/** A user-made "purpose" group in CHAT: a named, colored bucket that holds
+ *  agents pulled from ANY host (move model — a member leaves its host block).
+ *  Dissolving the group returns its agents to their host blocks. */
+export interface ChatPurpose {
+  id: string;
+  name: string;
+  color: string;
+  /** Ordered membership (terminal ids). */
+  termIds: string[];
+}
+
+/** Distinct colors for new purpose groups (neutral, not host identities). */
+export const PURPOSE_COLORS = [
+  "#7aa2f7",
+  "#bb9af7",
+  "#7dcfff",
+  "#9ece6a",
+  "#e0af68",
+  "#f7768e",
+];
+
+export type ChatSection =
+  | {
+      kind: "purpose";
+      id: string;
+      name: string;
+      color: string;
+      terminals: TerminalSession[];
+    }
+  | { kind: "host"; connId: string; terminals: TerminalSession[] };
+
+/** The CHAT layout, purpose-aware: purpose sections first (in their order,
+ *  empty ones kept as drop targets), then the host blocks for every agent NOT
+ *  in a purpose ("uncategorized" — looks exactly like today when there are no
+ *  purposes). Shared by the focus view and the CHAT panel's clusters. */
+export function chatSections(
+  terminals: TerminalSession[],
+  purposes: ChatPurpose[],
+  orderedHosts: string[],
+): ChatSection[] {
+  const resident = (t: TerminalSession) => t.inChat && !t.usageProbe;
+  const byId = new Map(terminals.filter(resident).map((t) => [t.id, t]));
+  const claimed = new Set<string>();
+  const purposeSections: ChatSection[] = purposes.map((p) => {
+    const terms = p.termIds
+      .map((id) => byId.get(id))
+      .filter((t): t is TerminalSession => !!t);
+    terms.forEach((t) => claimed.add(t.id));
+    return {
+      kind: "purpose",
+      id: p.id,
+      name: p.name,
+      color: p.color,
+      terminals: terms,
+    };
+  });
+  const hostSections: ChatSection[] = orderedHosts
+    .map((connId) => ({
+      kind: "host" as const,
+      connId,
+      terminals: terminals.filter(
+        (t) => resident(t) && t.connId === connId && !claimed.has(t.id),
+      ),
+    }))
+    .filter((s) => s.terminals.length > 0);
+  return [...purposeSections, ...hostSections];
 }
 
 /** An OSC title worth showing, or undefined to fall back to the default label.
@@ -423,29 +540,16 @@ function wslMirror(wsls: RemoteWorkspace[]) {
   };
 }
 
-// Host identity colors, keyed by `user@host:port` (remote hosts only — Local
-// and WSL use their section colors). Persisted so prod stays "its" color.
-const HOST_COLORS_KEY = "straylight.hostColors";
-/** Default ramp for newly-seen hosts, by remote slot. Starts at the Remote
- *  section color (NOT red — that's Local's), and stops short of pure green
- *  (`var(--green)` means "tracked repo" in the tree). */
-export const HOST_COLOR_RAMP = ["var(--section-remote)", "#ff8a00", "#d8e626"];
-
-function loadHostColors(): Record<string, string> {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(HOST_COLORS_KEY) ?? "null");
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const out: Record<string, string> = {};
-      for (const [k, v] of Object.entries(parsed)) {
-        if (typeof v === "string") out[k] = v;
-      }
-      return out;
-    }
-  } catch {
-    /* ignore */
-  }
-  return {};
-}
+/** Theme-slot color per remote slot — a warm→cool host spectrum (Local crimson,
+ *  WSL magenta, remotes violet→indigo→blue) so the category reads at a glance.
+ *  Host colors are FIXED to these slots by position: edit their values in the
+ *  Theme UI; right-clicking a remote's host bar swaps its position (slot) with
+ *  another remote. */
+export const HOST_COLOR_RAMP = [
+  "var(--section-remote)",
+  "var(--section-remote-2)",
+  "var(--section-remote-3)",
+];
 
 // Which explorer sections are shown (the L / W / R toggles). Hiding never
 // touches the connection — just the section's rendering.
@@ -555,8 +659,6 @@ interface AppState {
   lastRefreshLocal: number | null;
   lastRefreshRemote: number | null;
   lastRefreshWsl: number | null;
-  /** Identity colors for remote hosts (`user@host:port` → color). */
-  hostColors: Record<string, string>;
   /** Explorer section visibility (the L / W / R header toggles). */
   sections: SectionVisibility;
 
@@ -641,8 +743,9 @@ interface AppState {
   toggleHiddenLocal: () => void;
   toggleHiddenRemote: (connId: string) => void;
   toggleHiddenWsl: (connId: string) => void;
-  /** Set (or null = reset to the auto ramp) a remote host's identity color. */
-  setHostColor: (hostKey: string, color: string | null) => void;
+  /** Swap two remotes' positions in the list — position IS the color slot
+   *  (Remote 1/2/3), so this reassigns both place and identity color. */
+  swapRemotes: (a: number, b: number) => void;
   toggleSection: (which: keyof SectionVisibility) => void;
   refreshLocal: () => void;
   /** Refresh one remote's trees, or all remotes when no id is given. */
@@ -670,6 +773,26 @@ interface AppState {
   /** Panel group-bar order (conn ids; unknown/new conns append). Draggable. */
   termGroupOrder: string[];
   setTermGroupOrder: (order: string[]) => void;
+  /** CHAT host grouping order (conn ids). Draggable in the focus view; shared
+   *  by the CHAT panel's dot clusters. Unknown/new hosts append. */
+  chatHostOrder: string[];
+  setChatHostOrder: (order: string[]) => void;
+  /** User-made purpose groups (in display order). Session-lived, shared by
+   *  the focus view and the CHAT panel. */
+  chatPurposes: ChatPurpose[];
+  addPurpose: (name?: string) => string;
+  renamePurpose: (id: string, name: string) => void;
+  /** Dissolve a group — its agents fall back to their host blocks. */
+  deletePurpose: (id: string) => void;
+  /** Move an agent INTO a group (leaving any other group — the move model). */
+  addToPurpose: (purposeId: string, termId: string) => void;
+  /** Remove an agent from whatever group holds it (back to its host block). */
+  removeFromPurpose: (termId: string) => void;
+  /** Reorder groups — drag a purpose before (or, with `after`, after) another,
+   *  so the last slot is reachable too. */
+  movePurpose: (dragId: string, targetId: string, after?: boolean) => void;
+  /** Reorder a member within its group (drag one agent before another). */
+  reorderInPurpose: (purposeId: string, dragId: string, targetId: string) => void;
   /** The selected group chip (conn id) — in the store so shortcuts can target
    *  it (Ctrl+Shift+` in an empty group). The panel keeps it in step with the
    *  active terminal. */
@@ -748,6 +871,10 @@ interface AppState {
    *  switch). Hiding the column never evicts residents. */
   chatVisible: boolean;
   setChatVisible: (v: boolean) => void;
+  /** Focus view (F11): a full-window CHAT workspace (agent list + the active
+   *  agent's live terminal) overlaying the normal layout. */
+  focusView: boolean;
+  setFocusView: (v: boolean) => void;
   toggleChat: () => void;
   /** The resident currently on screen. */
   chatActiveId: string | null;
@@ -756,8 +883,14 @@ interface AppState {
   moveTerminalToChat: (terminalId: string) => void;
   /** − on the name line: the resident goes back to the bottom panel. */
   returnTerminalFromChat: (terminalId: string) => void;
-  /** ＋ in the chat header: open a fresh shell directly as a resident. */
-  openTerminalInChat: (connId: string, label: string) => void;
+  /** ＋ in the chat header: open a fresh shell directly as a resident. Opts
+   *  cover the usage probe: timed keystrokes, an input lock, auto-close on
+   *  focus-view exit. Returns the new terminal's id. */
+  openTerminalInChat: (
+    connId: string,
+    label: string,
+    opts?: Pick<TerminalSession, "scriptedInput" | "locked" | "usageProbe">,
+  ) => string;
   /** Left→right arrangement of the editor + the two movable columns, after the
    *  pinned explorer. Persisted. */
   dockOrder: DockToken[];
@@ -872,6 +1005,9 @@ interface AppState {
     rename: boolean;
     label: string;
     firstName: string;
+    /** Pre-flight size (from the confirm sheet's fsMeasure) so the bar shows
+     *  the real total immediately and the backend skips a second size walk. */
+    total?: { bytes: number; files: number } | null;
   }) => Promise<void>;
   updateTransferProgress: (progress: TransferProgress) => void;
   cancelActiveTransfer: () => void;
@@ -902,10 +1038,22 @@ interface AppState {
   belled: Record<string, true>;
   markBell: (terminalId: string) => void;
   clearBell: (terminalId: string) => void;
-  /** Terminals producing output right now ("running" — e.g. Claude Code
-   *  working). Set on PTY output, cleared after a short idle. */
+  /** Terminals with output flowing right now (raw signal — includes redraws).
+   *  Set on PTY output, cleared after a short idle. */
   busy: Record<string, true>;
   setBusy: (terminalId: string, on: boolean) => void;
+  /** Terminals genuinely WORKING (a tool streaming a long response) — busy
+   *  that's been SUSTAINED past a chunk threshold, so a click/resize redraw
+   *  never counts. This is the "thinking" signal the focus view animates. */
+  thinking: Record<string, true>;
+  setThinking: (terminalId: string, on: boolean) => void;
+  /** When each terminal STARTED its current thinking spell (ms) — the focus
+   *  view counts seconds up from this while it works. */
+  thinkingSince: Record<string, number>;
+  /** When each terminal last FINISHED (ms) — stamped when a real work spell
+   *  ends (thinking→idle) or on the BEL, both discrete, NEVER on a redraw.
+   *  The focus view shows "Ns ago" from this; it doesn't reset on clicks. */
+  finishedAt: Record<string, number>;
   /** Terminals whose PTY has exited (the backend sends an empty output chunk
    *  when the shell dies). Cleared when a fresh PTY opens (epoch restart). */
   ptyDead: Record<string, true>;
@@ -915,6 +1063,7 @@ interface AppState {
 let noticeId = 0;
 let tabCounter = 0;
 let terminalCounter = 0;
+let purposeCounter = 0;
 
 export const useAppStore = create<AppState>()((set, get) => ({
   localConnId: null,
@@ -957,7 +1106,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   lastRefreshLocal: null,
   lastRefreshRemote: null,
   lastRefreshWsl: null,
-  hostColors: loadHostColors(),
   sections: loadSections(),
 
   terminals: [],
@@ -1200,17 +1348,20 @@ export const useAppStore = create<AppState>()((set, get) => ({
         ),
       ),
     ),
-  setHostColor: (hostKey, color) =>
+  swapRemotes: (a, b) =>
     set((s) => {
-      const hostColors = { ...s.hostColors };
-      if (color === null) delete hostColors[hostKey];
-      else hostColors[hostKey] = color;
-      try {
-        localStorage.setItem(HOST_COLORS_KEY, JSON.stringify(hostColors));
-      } catch {
-        /* ignore */
+      if (
+        a === b ||
+        a < 0 ||
+        b < 0 ||
+        a >= s.remotes.length ||
+        b >= s.remotes.length
+      ) {
+        return {};
       }
-      return { hostColors };
+      const remotes = [...s.remotes];
+      [remotes[a], remotes[b]] = [remotes[b], remotes[a]];
+      return { remotes };
     }),
   toggleSection: (which) =>
     set((s) => {
@@ -1307,9 +1458,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
       };
     }),
 
-  openTerminalInChat: (connId, label) =>
+  openTerminalInChat: (connId, label, opts) => {
+    const id = `term-${(terminalCounter += 1)}`;
     set((s) => {
-      const id = `term-${(terminalCounter += 1)}`;
       let title = label;
       let n = 1;
       while (s.terminals.some((t) => t.connId === connId && t.title === title)) {
@@ -1322,6 +1473,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         title,
         command: null,
         initialInput: null,
+        ...opts,
         epoch: 0,
         inChat: true,
       };
@@ -1332,7 +1484,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
         chatActiveId: id,
         chatVisible: true,
       };
-    }),
+    });
+    return id;
+  },
 
   closeTerminal: (id) =>
     set((s) => {
@@ -1375,7 +1529,22 @@ export const useAppStore = create<AppState>()((set, get) => ({
         ptyDead = { ...ptyDead };
         delete ptyDead[id];
       }
-      return { terminals, activeTerminalId, chatActiveId, belled, busy, ptyDead };
+      // Drop the closed agent from any purpose group it belonged to.
+      const chatPurposes = s.chatPurposes.some((p) => p.termIds.includes(id))
+        ? s.chatPurposes.map((p) => ({
+            ...p,
+            termIds: p.termIds.filter((t) => t !== id),
+          }))
+        : s.chatPurposes;
+      return {
+        terminals,
+        activeTerminalId,
+        chatActiveId,
+        belled,
+        busy,
+        ptyDead,
+        chatPurposes,
+      };
     }),
 
   setActiveTerminal: (activeTerminalId) =>
@@ -1385,6 +1554,77 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   termGroupOrder: [],
   setTermGroupOrder: (termGroupOrder) => set({ termGroupOrder }),
+  chatHostOrder: [],
+  setChatHostOrder: (chatHostOrder) => set({ chatHostOrder }),
+
+  chatPurposes: [],
+  addPurpose: (name) => {
+    const id = `grp-${(purposeCounter += 1)}`;
+    set((s) => {
+      const color = PURPOSE_COLORS[s.chatPurposes.length % PURPOSE_COLORS.length];
+      return {
+        chatPurposes: [
+          ...s.chatPurposes,
+          {
+            id,
+            name: name?.trim() || `IN PROGRESS ${s.chatPurposes.length + 1}`,
+            color,
+            termIds: [],
+          },
+        ],
+      };
+    });
+    return id;
+  },
+  renamePurpose: (id, name) =>
+    set((s) => ({
+      chatPurposes: s.chatPurposes.map((p) =>
+        p.id === id ? { ...p, name: name.trim() || p.name } : p,
+      ),
+    })),
+  deletePurpose: (id) =>
+    set((s) => ({ chatPurposes: s.chatPurposes.filter((p) => p.id !== id) })),
+  addToPurpose: (purposeId, termId) =>
+    set((s) => ({
+      chatPurposes: s.chatPurposes.map((p) =>
+        p.id === purposeId
+          ? { ...p, termIds: [...p.termIds.filter((t) => t !== termId), termId] }
+          : { ...p, termIds: p.termIds.filter((t) => t !== termId) },
+      ),
+    })),
+  removeFromPurpose: (termId) =>
+    set((s) => ({
+      chatPurposes: s.chatPurposes.map((p) => ({
+        ...p,
+        termIds: p.termIds.filter((t) => t !== termId),
+      })),
+    })),
+  movePurpose: (dragId, targetId, after) =>
+    set((s) => {
+      if (dragId === targetId) return {};
+      const order = [...s.chatPurposes];
+      const from = order.findIndex((p) => p.id === dragId);
+      if (from < 0) return {};
+      const [moved] = order.splice(from, 1);
+      let to = order.findIndex((p) => p.id === targetId);
+      if (to < 0) return { chatPurposes: [...order, moved] };
+      if (after) to += 1;
+      order.splice(to, 0, moved);
+      return { chatPurposes: order };
+    }),
+  reorderInPurpose: (purposeId, dragId, targetId) =>
+    set((s) => ({
+      chatPurposes: s.chatPurposes.map((p) => {
+        if (p.id !== purposeId) return p;
+        const ids = [...p.termIds];
+        const from = ids.indexOf(dragId);
+        const to = ids.indexOf(targetId);
+        if (from < 0 || to < 0 || from === to) return p;
+        ids.splice(from, 1);
+        ids.splice(ids.indexOf(targetId), 0, dragId);
+        return { ...p, termIds: ids };
+      }),
+    })),
   termGroup: null,
   setTermGroup: (termGroup) => set({ termGroup }),
   termListMini: false,
@@ -1652,6 +1892,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
       );
     }),
 
+  focusView: false,
+  setFocusView: (focusView) => set({ focusView }),
   chatVisible: localStorage.getItem(CHAT_VIS_KEY) === "1",
   setChatVisible: (chatVisible) => {
     persistChatVisible(chatVisible);
@@ -2039,15 +2281,19 @@ export const useAppStore = create<AppState>()((set, get) => ({
     rename,
     label,
     firstName,
+    total,
   }) => {
     set({
       activeTransfer: {
         id: transferId,
         label,
         doneBytes: 0,
-        totalBytes: 0,
+        // Seed the total from the pre-flight so the bar shows "X / total"
+        // straight away; 0 (unknown) makes the bar read "Preparing…" until the
+        // backend's own measure lands.
+        totalBytes: total?.bytes ?? 0,
         doneFiles: 0,
-        totalFiles: 0,
+        totalFiles: total?.files ?? 0,
         current: "",
       },
     });
@@ -2059,6 +2305,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         destConnId,
         destDir,
         rename,
+        total,
       );
       // Refresh whichever section owns the destination (explorer + any panel).
       get().refreshConn(destConnId);
@@ -2068,11 +2315,19 @@ export const useAppStore = create<AppState>()((set, get) => ({
           `Transfer cancelled — ${outcome.files} file${outcome.files === 1 ? "" : "s"} copied`,
         );
       } else {
-        // Symlinked directories are skipped (a link cycle would loop forever);
-        // say so rather than reporting a silent partial copy.
-        const skipped = outcome.skippedLinks
-          ? ` (${outcome.skippedLinks} linked folder${outcome.skippedLinks === 1 ? "" : "s"} skipped)`
-          : "";
+        // Report anything skipped rather than passing off a silent partial
+        // copy: symlinked dirs (link cycles) and unreadable entries (dangling
+        // links, broken gitlinks) both get named.
+        const parts: string[] = [];
+        if (outcome.skippedLinks)
+          parts.push(
+            `${outcome.skippedLinks} linked folder${outcome.skippedLinks === 1 ? "" : "s"}`,
+          );
+        if (outcome.skippedErrors)
+          parts.push(
+            `${outcome.skippedErrors} unreadable item${outcome.skippedErrors === 1 ? "" : "s"}`,
+          );
+        const skipped = parts.length ? ` (${parts.join(", ")} skipped)` : "";
         get().pushNotice(
           "info",
           (outcome.files === 1
@@ -2170,9 +2425,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   belled: {},
   markBell: (terminalId) =>
-    set((s) =>
-      s.belled[terminalId] ? {} : { belled: { ...s.belled, [terminalId]: true } },
-    ),
+    set((s) => ({
+      // The BEL is the reliable "finished / your turn" moment — stamp the
+      // completion time here (stable) so the focus view's "Ns ago" doesn't
+      // reset on redraws, and mark it belled (unread) unless already so.
+      belled: s.belled[terminalId]
+        ? s.belled
+        : { ...s.belled, [terminalId]: true },
+      finishedAt: { ...s.finishedAt, [terminalId]: Date.now() },
+    })),
   clearBell: (terminalId) =>
     set((s) => {
       if (!s.belled[terminalId]) return {};
@@ -2182,6 +2443,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }),
 
   busy: {},
+  thinking: {},
+  thinkingSince: {},
+  finishedAt: {},
   setBusy: (terminalId, on) =>
     set((s) => {
       if (on) {
@@ -2193,6 +2457,27 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const busy = { ...s.busy };
       delete busy[terminalId];
       return { busy };
+    }),
+  setThinking: (terminalId, on) =>
+    set((s) => {
+      if (on) {
+        return s.thinking[terminalId]
+          ? {}
+          : {
+              thinking: { ...s.thinking, [terminalId]: true },
+              thinkingSince: { ...s.thinkingSince, [terminalId]: Date.now() },
+            };
+      }
+      if (!s.thinking[terminalId]) return {};
+      const thinking = { ...s.thinking };
+      delete thinking[terminalId];
+      // A real work spell just ended — a completion moment (the BEL, if one
+      // rings, restamps the same instant). Redraws never set thinking, so
+      // this can't fire on a click/resize.
+      return {
+        thinking,
+        finishedAt: { ...s.finishedAt, [terminalId]: Date.now() },
+      };
     }),
 
   ptyDead: {},

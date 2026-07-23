@@ -9,6 +9,7 @@ import { hostColorForConnKey, SECTION_LOCAL, SECTION_WSL } from "../../lib/hostC
 import { fsTransferCheck } from "../../lib/ipc";
 import type { DragItem } from "../../lib/transferDrag";
 import { remoteHostKey, useAppStore } from "../../store/appStore";
+import { TransferConfirm, type TransferTotal } from "./TransferConfirm";
 import { TransferPane } from "./TransferPane";
 import { TransferProgressBar } from "./TransferProgressBar";
 import type { TransferConn } from "./TransferPanel";
@@ -26,7 +27,6 @@ export function TransfersView() {
   const pinnedFolders = useAppStore((s) => s.pinnedFolders);
   const wsls = useAppStore((s) => s.wsls);
   const remotes = useAppStore((s) => s.remotes);
-  const hostColors = useAppStore((s) => s.hostColors);
   const pushNotice = useAppStore((s) => s.pushNotice);
   const runTransfer = useAppStore((s) => s.runTransfer);
   const setTransferOpen = useAppStore((s) => s.setTransferOpen);
@@ -39,14 +39,14 @@ export function TransfersView() {
       connId: w.conn.connId,
       roots: w.pins,
       label: w.conn.name,
-      color: hostColors[`wsl:${w.conn.name}`] ?? SECTION_WSL,
+      color: SECTION_WSL,
     });
   for (const r of remotes)
     conns.push({
       connId: r.conn.connId,
       roots: r.pins,
       label: r.conn.name,
-      color: hostColorForConnKey(hostColors, remoteHostKey(r.conn)),
+      color: hostColorForConnKey(remoteHostKey(r.conn)),
     });
 
   const [sides, setSides] = useState(remembered);
@@ -63,6 +63,14 @@ export function TransfersView() {
     name: string;
     resolve: (c: Choice) => void;
   } | null>(null);
+  const [sheet, setSheet] = useState<{
+    items: DragItem[];
+    srcConnId: string;
+    srcLabel: string;
+    destLabel: string;
+    destDir: string;
+    resolve: (r: { total: TransferTotal | null } | null) => void;
+  } | null>(null);
   const busyRef = useRef(false);
 
   // While shown, the panes own F2/Delete (not the explorer selection).
@@ -72,12 +80,39 @@ export function TransfersView() {
   }, [setTransferOpen]);
 
   async function onDropInto(items: DragItem[], destConnId: string, destDir: string) {
-    if (busyRef.current || useAppStore.getState().activeTransfer) return;
     const xfer = items.filter((it) => it.connId !== destConnId);
     if (!xfer.length) return;
+    // A confirm sheet / collision prompt is already up for a prior drop — it's
+    // visible, so just ignore this one silently.
+    if (busyRef.current) return;
+    // A transfer is mid-flight. We only run one at a time; say so, otherwise the
+    // dropped drag looks like it silently vanished.
+    if (useAppStore.getState().activeTransfer) {
+      pushNotice("info", "A transfer is already running — let it finish first.");
+      return;
+    }
     const srcConnId = xfer[0].connId;
+    const label = (id: string) => connFor(id)?.label ?? "?";
     busyRef.current = true;
     try {
+      // 1. Confirm sheet — route + a size that fills in while scanning. Returns
+      //    null on cancel, else the pre-flight total (null if committed before
+      //    the scan finished, so the backend measures instead).
+      const confirmed = await new Promise<{ total: TransferTotal | null } | null>(
+        (resolve) =>
+          setSheet({
+            items: xfer,
+            srcConnId,
+            srcLabel: label(srcConnId),
+            destLabel: label(destConnId),
+            destDir,
+            resolve,
+          }),
+      );
+      setSheet(null);
+      if (!confirmed) return;
+
+      // 2. Collision prompt (unchanged) — after the intent is confirmed.
       let anyCollide = false;
       for (const it of xfer) {
         if (await fsTransferCheck(it.path, destConnId, destDir)) {
@@ -94,7 +129,7 @@ export function TransfersView() {
         if (choice === "cancel") return;
         rename = choice === "keepBoth";
       }
-      const label = (id: string) => connFor(id)?.label ?? "?";
+      // 3. Transfer — reuse the pre-flight size when we have it.
       void runTransfer({
         transferId: crypto.randomUUID(),
         srcConnId,
@@ -104,6 +139,7 @@ export function TransfersView() {
         rename,
         label: `${label(srcConnId)} → ${label(destConnId)}`,
         firstName: xfer[0].name,
+        total: confirmed.total,
       });
     } catch (e) {
       pushNotice("error", `Transfer failed: ${String(e)}`);
@@ -161,6 +197,17 @@ export function TransfersView() {
         {side("right", right)}
       </div>
       <TransferProgressBar variant="panel" />
+      {sheet && (
+        <TransferConfirm
+          items={sheet.items}
+          srcConnId={sheet.srcConnId}
+          srcLabel={sheet.srcLabel}
+          destLabel={sheet.destLabel}
+          destDir={sheet.destDir}
+          onCancel={() => sheet.resolve(null)}
+          onConfirm={(total) => sheet.resolve({ total })}
+        />
+      )}
       {conflict && (
         <div className="transfer-conflict">
           <div className="transfer-conflict__text">

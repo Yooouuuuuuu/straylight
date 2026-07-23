@@ -10,9 +10,11 @@ import {
   type ReactNode,
 } from "react";
 
-import { commitRename } from "../../lib/fileOps";
+import { commitRename, dropIntoDir } from "../../lib/fileOps";
 import { fsEntryMeta, fsListDir, type FileEntry } from "../../lib/ipc";
 import { openRemoteFile } from "../../lib/openFile";
+import { canDropInto, getTreeDrag, setTreeDrag } from "../../lib/treeDrag";
+import type { DragItem } from "../../lib/transferDrag";
 import {
   registerTreeRoot,
   selectionRange,
@@ -127,6 +129,32 @@ export function RootTree({
     [connId, rootPath],
   );
   const [dirs, setDirs] = useState<Record<string, DirState>>({});
+  // In-host drag/drop: the Move/Copy/Cancel popup, and the root-header highlight.
+  const [dropMenu, setDropMenu] = useState<{
+    x: number;
+    y: number;
+    destDir: string;
+    destName: string;
+    nodes: DragItem[];
+  } | null>(null);
+  const [dropOverRoot, setDropOverRoot] = useState(false);
+
+  // Record the drag set on drag start: the whole selection if this row is part
+  // of it (same host), else just this row.
+  const startNodeDrag = useCallback(
+    (entry: FileEntry) => {
+      const sel = useAppStore.getState().selection;
+      const inSel = sel.some((n) => n.connId === connId && n.path === entry.path);
+      const set: DragItem[] =
+        inSel && sel.length
+          ? sel
+              .filter((n) => n.connId === connId)
+              .map((n) => ({ connId, path: n.path, name: n.name, isDir: n.isDir }))
+          : [{ connId, path: entry.path, name: entry.name, isDir: entry.isDir }];
+      setTreeDrag(set);
+    },
+    [connId],
+  );
   // The root's own metadata, so its header tip shows the same file info as
   // every row (path + mode/ownership + date). Best-effort; path-only until it
   // arrives.
@@ -334,6 +362,16 @@ export function RootTree({
     updateTreeRows(rootId, navRows);
   }, [rootId, navRows]);
 
+  // Esc dismisses the drag-drop Move/Copy popup (backdrop click does too).
+  useEffect(() => {
+    if (!dropMenu) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDropMenu(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dropMenu]);
+
   const rootSelected =
     selected?.connId === connId && selected?.path === rootPath;
   const headerRef = useRef<HTMLDivElement>(null);
@@ -404,6 +442,16 @@ export function RootTree({
           }
           onCommitRename={(name) => void commitRename(connId, entry.path, name)}
           onCancelRename={() => cancelRename()}
+          onDragStartNode={() => startNodeDrag(entry)}
+          onDropInto={(x, y) =>
+            setDropMenu({
+              x,
+              y,
+              destDir: entry.path,
+              destName: entry.name,
+              nodes: getTreeDrag(),
+            })
+          }
         />,
       );
       if (entry.isDir && isExpanded) {
@@ -419,10 +467,37 @@ export function RootTree({
     <div className="root-tree">
       <div
         ref={headerRef}
-        className={`root-tree__header ${rootSelected ? "root-tree__header--active" : ""}`}
+        className={`root-tree__header ${rootSelected ? "root-tree__header--active" : ""} ${
+          dropOverRoot ? "root-tree__header--dropinto" : ""
+        }`}
         onClick={() => {
           setSelected({ connId, path: rootPath, name: label, isDir: true });
           setCollapsed((c) => !c);
+        }}
+        onDragOver={(e) => {
+          if (canDropInto(connId, rootPath)) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            if (!dropOverRoot) setDropOverRoot(true);
+          } else {
+            e.dataTransfer.dropEffect = "none";
+          }
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropOverRoot(false);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDropOverRoot(false);
+          if (canDropInto(connId, rootPath)) {
+            setDropMenu({
+              x: e.clientX,
+              y: e.clientY,
+              destDir: rootPath,
+              destName: label,
+              nodes: getTreeDrag(),
+            });
+          }
         }}
       >
         <span
@@ -492,6 +567,50 @@ export function RootTree({
             renderDir(rootPath, 0)
           )}
         </div>
+      )}
+
+      {dropMenu && (
+        <>
+          <div
+            className="drop-menu__backdrop"
+            onMouseDown={() => setDropMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setDropMenu(null);
+            }}
+          />
+          <div className="context-menu" style={{ left: dropMenu.x, top: dropMenu.y }}>
+            <div className="context-menu__head">
+              Into “{dropMenu.destName}”
+            </div>
+            <button
+              className="context-menu__item"
+              onClick={() => {
+                const m = dropMenu;
+                setDropMenu(null);
+                void dropIntoDir("move", connId, m.nodes, m.destDir);
+              }}
+            >
+              Move here
+              {dropMenu.nodes.length > 1 && ` (${dropMenu.nodes.length})`}
+            </button>
+            <button
+              className="context-menu__item"
+              onClick={() => {
+                const m = dropMenu;
+                setDropMenu(null);
+                void dropIntoDir("copy", connId, m.nodes, m.destDir);
+              }}
+            >
+              Copy here
+              {dropMenu.nodes.length > 1 && ` (${dropMenu.nodes.length})`}
+            </button>
+            <div className="context-menu__sep" />
+            <button className="context-menu__item" onClick={() => setDropMenu(null)}>
+              Cancel
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

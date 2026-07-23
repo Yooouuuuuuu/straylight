@@ -38,10 +38,10 @@ export function VcsLogTabHead({
   backend: string;
 }) {
   const repos = useVcsStore((s) => s.repos);
-  const hostColors = useAppStore((s) => s.hostColors);
+  useAppStore((s) => s.remotes); // host colors are positional — re-render on reorder
   const repo = repos.find((r) => r.connId === connId && r.root === root);
   const color = repo
-    ? hostColorForConnKey(hostColors, repo.connKey)
+    ? hostColorForConnKey(repo.connKey)
     : "var(--border)";
   return (
     <>

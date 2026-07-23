@@ -1,9 +1,9 @@
 /** Right-click menu for a file-tree node. Closes on outside click / Escape. */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { copyPath, pasteInto } from "../../lib/fileOps";
+import { copyPath, downloadToLocal, pasteInto } from "../../lib/fileOps";
 import { dirname } from "../../lib/format";
-import { fsTransferBatch } from "../../lib/ipc";
+import { revealPath } from "../../lib/ipc";
 import { useAppStore } from "../../store/appStore";
 import { Tip } from "../Tooltip";
 
@@ -134,37 +134,14 @@ export function ContextMenu() {
       </button>
       <div className="context-menu__sep" />
       {menu.connId !== useAppStore.getState().localConnId && (
-        <Tip label="Copies to your Downloads folder">
+        <Tip label="Downloads to your local machine (Preferences → Download folder)">
         <button
           className="context-menu__item"
           onClick={() => {
             closeContextMenu();
             const sel = selection.filter((n) => n.connId === menu.connId);
             const paths = sel.length ? sel.map((n) => n.path) : [menu.path];
-            void (async () => {
-              const store = useAppStore.getState();
-              try {
-                const { downloadDir } = await import("@tauri-apps/api/path");
-                const dest = await downloadDir();
-                const outcome = await fsTransferBatch(
-                  `dl-${Date.now()}`,
-                  menu.connId,
-                  paths,
-                  store.localConnId!,
-                  dest,
-                  true,
-                );
-                const skipped = outcome.skippedLinks
-                  ? ` (${outcome.skippedLinks} linked folder${outcome.skippedLinks === 1 ? "" : "s"} skipped)`
-                  : "";
-                store.pushNotice(
-                  "info",
-                  `Downloaded ${paths.length} item(s) to Downloads.${skipped}`,
-                );
-              } catch (e) {
-                store.pushNotice("error", `Download failed: ${String(e)}`);
-              }
-            })();
+            void downloadToLocal(menu.connId, paths);
           }}
         >
           Download{selection.length > 1 && ` (${selection.length})`}
@@ -184,6 +161,17 @@ export function ContextMenu() {
       >
         Copy Path
       </button>
+      {menu.connId === useAppStore.getState().localConnId && (
+        <button
+          className="context-menu__item"
+          onClick={() => {
+            closeContextMenu();
+            void revealPath(menu.path);
+          }}
+        >
+          Reveal in file manager
+        </button>
+      )}
       <div className="context-menu__sep" />
       <button
         className="context-menu__item"

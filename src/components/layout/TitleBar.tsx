@@ -6,16 +6,17 @@ import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import appIcon from "../../assets/icon.png";
-import { remoteColor } from "../../lib/hostColors";
 import { openFileByPath } from "../../lib/openFile";
 import {
   confirmEnabled,
   disableConfirm,
   settingsFilePath,
 } from "../../lib/settings";
+import { toggleFocusView } from "../../lib/focusMode";
 import { applyTheme, savedThemeNames } from "../../lib/themes";
 import { useDialogKeys } from "../../hooks/useDialogKeys";
 import { useAppStore } from "../../store/appStore";
+import { ConnectionGauge } from "../ConnectionGauge";
 import {
   IconClose,
   IconMaximize,
@@ -39,7 +40,6 @@ function Logo({ size = 16 }: { size?: number }) {
 
 export function TitleBar() {
   const remote = useAppStore((s) => s.remote);
-  const hostColors = useAppStore((s) => s.hostColors);
   const settingsIssues = useAppStore((s) => s.settingsIssues);
   const [menuOpen, setMenuOpen] = useState(false);
   const [exitAsk, setExitAsk] = useState(false);
@@ -88,9 +88,6 @@ export function TitleBar() {
   // Keyboard contract from the shared hook: Enter closes (primary), Esc
   // stays, Tab/arrows cycle checkbox + buttons, focus trapped + restored.
   const dlg = useDialogKeys(() => setExitAsk(false), exitAsk);
-  // The window carries its remote's identity color (host bars use the same).
-  const accent = remote ? remoteColor(hostColors, remote) : "transparent";
-
   // Native title = the connected host, so the taskbar and Alt+Tab can tell
   // windows apart (the in-window title bar is custom-drawn).
   useEffect(() => {
@@ -108,7 +105,10 @@ export function TitleBar() {
   };
 
   return (
-    <header className="titlebar" style={{ borderLeftColor: accent }}>
+    <header className="titlebar">
+      {/* Two clusters positioned over the explorer's W and R toggles
+          (--gauge-w-x / --gauge-r-x, derived from the sidebar width). */}
+      <ConnectionGauge />
       <div className="titlebar__drag" data-tauri-drag-region>
         <div className="titlebar__brand" data-tauri-drag-region>
           <Logo />
@@ -138,6 +138,11 @@ export function TitleBar() {
             onClick={() => setMenuOpen((v) => !v)}
           >
             ⚙
+          </button>
+        </Tip>
+        <Tip label="Session focus mode (F11)">
+          <button className="titlebar__btn" onClick={() => toggleFocusView()}>
+            ⛶
           </button>
         </Tip>
         {menuOpen && (

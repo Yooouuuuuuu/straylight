@@ -38,7 +38,6 @@ export function TerminalPanel() {
   const remotes = useAppStore((s) => s.remotes);
   const wsls = useAppStore((s) => s.wsls);
   const localConnId = useAppStore((s) => s.localConnId);
-  const hostColors = useAppStore((s) => s.hostColors);
   const terminals = useAppStore((s) => s.terminals);
   const activeTerminalId = useAppStore((s) => s.activeTerminalId);
   const openTerminal = useAppStore((s) => s.openTerminal);
@@ -105,21 +104,21 @@ export function TerminalPanel() {
         connId: w.conn.connId,
         key: `wsl:${w.conn.name}`,
         label: w.conn.name,
-        color: hostColors[`wsl:${w.conn.name}`] ?? SECTION_WSL,
+        color: SECTION_WSL,
       });
     for (const r of remotes)
       all.push({
         connId: r.conn.connId,
         key: remoteHostKey(r.conn),
         label: r.conn.name,
-        color: remoteColor(hostColors, r.conn),
+        color: remoteColor(r.conn),
       });
     const rank = (id: string) => {
       const i = termGroupOrder.indexOf(id);
       return i < 0 ? termGroupOrder.length : i;
     };
     return [...all].sort((a, b) => rank(a.connId) - rank(b.connId));
-  }, [localConnId, wsls, remotes, hostColors, termGroupOrder]);
+  }, [localConnId, wsls, remotes, termGroupOrder]);
 
   const activeConn =
     terminals.find((t) => t.id === activeTerminalId)?.connId ?? null;
@@ -324,6 +323,8 @@ export function TerminalPanel() {
                 active={terminalView === "terminals" && t.id === activeTerminalId}
                 command={t.command}
                 initialInput={t.initialInput ?? null}
+                scriptedInput={t.scriptedInput ?? null}
+                locked={!!t.locked}
               />
             </div>
           ))}
@@ -455,7 +456,7 @@ export function TerminalPanel() {
                       )}
                       {(!uiConfig.disableChat ||
                         terminals.some((x) => x.inChat)) && (
-                        <Tip label="Move to CHAT (shell keeps running)">
+                        <Tip label="Move to Sessions (shell keeps running)">
                           <button
                             className="terminal-entry__close terminal-entry__move"
                             onClick={(e) => {

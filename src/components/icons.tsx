@@ -570,6 +570,34 @@ export function IconFolderPlus({ size = 16, className }: IconProps) {
   );
 }
 
+/** Stacked layers — "make a new group / collection". */
+export function IconLayers({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M8 2.5 14 5.5 8 8.5 2 5.5 8 2.5Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M2.5 8 8 10.75 13.5 8"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M2.5 10.5 8 13.25 13.5 10.5"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function IconTransfer({ size = 16, className }: IconProps) {
   return (
     <svg {...svgProps(size)} className={className}>

@@ -17,6 +17,16 @@ file tree for that host, and hidden-files toggle. Left pane defaults to Local.
   or select + copy/paste between panes. There is deliberately **no cut/move
   across connections** — a failed cross-host move can lose data, so it must
   never exist here.
+- **Confirm before it goes.** Dropping/pasting opens a small sheet — source →
+  destination, the items, and a size that fills in while the source is scanned
+  (`fs_transfer_measure`, the copy walk's exact rules). Copy is enabled from the
+  first frame, so a deep tree never blocks the decision. **The copy never waits
+  on a blocking size pre-pass:** wait for the scan and its size is handed to
+  `fs_transfer_batch`, which skips its own walk (bar shows the total at once);
+  commit early and the copy starts immediately while a lightweight measure runs
+  *alongside* it (`tokio::join!`), so the bar reads `N copied · calculating…`
+  until the total lands. The measure is metadata-only, so it settles early in
+  the copy.
 - **Collisions** prompt once: **Overwrite / Keep both / Cancel**. "Keep both"
   uniquifies (`name copy`); "Overwrite" writes in place / merges into an
   existing folder; nested collisions overwrite/merge.
@@ -52,6 +62,11 @@ files in RAM behind a 512 MB limit; streaming replaced it.)
   otherwise recurse forever; symlinks to files still copy as regular files, and
   the count of skipped links is reported in the completion toast. (The measure
   and copy walks apply the same skip, so totals match.)
+- **Unreadable entries are skipped, not fatal.** A source entry that can't be
+  stat'd or listed — a dangling symlink, a broken submodule gitlink, a vanished
+  path — is skipped and counted (reported next to skipped links) instead of
+  aborting the batch. Both the measure and copy walks tolerate it, so one bad
+  entry no longer takes the rest of the selection down with it.
 
 WSL is its own transport, so a WSL ⇄ remote copy is relayed through the app
 (read one SSH endpoint, write the other). SSH-level `zlib` compression, when

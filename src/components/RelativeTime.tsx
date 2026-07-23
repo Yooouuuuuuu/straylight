@@ -18,6 +18,21 @@ export function formatAgo(seconds: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+/** Compact, low-pressure form for the focus view: "now" under a minute, then
+ *  Nm, then Nh (no seconds count-up, no days rollover). */
+export function formatAgoCompact(seconds: number): string {
+  if (seconds < 60) return "now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  return `${Math.floor(minutes / 60)}h`;
+}
+
+/** Live thinking timer: seconds while under an hour, then Nh. */
+export function formatThinking(seconds: number): string {
+  if (seconds < 3600) return `${seconds}s`;
+  return `${Math.floor(seconds / 3600)}h`;
+}
+
 /** How long until the displayed value could next change, given the current age. */
 function nextTickMs(seconds: number): number {
   if (seconds < 10) return (10 - seconds) * 1_000; // one hop to the bucket edge
@@ -30,10 +45,18 @@ function nextTickMs(seconds: number): number {
 export function RelativeTime({
   at,
   title = "Last refreshed",
+  compact = false,
+  thinking = false,
+  className = "sidebar__section-ago",
 }: {
   at: number | null;
   /** Native tooltip; pass null when a parent Tip already covers it. */
   title?: string | null;
+  /** Low-pressure "now / Nm / Nh" form (formatAgoCompact). */
+  compact?: boolean;
+  /** Live seconds count-up ("Ns", then Nh) — the thinking timer. */
+  thinking?: boolean;
+  className?: string;
 }) {
   const [, bump] = useState(0);
 
@@ -42,19 +65,28 @@ export function RelativeTime({
     let timer: number;
     const schedule = () => {
       const seconds = Math.max(0, Math.floor((Date.now() - at) / 1000));
+      // Thinking ticks every second (up to an hour), otherwise slow down.
+      const wait =
+        thinking && seconds < 3600 ? 1_000 : nextTickMs(seconds);
       timer = window.setTimeout(() => {
         bump((n) => n + 1);
         schedule();
-      }, nextTickMs(seconds));
+      }, wait);
     };
     schedule();
     return () => window.clearTimeout(timer);
-  }, [at]);
+  }, [at, thinking]);
 
   if (at == null) return null;
   const seconds = Math.max(0, Math.floor((Date.now() - at) / 1000));
   const span = (
-    <span className="sidebar__section-ago">{formatAgo(seconds)}</span>
+    <span className={className}>
+      {thinking
+        ? formatThinking(seconds)
+        : compact
+          ? formatAgoCompact(seconds)
+          : formatAgo(seconds)}
+    </span>
   );
   return title ? <Tip label={title}>{span}</Tip> : span;
 }

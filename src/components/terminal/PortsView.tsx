@@ -25,7 +25,6 @@ export function PortsView() {
   const localConnId = useAppStore((s) => s.localConnId);
   const wsls = useAppStore((s) => s.wsls);
   const remotes = useAppStore((s) => s.remotes);
-  const hostColors = useAppStore((s) => s.hostColors);
   const setTerminalView = useAppStore((s) => s.setTerminalView);
   const setForwardPrefill = useAppStore((s) => s.setForwardPrefill);
   const setPortCounts = useAppStore((s) => s.setPortCounts);
@@ -43,14 +42,14 @@ export function PortsView() {
       connId: w.conn.connId,
       key: `wsl:${w.conn.name}`,
       host: w.conn.name,
-      color: hostColors[`wsl:${w.conn.name}`] ?? SECTION_WSL,
+      color: SECTION_WSL,
     });
   for (const r of remotes)
     hosts.push({
       connId: r.conn.connId,
       key: remoteHostKey(r.conn),
       host: r.conn.name,
-      color: hostColorForConnKey(hostColors, remoteHostKey(r.conn)),
+      color: hostColorForConnKey(remoteHostKey(r.conn)),
     });
 
   const ignored = new Set(panelsConfig.portsIgnoreHosts);

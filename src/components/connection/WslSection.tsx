@@ -1,11 +1,11 @@
 /** Sidebar WSL section, mirroring the Remote section's shape: a permanent
  *  "WSL" bar; every connected distro (up to MAX_WSLS) appears as a colored
- *  host bar underneath (`user@distro`, toolbar, right-click color menu), with
- *  the distro list behind the bar's + for attaching more. Connecting
- *  provisions an sshd inside the distro (see docs/wsl-connection.md). */
+ *  host bar underneath (`user@distro`, toolbar), with the distro list behind
+ *  the bar's + for attaching more. All distros share the WSL section color.
+ *  Connecting provisions an sshd inside the distro (see
+ *  docs/wsl-connection.md). */
 import { useCallback, useEffect, useState } from "react";
 
-import { PALETTE, paletteName } from "../../lib/connectionColor";
 import { connStateTip } from "../../lib/hostColors";
 import { basename, dirname } from "../../lib/format";
 import {
@@ -16,7 +16,6 @@ import {
 } from "../../lib/ipc";
 import { connectWslDistro } from "../../lib/wslSession";
 import {
-  HOST_COLOR_RAMP,
   MAX_WSLS,
   useAppStore,
   type RemoteWorkspace,
@@ -37,8 +36,9 @@ import {
 
 const WSL_COLOR = "var(--section-wsl)";
 
-/** One connected distro: host bar (state dot, color menu, disconnect),
- *  host-tools line, and its pinned-folder trees. */
+/** One connected distro: host bar (state dot, disconnect), host-tools line,
+ *  and its pinned-folder trees. All distros share the WSL section color —
+ *  edit it in the Theme UI. */
 function WslHost({ ws, order }: { ws: RemoteWorkspace; order: number }) {
   const addWslPin = useAppStore((s) => s.addWslPin);
   const removeWslPin = useAppStore((s) => s.removeWslPin);
@@ -47,15 +47,11 @@ function WslHost({ ws, order }: { ws: RemoteWorkspace; order: number }) {
   const refreshWsl = useAppStore((s) => s.refreshWsl);
   const selected = useAppStore((s) => s.selected);
   const openNewEntry = useAppStore((s) => s.openNewEntry);
-  const hostColors = useAppStore((s) => s.hostColors);
-  const setHostColor = useAppStore((s) => s.setHostColor);
 
   const [browsing, setBrowsing] = useState(false);
-  const [colorMenu, setColorMenu] = useState(false);
 
   const conn = ws.conn;
-  const wslKey = `wsl:${conn.name}`;
-  const hostColor = hostColors[wslKey] ?? WSL_COLOR;
+  const hostColor = WSL_COLOR;
   const newParent =
     selected && selected.connId === conn.connId
       ? selected.isDir
@@ -79,44 +75,10 @@ function WslHost({ ws, order }: { ws: RemoteWorkspace; order: number }) {
       <div
         className="host-bar"
         style={{ "--host-color": hostColor } as React.CSSProperties}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          setColorMenu((o) => !o);
-        }}
       >
-        {colorMenu && (
-          <div className="color-menu">
-            <span className="color-menu__label">{wslKey}</span>
-            {[...HOST_COLOR_RAMP, ...PALETTE].map((c) => (
-              <Tip key={c} label={c.startsWith("var(") ? paletteName(c) : c}>
-                <button
-                  className="color-menu__swatch"
-                  style={{ background: c }}
-                  onClick={() => {
-                    setHostColor(wslKey, c);
-                    setColorMenu(false);
-                  }}
-                />
-              </Tip>
-            ))}
-            <Tip label="Back to the section color">
-              <button
-                className="color-menu__reset"
-                onClick={() => {
-                  setHostColor(wslKey, null);
-                  setColorMenu(false);
-                }}
-              >
-                Auto
-              </button>
-            </Tip>
-          </div>
-        )}
-        <Tip label={`${conn.name} — right-click: host color`}>
-          <span className="host-bar__label">
-            {conn.user ? `${conn.user}@${conn.name}` : conn.name}
-          </span>
-        </Tip>
+        <span className="host-bar__label">
+          {conn.user ? `${conn.user}@${conn.name}` : conn.name}
+        </span>
         <Tip label="Disconnect">
           <button
             className="icon-btn icon-btn--danger sidebar__section-action"

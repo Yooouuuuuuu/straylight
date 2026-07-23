@@ -10,7 +10,13 @@ import { useEffect, useRef, useState } from "react";
 import { tabHostColor, hostColorForConnKey } from "../lib/hostColors";
 import { matchShortcut } from "../lib/shortcuts";
 import { focusTerminal } from "../lib/terminalFocus";
-import { remoteHostKey, termDisplayName, useAppStore } from "../store/appStore";
+import {
+  chatSections,
+  connectedChatHosts,
+  remoteHostKey,
+  termDisplayName,
+  useAppStore,
+} from "../store/appStore";
 
 interface Cand {
   kind: "tab" | "terminal" | "chat";
@@ -77,7 +83,7 @@ function buildTerminals(): { list: Cand[]; currentId: string | null } {
           id: t.id,
           name: termDisplayName(t),
           detail: host.label,
-          color: hostColorForConnKey(s.hostColors, host.key),
+          color: hostColorForConnKey(host.key),
         };
       }),
   );
@@ -96,18 +102,23 @@ function buildChat(): { list: Cand[]; currentId: string | null } {
       ? { label: r.conn.name, key: remoteHostKey(r.conn) }
       : { label: "?", key: "local" };
   };
-  const list = s.terminals
-    .filter((t) => t.inChat)
-    .map((t) => {
+  // VISUAL order: hosts as clustered/sectioned, then each host's terminals.
+  const list = chatSections(
+    s.terminals,
+    s.chatPurposes,
+    connectedChatHosts(s),
+  ).flatMap((g) =>
+    g.terminals.map((t) => {
       const host = hostOf(t.connId);
       return {
         kind: "chat" as const,
         id: t.id,
         name: termDisplayName(t),
         detail: host.label,
-        color: hostColorForConnKey(s.hostColors, host.key),
+        color: hostColorForConnKey(host.key),
       };
-    });
+    }),
+  );
   return { list, currentId: s.chatActiveId };
 }
 
@@ -117,7 +128,8 @@ function activate(c: Cand) {
     store.setActiveTab(c.id);
     store.requestEditorFocus();
   } else if (c.kind === "chat") {
-    store.setChatVisible(true);
+    // In the focus view the layout underneath must stay untouched.
+    if (!store.focusView) store.setChatVisible(true);
     store.setChatActive(c.id);
     requestAnimationFrame(() => focusTerminal(c.id));
   } else {
@@ -155,8 +167,11 @@ export function TabSwitcher() {
       );
 
     const open = (dir: 1 | -1) => {
+      // The focus view (F11) is a CHAT workspace — Ctrl+Tab walks the agents
+      // there, regardless of what has DOM focus.
+      const focusMode = useAppStore.getState().focusView;
       const el = document.activeElement as HTMLElement | null;
-      const inChat = !!el?.closest(".chat-panel");
+      const inChat = focusMode || !!el?.closest(".chat-panel");
       const inTerminal = !inChat && !!el?.closest(".terminal-host");
       let built = inChat
         ? buildChat()
@@ -168,6 +183,7 @@ export function TabSwitcher() {
         : inTerminal
           ? "terminals"
           : "tabs";
+      if (focusMode && built.list.length === 0) return; // nothing to walk
       if (mode !== "tabs" && built.list.length === 0) {
         built = buildTabs();
         mode = "tabs";
@@ -234,7 +250,7 @@ export function TabSwitcher() {
           {state.mode === "tabs"
             ? "Editor tabs"
             : state.mode === "chat"
-              ? "CHAT"
+              ? "Sessions"
               : "Terminals"}
         </div>
         <div className="switcher__list">

@@ -137,6 +137,17 @@ export function closeDevtools(): Promise<void> {
   return invoke("ui_close_devtools");
 }
 
+/** Reveal a LOCAL path in the OS file manager (selects the item). */
+export function revealPath(path: string): Promise<void> {
+  return invoke("reveal_path", { path });
+}
+
+/** Open an http(s) URL in the default browser (the editor's Ctrl-click links —
+ *  the WebView2 has no working window.open to an external browser). */
+export function openExternal(url: string): Promise<void> {
+  return invoke("open_external", { url });
+}
+
 
 // ---------------------------------------------------------------------------
 // Filesystem (transport-agnostic: SFTP for SSH sessions, std::fs for local)
@@ -266,12 +277,17 @@ export interface TransferOutcome {
   cancelled: boolean;
   /** Symlinked directories skipped during the walk (a link cycle would loop). */
   skippedLinks: number;
+  /** Entries skipped because the source couldn't be read (dangling link,
+   *  broken submodule gitlink) — one bad entry no longer fails the batch. */
+  skippedErrors: number;
 }
 
 /** Stream a batch of entries from one connection into a directory on another
  *  (copy-only), emitting `transfer-progress`. `renameOnConflict` resolves a
  *  top-level name clash by appending "copy", otherwise it overwrites a file /
- *  merges into an existing folder. `transferId` keys progress + cancellation. */
+ *  merges into an existing folder. `transferId` keys progress + cancellation.
+ *  Pass `total` (from a pre-flight `fsMeasure`) to skip the copy's own size
+ *  walk so a deep tree isn't measured twice. */
 export function fsTransferBatch(
   transferId: string,
   srcConnId: string,
@@ -279,6 +295,7 @@ export function fsTransferBatch(
   destConnId: string,
   destDir: string,
   renameOnConflict: boolean,
+  total?: { bytes: number; files: number } | null,
 ): Promise<TransferOutcome> {
   return invoke("fs_transfer_batch", {
     transferId,
@@ -287,12 +304,28 @@ export function fsTransferBatch(
     destConnId,
     destDir,
     renameOnConflict,
+    totalBytes: total?.bytes ?? null,
+    totalFiles: total?.files ?? null,
   });
 }
 
 /** Ask a running transfer to stop (it halts at the next chunk). */
 export function fsTransferCancel(transferId: string): Promise<void> {
   return invoke("fs_transfer_cancel", { transferId });
+}
+
+/** Pre-flight size of a pending transfer, measured with the copy walk's exact
+ *  rules so it matches the progress bar's total (symlinked dirs excluded). */
+export interface TransferSize {
+  files: number;
+  bytes: number;
+}
+
+export function fsTransferMeasure(
+  connId: string,
+  paths: string[],
+): Promise<TransferSize> {
+  return invoke("fs_transfer_measure", { connId, paths });
 }
 
 /** Aggregate size + counts for the Properties dialog (recursive). */

@@ -9,9 +9,11 @@ import { allCommands, commandKeyLabel } from "../../lib/commands";
 import {
   CONFIRM_IDS,
   confirmFlags,
+  downloadConfig,
   keybindingOverrides,
   settingsZoom,
   terminalFontConfig,
+  terminalHostColorConfig,
   uiConfig,
   updateSettings,
 } from "../../lib/settings";
@@ -27,6 +29,8 @@ const CONFIRM_LABELS: Record<string, string> = {
   "vcs-push": "Pushing to the remote",
   "vcs-stash-pop": "Popping a stash",
   "vcs-amend-pushed": "Amending a pushed commit",
+  "usage-check": "Checking Claude usage on a host",
+  "close-agent": "Closing a session",
 };
 
 export function SettingsView() {
@@ -100,6 +104,19 @@ export function SettingsView() {
         />
       </div>
       <div className="settings-row">
+        <Tip label="Where Download sends files. Empty = your OS Downloads folder.">
+          <span className="settings-row__label">Download folder</span>
+        </Tip>
+        <input
+          className="input"
+          placeholder="Downloads (default)"
+          defaultValue={downloadConfig.dir}
+          onBlur={(e) =>
+            void updateSettings({ download: { dir: e.target.value.trim() } })
+          }
+        />
+      </div>
+      <div className="settings-row">
         <span className="settings-row__label">Terminal font family</span>
         <input
           className="input"
@@ -167,8 +184,8 @@ export function SettingsView() {
       <Tip
         label={
           hasChatResidents
-            ? "Return (−) or close CHAT's terminals first"
-            : "Removes the CHAT column entirely"
+            ? "Return (−) or close the Sessions terminals first"
+            : "Removes the Sessions column entirely"
         }
       >
       <label
@@ -182,7 +199,7 @@ export function SettingsView() {
               .getState()
               .pushNotice(
                 "warn",
-                "CHAT can't be disabled while terminals live in it — return (−) or close them first.",
+                "Sessions can't be disabled while terminals live in it — return (−) or close them first.",
               );
           }
         }}
@@ -200,8 +217,20 @@ export function SettingsView() {
             })
           }
         />
-        Disable CHAT
+        Disable Sessions
       </label>
+      </Tip>
+      <Tip label="Each terminal's cursor + selection take its host's identity color (Local / WSL / remote slots)">
+        <label className="settings-row settings-row--check">
+          <input
+            type="checkbox"
+            checked={terminalHostColorConfig}
+            onChange={(e) =>
+              void updateSettings({ terminalHostColor: e.target.checked })
+            }
+          />
+          Host color in terminals
+        </label>
       </Tip>
 
       <h3 className="app-tab__section">Confirmations</h3>

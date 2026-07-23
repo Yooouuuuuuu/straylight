@@ -5,23 +5,23 @@
  *  deleting keys falls back to the built-in default (Straylight). */
 import type { ITheme, Terminal } from "@xterm/xterm";
 
+import { hostColorForConnKey } from "./hostColors";
 import { monaco } from "./monaco";
 import {
   editorColors,
   savedThemes,
   setOnSettingsApplied,
   setThemeTemplate,
+  terminalColors,
   terminalFontConfig,
-  terminalLocalColors,
-  terminalRemoteColors,
-  terminalWslColors,
+  terminalHostColorConfig,
   UI_COLOR_DEFAULTS,
   uiColors,
   updateSettings,
   type Settings,
   type ThemeData,
 } from "./settings";
-import { useAppStore } from "../store/appStore";
+import { connKeyForConnId, useAppStore } from "../store/appStore";
 
 // ---- contract keys + Straylight (built-in default) values -------------------
 
@@ -29,46 +29,49 @@ import { useAppStore } from "../store/appStore";
 export const EDITOR_DEFAULTS: Record<string, string> = {
   background: "#151013",
   foreground: "#f0e7e9",
-  cursor: "#f30100",
+  cursor: "#c62435",
   selection: "#46232c",
   lineHighlight: "#221418",
-  findMatch: "#9e6a03",
-  findMatchHighlight: "#5c4308",
+  findMatch: "#ffa00047",
+  findMatchHighlight: "#ffa0001a",
   widget: "#0f0b0d",
-  comment: "#7a5f66",
-  keyword: "#ff4d6d",
-  string: "#5ce626",
-  number: "#ff00ff",
+  comment: "#876a72",
+  keyword: "#f05f72",
+  string: "#6fca4a",
+  number: "#c17dd0",
   type: "#ffb454",
   function: "#ff7a9c",
   variable: "#f0e7e9",
-  constant: "#ff00ff",
-  operator: "#ff4d6d",
+  constant: "#c17dd0",
+  operator: "#c99aa2",
 };
 
-/** Terminal section keys — exactly xterm's ITheme color names. */
+/** Terminal section keys — exactly xterm's ITheme color names. ONE scheme for
+ *  every shell: Catppuccin Mocha's soft ANSI set on the warm Straylight
+ *  background (hosts are told apart by identity cursor/selection, not by
+ *  per-scope schemes). */
 export const TERMINAL_DEFAULTS: Record<string, string> = {
   background: "#151013",
   foreground: "#f0e7e9",
-  cursor: "#f30100",
+  cursor: "#f5e0dc",
   cursorAccent: "#151013",
   selectionBackground: "#46232c",
-  black: "#241a1e",
-  red: "#f30100",
-  green: "#5ce626",
-  yellow: "#ffb454",
-  blue: "#e0446a",
-  magenta: "#ff00ff",
-  cyan: "#ff7a9c",
-  white: "#f0e7e9",
-  brightBlack: "#8a6f76",
-  brightRed: "#ff5c5c",
-  brightGreen: "#8aff5c",
-  brightYellow: "#ffd28a",
-  brightBlue: "#ff7a9c",
-  brightMagenta: "#ff66ff",
-  brightCyan: "#ffb3c8",
-  brightWhite: "#ffffff",
+  black: "#45475a",
+  red: "#f38ba8",
+  green: "#a6e3a1",
+  yellow: "#f9e2af",
+  blue: "#89b4fa",
+  magenta: "#cba6f7",
+  cyan: "#89dceb",
+  white: "#bac2de",
+  brightBlack: "#585b70",
+  brightRed: "#f38ba8",
+  brightGreen: "#a6e3a1",
+  brightYellow: "#f9e2af",
+  brightBlue: "#89b4fa",
+  brightMagenta: "#cba6f7",
+  brightCyan: "#89dceb",
+  brightWhite: "#a6adc8",
 };
 
 // ---- application ------------------------------------------------------------
@@ -86,7 +89,7 @@ function luminance(color: string): number {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
 }
 
-function buildMonacoTheme(): monaco.editor.IStandaloneThemeData {
+export function buildMonacoTheme(): monaco.editor.IStandaloneThemeData {
   const g = (k: string) => editorColors[k] ?? EDITOR_DEFAULTS[k];
   const hex = (k: string) => g(k).replace("#", "");
   return {
@@ -122,6 +125,10 @@ function buildMonacoTheme(): monaco.editor.IStandaloneThemeData {
       "editorLineNumber.activeForeground": g("foreground"),
       "editor.findMatchBackground": g("findMatch"),
       "editor.findMatchHighlightBackground": g("findMatchHighlight"),
+      // A bright, opaque border around every match (findMatch minus its alpha)
+      // — eye-catching without covering the matched text.
+      "editor.findMatchBorder": g("findMatch").slice(0, 7),
+      "editor.findMatchHighlightBorder": g("findMatch").slice(0, 7),
       "editorWidget.background": g("widget"),
       "editorWidget.border": g("selection"),
       "editorSuggestWidget.background": g("widget"),
@@ -138,20 +145,48 @@ function buildMonacoTheme(): monaco.editor.IStandaloneThemeData {
   };
 }
 
-export type TermScope = "local" | "wsl" | "remote";
+/** A CSS color to a concrete value: `var(--x)` → its computed value (xterm
+ *  paints to canvas, so CSS variables can't pass through). */
+function computedColor(c: string): string {
+  const m = /^var\((--[\w-]+)\)$/.exec(c.trim());
+  if (!m) return c;
+  const v = getComputedStyle(document.documentElement)
+    .getPropertyValue(m[1])
+    .trim();
+  return v || c;
+}
 
-/** The effective terminal theme for one shell kind: its settings section
- *  (`terminalLocal` / `terminalWsl` / `terminalRemote`) over the defaults. */
-export function currentTermTheme(scope: TermScope): ITheme {
-  const section =
-    scope === "local"
-      ? terminalLocalColors
-      : scope === "wsl"
-        ? terminalWslColors
-        : terminalRemoteColors;
+/** The effective terminal theme for one terminal: the single `terminal`
+ *  section over the defaults; with `terminalHostColor` on (default), the
+ *  cursor + selection take the HOST's identity color instead. */
+export function currentTermTheme(connId: string | null): ITheme {
   const out: Record<string, string> = { ...TERMINAL_DEFAULTS };
-  for (const [k, v] of Object.entries(section)) {
+  for (const [k, v] of Object.entries(terminalColors)) {
     if (k in TERMINAL_DEFAULTS && typeof v === "string" && v.trim()) out[k] = v;
+  }
+  if (terminalHostColorConfig && connId) {
+    const key = connKeyForConnId(connId);
+    if (key) {
+      const hc = computedColor(hostColorForConnKey(key));
+      if (/^#[0-9a-fA-F]{6}$/.test(hc)) {
+        out.cursor = hc;
+        out.selectionBackground = `${hc}59`; // ~35% — readable text on top
+        // The character under a block cursor draws in cursorAccent — pick
+        // whichever of fg/bg reads better on THIS host color (dark crimson
+        // wants a light char; a bright blue wants a dark one).
+        const cr = (a: string, b: string) => {
+          const [hi, lo] =
+            luminance(a) > luminance(b)
+              ? [luminance(a), luminance(b)]
+              : [luminance(b), luminance(a)];
+          return (hi + 0.05) / (lo + 0.05);
+        };
+        out.cursorAccent =
+          cr(out.foreground, hc) >= cr(out.background, hc)
+            ? out.foreground
+            : out.background;
+      }
+    }
   }
   return out as unknown as ITheme;
 }
@@ -182,33 +217,45 @@ export async function adjustTerminalFontSize(delta: number | null): Promise<void
 
 // Live terminals, re-themed/refit in place when settings change.
 interface LiveTerminal {
-  scope: TermScope;
+  connId: string | null;
   refit: () => void;
 }
 const liveTerminals = new Map<Terminal, LiveTerminal>();
 
 export function registerTerminal(
   term: Terminal,
-  opts: { scope?: TermScope; refit?: () => void } = {},
+  opts: { connId?: string | null; refit?: () => void } = {},
 ): void {
-  liveTerminals.set(term, { scope: opts.scope ?? "local", refit: opts.refit ?? (() => {}) });
+  liveTerminals.set(term, {
+    connId: opts.connId ?? null,
+    refit: opts.refit ?? (() => {}),
+  });
 }
 
 export function unregisterTerminal(term: Terminal): void {
   liveTerminals.delete(term);
 }
 
+/** Re-theme every live terminal (per terminal — host color is per connId).
+ *  Also runs when the remotes list reorders: position = identity color. */
+function applyTerminalThemes(): void {
+  for (const [term, meta] of liveTerminals) {
+    term.options.theme = currentTermTheme(meta.connId);
+  }
+}
+
 function applyThemeLayers(): void {
   monaco.editor.defineTheme(CUSTOM_THEME, buildMonacoTheme());
   monaco.editor.setTheme(CUSTOM_THEME);
-  const themes: Record<TermScope, ITheme> = {
-    local: currentTermTheme("local"),
-    wsl: currentTermTheme("wsl"),
-    remote: currentTermTheme("remote"),
-  };
   const font = currentTermFont();
+  // Expose the terminal font size as a CSS var so chrome that wants to match
+  // the terminal (the focus view's section headers) tracks it live.
+  document.documentElement.style.setProperty(
+    "--term-font-size",
+    `${font.size}px`,
+  );
+  applyTerminalThemes();
   for (const [term, meta] of liveTerminals) {
-    term.options.theme = themes[meta.scope];
     const fontChanged =
       term.options.fontFamily !== font.family || term.options.fontSize !== font.size;
     if (fontChanged) {
@@ -224,18 +271,15 @@ function applyThemeLayers(): void {
  *  the file documents every customizable key. */
 export function initThemes(): void {
   setOnSettingsApplied(applyThemeLayers);
+  // Host colors are positional (remote slot = position) — a reorder must
+  // recolor live terminals' cursor/selection without a settings write.
+  useAppStore.subscribe((s, prev) => {
+    if (s.remotes !== prev.remotes) applyTerminalThemes();
+  });
   setThemeTemplate(() => ({
     colors: { ...UI_COLOR_DEFAULTS },
     editor: { ...EDITOR_DEFAULTS },
-    terminalLocal: { ...TERMINAL_DEFAULTS },
-    terminalWsl: { ...TERMINAL_DEFAULTS },
-    terminalRemote: {
-      ...TERMINAL_DEFAULTS,
-      background: "#070406",
-      cursorAccent: "#070406",
-      black: "#1a1114",
-      selectionBackground: "#381b22",
-    },
+    terminal: { ...TERMINAL_DEFAULTS },
     themes: builtinThemeData(),
   }));
 }
@@ -247,15 +291,12 @@ interface ThemePreset {
   title: string;
   ui: Record<string, string>;
   editor: Record<string, string>;
-  /** One full section per shell kind. Local and WSL ship the same scheme;
-   *  remote is a darker variant so SSH shells read as "elsewhere". */
-  terminalLocal: Record<string, string>;
-  terminalWsl: Record<string, string>;
-  terminalRemote: Record<string, string>;
+  /** ONE terminal scheme for every shell — hosts are told apart by the
+   *  identity cursor/selection (`terminalHostColor`), not per-scope schemes. */
+  terminal: Record<string, string>;
 }
 
-// Terminal schemes, shared by a preset's local + WSL sections and used as the
-// base of its (darker) remote section.
+// Terminal schemes, one per preset.
 const TERM_DRACULA: Record<string, string> = {
   background: "#282a36", foreground: "#f8f8f2", cursor: "#f8f8f2",
   cursorAccent: "#282a36", selectionBackground: "#44475a",
@@ -274,23 +315,26 @@ const TERM_SOLARIZED_LIGHT: Record<string, string> = {
   brightYellow: "#657b83", brightBlue: "#839496", brightMagenta: "#6c71c4",
   brightCyan: "#93a1a1", brightWhite: "#fdf6e3",
 };
-const TERM_CRIMSON: Record<string, string> = {
-  background: "#1c070c", foreground: "#f5e6e8", cursor: "#ff00ff",
-  cursorAccent: "#1c070c", selectionBackground: "#591a28",
-  black: "#331018", red: "#f30100", green: "#5ce626", yellow: "#ffb454",
-  blue: "#ff4d6d", magenta: "#ff00ff", cyan: "#ff8fb0", white: "#f5e6e8",
-  brightBlack: "#a06a75", brightRed: "#ff5c5c", brightGreen: "#8aff5c",
-  brightYellow: "#ffd28a", brightBlue: "#ff8fb0", brightMagenta: "#ff66ff",
-  brightCyan: "#ffc2d4", brightWhite: "#ffffff",
+// Catppuccin Latte's ANSI set (light sibling of the Mocha set the default
+// uses) — on Straylight Light's warm paper here, on true Latte base below.
+const TERM_STRAYLIGHT_LIGHT: Record<string, string> = {
+  background: "#faf4f5", foreground: "#3a262d", cursor: "#c62435",
+  cursorAccent: "#faf4f5", selectionBackground: "#e8d3d9",
+  // Latte's set with yellow/magenta deepened — our rules want ≥3:1 on paper.
+  black: "#5c5f77", red: "#d20f39", green: "#40a02b", yellow: "#b17110",
+  blue: "#1e66f5", magenta: "#c94ba8", cyan: "#179299", white: "#acb0be",
+  brightBlack: "#6c6f85", brightRed: "#d20f39", brightGreen: "#40a02b",
+  brightYellow: "#b17110", brightBlue: "#1e66f5", brightMagenta: "#c94ba8",
+  brightCyan: "#179299", brightWhite: "#bcc0cc",
 };
-const TERM_NEON: Record<string, string> = {
-  background: "#0a0a0a", foreground: "#e8e8e8", cursor: "#5ce626",
-  cursorAccent: "#0a0a0a", selectionBackground: "#3d0f17",
-  black: "#1a1a1a", red: "#f30100", green: "#5ce626", yellow: "#9dff5c",
-  blue: "#ff1744", magenta: "#ff00ff", cyan: "#ff40ff", white: "#e8e8e8",
-  brightBlack: "#777777", brightRed: "#ff4d4d", brightGreen: "#8aff5c",
-  brightYellow: "#c8ff8a", brightBlue: "#ff4d6d", brightMagenta: "#ff66ff",
-  brightCyan: "#ff8aff", brightWhite: "#ffffff",
+const TERM_LATTE: Record<string, string> = {
+  background: "#eff1f5", foreground: "#4c4f69", cursor: "#d20f39",
+  cursorAccent: "#eff1f5", selectionBackground: "#ccd0da",
+  black: "#5c5f77", red: "#d20f39", green: "#40a02b", yellow: "#df8e1d",
+  blue: "#1e66f5", magenta: "#ea76cb", cyan: "#179299", white: "#acb0be",
+  brightBlack: "#6c6f85", brightRed: "#d20f39", brightGreen: "#40a02b",
+  brightYellow: "#df8e1d", brightBlue: "#1e66f5", brightMagenta: "#ea76cb",
+  brightCyan: "#179299", brightWhite: "#bcc0cc",
 };
 const TERM_NORD: Record<string, string> = {
   background: "#2e3440", foreground: "#d8dee9", cursor: "#d8dee9",
@@ -300,17 +344,6 @@ const TERM_NORD: Record<string, string> = {
   brightBlack: "#4c566a", brightRed: "#bf616a", brightGreen: "#a3be8c",
   brightYellow: "#ebcb8b", brightBlue: "#81a1c1", brightMagenta: "#b48ead",
   brightCyan: "#8fbcbb", brightWhite: "#eceff4",
-};
-// Remote for the Dracula preset: the classic black console (Campbell), so an
-// SSH shell is unmistakable at a glance.
-const TERM_CAMPBELL: Record<string, string> = {
-  background: "#000000", foreground: "#ffffff", cursor: "#ffffff",
-  cursorAccent: "#000000", selectionBackground: "#3a3d41",
-  black: "#0c0c0c", red: "#c50f1f", green: "#13a10e", yellow: "#c19c00",
-  blue: "#3b78ff", magenta: "#881798", cyan: "#3a96dd", white: "#cccccc",
-  brightBlack: "#767676", brightRed: "#e74856", brightGreen: "#16c60c",
-  brightYellow: "#f9f1a5", brightBlue: "#3b78ff", brightMagenta: "#b4009e",
-  brightCyan: "#61d6d6", brightWhite: "#f2f2f2",
 };
 
 export const THEME_PRESETS: ThemePreset[] = [
@@ -323,82 +356,38 @@ export const THEME_PRESETS: ThemePreset[] = [
     title: "Theme: Straylight (default)",
     ui: { ...UI_COLOR_DEFAULTS },
     editor: { ...EDITOR_DEFAULTS },
-    terminalLocal: { ...TERMINAL_DEFAULTS },
-    terminalWsl: { ...TERMINAL_DEFAULTS },
-    terminalRemote: {
-      ...TERMINAL_DEFAULTS,
-      background: "#070406", cursorAccent: "#070406", black: "#1a1114",
-      selectionBackground: "#381b22",
-    },
+    terminal: { ...TERMINAL_DEFAULTS },
   },
   {
-    // Immersive: the backgrounds themselves are dark crimson — the whole app
-    // sits inside the #AF011C world. Bolder than "Straylight".
-    id: "theme.straylightCrimson",
-    title: "Theme: Straylight Crimson",
+    // The identity on warm paper: rosy-white base, near-black plum text, the
+    // crimson brand carrying chrome. Semantics re-anchored for light (deep
+    // forest success, ochre warning, deep teal info) — never inverted.
+    id: "theme.straylightLight",
+    title: "Theme: Straylight Light",
     ui: {
-      "bg-primary": "#1c070c", "bg-secondary": "#120407", "bg-tertiary": "#331018",
-      "bg-selected": "#4d1622", "fg-primary": "#f5e6e8", "fg-secondary": "#a06a75",
-      cyan: "#ff8fb0", green: "#5ce626", orange: "#ff6a3d", pink: "#ff00ff",
-      purple: "#ff4d6d", red: "#f30100", yellow: "#ffb454",
-      "tree-root": "#f5e6e8", "tree-dir": "#f5e6e8", "section-fg": "#f5e6e8",
-      "section-local": "#f30100", "section-wsl": "#ff0180", "section-remote": "#ff00ff",
-      titlebar: "#f30100", "titlebar-fg": "#f5e6e8",
-      "icon-folder": "#ff4d6d", "icon-folder-open": "#ff8fb0", pin: "#ff00ff",
-      border: "#4d1622", "border-focus": "#f30100",
-      scrollbar: "#4d1622", "scrollbar-hover": "#6b1e2e",
-      success: "#5ce626", warning: "#ffb454", error: "#f30100", info: "#5ce626",
+      "bg-primary": "#faf4f5", "bg-secondary": "#f2eaec", "bg-tertiary": "#eadde0",
+      "bg-selected": "#decdd3", "fg-primary": "#2b1a1f", "fg-secondary": "#7a5a64",
+      cyan: "#0f7a70", green: "#2c8f10", orange: "#c04a18", pink: "#c400c4",
+      purple: "#7644b8", red: "#d40012", yellow: "#9a6a00",
+      "tree-root": "#2b1a1f", "tree-dir": "#2b1a1f", "section-fg": "#fdf8f9",
+      "section-local": "#af011c", "section-wsl": "#a91274", "section-remote": "#7c2fb4",
+      "section-remote-2": "#4b3fd1", "section-remote-3": "#1e6ad0",
+      titlebar: "#f2eaec", "titlebar-fg": "#2b1a1f",
+      "icon-folder": "#b25064", "icon-folder-open": "#0f7a70", pin: "#c400c4",
+      border: "#decdd3", "border-focus": "#af011c",
+      scrollbar: "#decdd3", "scrollbar-hover": "#c9b2ba",
+      success: "#2c8f10", warning: "#9a6a00", error: "#d40012", info: "#0f7a70",
       accent: "#af011c",
     },
     editor: {
-      background: "#1c070c", foreground: "#f5e6e8", cursor: "#ff00ff",
-      selection: "#591a28", lineHighlight: "#2b0c13", widget: "#120407",
-      findMatch: "#9e6a03", findMatchHighlight: "#5c4308",
-      comment: "#8f5a66", keyword: "#ff00ff", string: "#5ce626",
-      number: "#f30100", type: "#ff8fb0", function: "#ff4d6d",
-      variable: "#f5e6e8", constant: "#f30100", operator: "#ff4d6d",
+      background: "#faf4f5", foreground: "#2b1a1f", cursor: "#af011c",
+      selection: "#ecd4da", lineHighlight: "#f3e8ea", widget: "#f2eaec",
+      findMatch: "#df8e1d55", findMatchHighlight: "#df8e1d24",
+      comment: "#977e86", keyword: "#c22540", string: "#3c7d1e",
+      number: "#8b3fa8", type: "#9a6a00", function: "#b3395f",
+      variable: "#2b1a1f", constant: "#8b3fa8", operator: "#8d6a72",
     },
-    terminalLocal: TERM_CRIMSON,
-    terminalWsl: TERM_CRIMSON,
-    terminalRemote: {
-      ...TERM_CRIMSON,
-      background: "#0d0306", cursorAccent: "#0d0306", black: "#240a10",
-      selectionBackground: "#45121e",
-    },
-  },
-  {
-    // The full ride: pitch black, all four colors at maximum volume.
-    id: "theme.straylightNeon",
-    title: "Theme: Straylight Neon",
-    ui: {
-      "bg-primary": "#0a0a0a", "bg-secondary": "#050505", "bg-tertiary": "#1a1a1a",
-      "bg-selected": "#2b0f14", "fg-primary": "#eeeeee", "fg-secondary": "#777777",
-      cyan: "#ff00ff", green: "#5ce626", orange: "#f30100", pink: "#ff40ff",
-      purple: "#ff1744", red: "#f30100", yellow: "#9dff5c",
-      "tree-root": "#eeeeee", "tree-dir": "#eeeeee", "section-fg": "#eeeeee",
-      "section-local": "#f30100", "section-wsl": "#ff0180", "section-remote": "#ff00ff",
-      titlebar: "#f30100", "titlebar-fg": "#eeeeee",
-      "icon-folder": "#f30100", "icon-folder-open": "#ff00ff", pin: "#ff00ff",
-      border: "#2b0f14", "border-focus": "#f30100",
-      scrollbar: "#331016", "scrollbar-hover": "#4d1620",
-      success: "#5ce626", warning: "#f30100", error: "#f30100", info: "#5ce626",
-      accent: "#af011c",
-    },
-    editor: {
-      background: "#0a0a0a", foreground: "#e8e8e8", cursor: "#5ce626",
-      selection: "#3d0f17", lineHighlight: "#161014", widget: "#050505",
-      findMatch: "#9e6a03", findMatchHighlight: "#5c4308",
-      comment: "#5c4448", keyword: "#ff00ff", string: "#5ce626",
-      number: "#f30100", type: "#ff40ff", function: "#ff1744",
-      variable: "#e8e8e8", constant: "#f30100", operator: "#ff00ff",
-    },
-    terminalLocal: TERM_NEON,
-    terminalWsl: TERM_NEON,
-    terminalRemote: {
-      ...TERM_NEON,
-      background: "#000000", cursorAccent: "#000000", black: "#111111",
-      selectionBackground: "#330d14",
-    },
+    terminal: TERM_STRAYLIGHT_LIGHT,
   },
   {
     id: "theme.dracula",
@@ -409,7 +398,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       cyan: "#8be9fd", green: "#50fa7b", orange: "#ffb86c", pink: "#ff79c6",
       purple: "#bd93f9", red: "#ff5555", yellow: "#f1fa8c",
       "tree-root": "#f8f8f2", "tree-dir": "#f8f8f2", "section-fg": "#21222c",
-      "section-local": "#ff5555", "section-wsl": "#ff79c6", "section-remote": "#bd93f9",
+      "section-local": "#bd93f9", "section-wsl": "#ff79c6", "section-remote": "#8be9fd",
+      "section-remote-2": "#50fa7b", "section-remote-3": "#f1fa8c",
       titlebar: "#21222c", "titlebar-fg": "#f8f8f2",
       "icon-folder": "#bd93f9", "icon-folder-open": "#8be9fd", pin: "#ff79c6",
       border: "#44475a", "border-focus": "#6272a4",
@@ -420,14 +410,12 @@ export const THEME_PRESETS: ThemePreset[] = [
     editor: {
       background: "#282a36", foreground: "#f8f8f2", cursor: "#f8f8f2",
       selection: "#44475a", lineHighlight: "#343746", widget: "#21222c",
-      findMatch: "#a97f56", findMatchHighlight: "#5e4e44",
+      findMatch: "#ffb86c4d", findMatchHighlight: "#ffb86c21",
       comment: "#6272a4", keyword: "#ff79c6", string: "#f1fa8c",
       number: "#bd93f9", type: "#8be9fd", function: "#50fa7b",
       variable: "#f8f8f2", constant: "#bd93f9", operator: "#ff79c6",
     },
-    terminalLocal: TERM_DRACULA,
-    terminalWsl: TERM_DRACULA,
-    terminalRemote: TERM_CAMPBELL,
+    terminal: TERM_DRACULA,
   },
   {
     id: "theme.nord",
@@ -438,7 +426,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       cyan: "#88c0d0", green: "#a3be8c", orange: "#d08770", pink: "#b48ead",
       purple: "#81a1c1", red: "#bf616a", yellow: "#ebcb8b",
       "tree-root": "#eceff4", "tree-dir": "#eceff4", "section-fg": "#2e3440",
-      "section-local": "#bf616a", "section-wsl": "#b48ead", "section-remote": "#81a1c1",
+      "section-local": "#88c0d0", "section-wsl": "#5e81ac", "section-remote": "#a3be8c",
+      "section-remote-2": "#ebcb8b", "section-remote-3": "#d08770",
       titlebar: "#3b4252", "titlebar-fg": "#eceff4",
       "icon-folder": "#81a1c1", "icon-folder-open": "#88c0d0", pin: "#b48ead",
       border: "#434c5e", "border-focus": "#7b88a1",
@@ -449,18 +438,12 @@ export const THEME_PRESETS: ThemePreset[] = [
     editor: {
       background: "#2e3440", foreground: "#d8dee9", cursor: "#d8dee9",
       selection: "#434c5e", lineHighlight: "#3b4252", widget: "#272c36",
-      findMatch: "#5f818f", findMatchHighlight: "#445764",
+      findMatch: "#ebcb8b4d", findMatchHighlight: "#ebcb8b21",
       comment: "#616e88", keyword: "#81a1c1", string: "#a3be8c",
       number: "#b48ead", type: "#8fbcbb", function: "#88c0d0",
       variable: "#d8dee9", constant: "#b48ead", operator: "#81a1c1",
     },
-    terminalLocal: TERM_NORD,
-    terminalWsl: TERM_NORD,
-    terminalRemote: {
-      ...TERM_NORD,
-      background: "#242933", cursorAccent: "#242933", black: "#2e3440",
-      selectionBackground: "#3b4252",
-    },
+    terminal: TERM_NORD,
   },
   {
     // The famous light theme. `section-fg` and `accent` invert (light text on
@@ -469,11 +452,12 @@ export const THEME_PRESETS: ThemePreset[] = [
     title: "Theme: Solarized Light",
     ui: {
       "bg-primary": "#fdf6e3", "bg-secondary": "#eee8d5", "bg-tertiary": "#e9e2cc",
-      "bg-selected": "#dcd4b9", "fg-primary": "#586e75", "fg-secondary": "#93a1a1",
+      "bg-selected": "#dcd4b9", "fg-primary": "#586e75", "fg-secondary": "#657b83",
       cyan: "#2aa198", green: "#859900", orange: "#cb4b16", pink: "#d33682",
       purple: "#6c71c4", red: "#dc322f", yellow: "#b58900",
       "tree-root": "#586e75", "tree-dir": "#586e75", "section-fg": "#fdf6e3",
-      "section-local": "#dc322f", "section-wsl": "#d33682", "section-remote": "#6c71c4",
+      "section-local": "#268bd2", "section-wsl": "#2aa198", "section-remote": "#d33682",
+      "section-remote-2": "#cb4b16", "section-remote-3": "#b58900",
       titlebar: "#eee8d5", "titlebar-fg": "#586e75",
       "icon-folder": "#268bd2", "icon-folder-open": "#2aa198", pin: "#d33682",
       border: "#d8d0b8", "border-focus": "#93a1a1",
@@ -484,18 +468,42 @@ export const THEME_PRESETS: ThemePreset[] = [
     editor: {
       background: "#fdf6e3", foreground: "#657b83", cursor: "#657b83",
       selection: "#dcd4b9", lineHighlight: "#eee8d5", widget: "#eee8d5",
-      findMatch: "#e4d094", findMatchHighlight: "#f0e2ba",
+      findMatch: "#b5890055", findMatchHighlight: "#b5890026",
       comment: "#93a1a1", keyword: "#859900", string: "#2aa198",
       number: "#d33682", type: "#b58900", function: "#268bd2",
       variable: "#657b83", constant: "#6c71c4", operator: "#859900",
     },
-    terminalLocal: TERM_SOLARIZED_LIGHT,
-    terminalWsl: TERM_SOLARIZED_LIGHT,
-    terminalRemote: {
-      ...TERM_SOLARIZED_LIGHT,
-      background: "#eee8d5", cursorAccent: "#eee8d5",
-      selectionBackground: "#d1c9ab",
+    terminal: TERM_SOLARIZED_LIGHT,
+  },
+  {
+    // The community's modern light favorite — official Latte palette, mauve
+    // as the accent; pairs with the Mocha ANSI set the default terminal uses.
+    id: "theme.catppuccinLatte",
+    title: "Theme: Catppuccin Latte",
+    ui: {
+      "bg-primary": "#eff1f5", "bg-secondary": "#e6e9ef", "bg-tertiary": "#dce0e8",
+      "bg-selected": "#ccd0da", "fg-primary": "#4c4f69", "fg-secondary": "#6c6f85",
+      cyan: "#179299", green: "#40a02b", orange: "#fe640b", pink: "#ea76cb",
+      purple: "#8839ef", red: "#d20f39", yellow: "#df8e1d",
+      "tree-root": "#4c4f69", "tree-dir": "#4c4f69", "section-fg": "#eff1f5",
+      "section-local": "#8839ef", "section-wsl": "#1e66f5", "section-remote": "#179299",
+      "section-remote-2": "#40a02b", "section-remote-3": "#d15408",
+      titlebar: "#e6e9ef", "titlebar-fg": "#4c4f69",
+      "icon-folder": "#8839ef", "icon-folder-open": "#179299", pin: "#ea76cb",
+      border: "#ccd0da", "border-focus": "#8839ef",
+      scrollbar: "#ccd0da", "scrollbar-hover": "#bcc0cc",
+      success: "#40a02b", warning: "#df8e1d", error: "#d20f39", info: "#179299",
+      accent: "#8839ef",
     },
+    editor: {
+      background: "#eff1f5", foreground: "#4c4f69", cursor: "#d20f39",
+      selection: "#ccd0da", lineHighlight: "#e6e9ef", widget: "#e6e9ef",
+      findMatch: "#df8e1d55", findMatchHighlight: "#df8e1d24",
+      comment: "#7c7f93", keyword: "#8839ef", string: "#40a02b",
+      number: "#fe640b", type: "#df8e1d", function: "#1e66f5",
+      variable: "#4c4f69", constant: "#fe640b", operator: "#04a5e5",
+    },
+    terminal: TERM_LATTE,
   },
 ];
 
@@ -510,9 +518,7 @@ export function builtinThemeData(): Record<string, ThemeData> {
       {
         colors: p.ui,
         editor: p.editor,
-        terminalLocal: p.terminalLocal,
-        terminalWsl: p.terminalWsl,
-        terminalRemote: p.terminalRemote,
+        terminal: p.terminal,
       },
     ]),
   );
@@ -534,13 +540,22 @@ export async function applyTheme(name: string): Promise<void> {
   await updateSettings({
     colors: th.colors ?? {},
     editor: th.editor ?? {},
-    terminalLocal: th.terminalLocal ?? {},
-    terminalWsl: th.terminalWsl ?? {},
-    terminalRemote: th.terminalRemote ?? {},
-    // Drop the pre-scoped `terminal` section from older files (undefined keys
-    // vanish in JSON.stringify).
-    terminal: undefined,
-  } as Partial<Settings> & { terminal?: undefined });
+    // Older library entries carry the retired per-scope split — first
+    // non-empty section stands in for the single scheme.
+    terminal:
+      th.terminal ??
+      (th as { terminalLocal?: Record<string, string> }).terminalLocal ??
+      {},
+    // The retired split keys die in settings.json here (undefined keys vanish
+    // in JSON.stringify).
+    terminalLocal: undefined,
+    terminalWsl: undefined,
+    terminalRemote: undefined,
+  } as Partial<Settings> & {
+    terminalLocal?: undefined;
+    terminalWsl?: undefined;
+    terminalRemote?: undefined;
+  });
 }
 
 /** Remove a library entry (built-ins included — they don't come back). */
@@ -558,9 +573,7 @@ export async function saveCurrentTheme(name: string): Promise<void> {
       [name]: {
         colors: { ...uiColors },
         editor: { ...editorColors },
-        terminalLocal: { ...terminalLocalColors },
-        terminalWsl: { ...terminalWslColors },
-        terminalRemote: { ...terminalRemoteColors },
+        terminal: { ...terminalColors },
       },
     },
   });

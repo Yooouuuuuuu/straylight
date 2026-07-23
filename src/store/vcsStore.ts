@@ -63,7 +63,8 @@ export interface TrackedRepo {
 }
 
 /** The fixed "this is a tracked repo" color in the explorer (green). Host
- *  identity uses a different channel — frames/bars/tabs via hostColors. */
+ *  identity uses a different channel — frames/bars/tabs via the positional
+ *  host slots (lib/hostColors). */
 export const REPO_COLOR_DEFAULT = "var(--green)";
 
 /** Color for a tree path: green when the path IS a tracked repo's root (or a

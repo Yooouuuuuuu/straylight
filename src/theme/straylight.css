@@ -9,32 +9,36 @@
   --bg-tertiary: #241a1e; /* Current line / hover */
   --bg-selected: #3a2228; /* Selection */
   --fg-primary: #f0e7e9; /* Foreground */
-  --fg-secondary: #8a6f76; /* Muted text */
+  --fg-secondary: #957a84; /* Muted text (kept ≥4.5 contrast on the dark bgs) */
 
   /* Accent colors */
-  --cyan: #ff7a9c;
+  --cyan: #48b3ac;
   --green: #5ce626;
   --orange: #ff6a3d;
   --pink: #ff00ff;
-  --purple: #e0446a;
+  --purple: #9a73d1;
   --red: #f30100;
   --yellow: #ffb454;
 
   /* Explorer content (root/pinned names, folder names, folder icons) */
   --tree-root: #f0e7e9;
   --tree-dir: #f0e7e9;
-  --icon-folder: #e0446a;
+  --icon-folder: #d76b83;
   --icon-folder-open: #ff7a9c;
   /* Pinned-tab badge */
   --pin: #ff00ff;
   /* Text/icons on the accent-colored section bars */
   --section-fg: #f5e6e8;
-  /* Per-section bar colors (Local / WSL / Remote get distinct identities) */
-  --section-local: #f30100;
-  --section-wsl: #ff0180;
-  --section-remote: #ff00ff;
-  /* The window's top bar (app name + window controls) */
-  --titlebar: #af011c;
+  /* Per-host identity as a warm→cool spectrum: Local crimson, WSL magenta,
+     Remote violet (→ indigo/blue for the 2nd/3rd below). */
+  --section-local: #af011c;
+  --section-wsl: #cf1f8f;
+  --section-remote: #9b46d4;
+  /* Remotes #2 and #3 (the remote ramp) — cooler/bluer than Local & WSL. */
+  --section-remote-2: #6a5ce6;
+  --section-remote-3: #3f86e6;
+  /* The window's top bar (dark; the accent shows as a thin underline) */
+  --titlebar: #1a1216;
   --titlebar-fg: #f5e6e8;
 
   /* Semantic mapping */
@@ -45,7 +49,7 @@
   --success: #5ce626;
   --warning: #ffb454;
   --error: #f30100;
-  --info: #5ce626;
+  --info: #48b3ac;
   --accent: #af011c;
 
   /* Typography */

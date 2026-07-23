@@ -94,7 +94,7 @@ export function ConnectionManager() {
         className="btn btn--primary btn--block"
         onClick={() => openDialog()}
       >
-        <IconPlug /> Connect to a new server
+        <IconPlug /> Connect to a server
       </button>
 
       {loading ? (
@@ -103,16 +103,24 @@ export function ConnectionManager() {
         </div>
       ) : hosts.length === 0 ? (
         <div className="conn-empty">
-          No hosts in ~/.ssh/config.
-          <br />
-          Use “Connect to a new server” or “Edit”.
+          {/* The list hides already-connected hosts — an empty list usually
+              means "everything is connected", not "the config is empty". */}
+          {allHosts.length > 0 ? (
+            <>Every host in ~/.ssh/config is connected.</>
+          ) : (
+            <>
+              No hosts in ~/.ssh/config.
+              <br />
+              Use “Connect to a server” or “Edit”.
+            </>
+          )}
         </div>
       ) : (
         hosts.map((host) => (
           <Tip key={host.name} label={`Connect to ${host.name}`}>
             <div
               className="conn-item"
-              style={{ borderLeftColor: colorForName(host.name) }}
+              style={{ borderLeftColor: "var(--section-remote)" }}
               onClick={() => onHostClick(host)}
             >
               <div className="conn-item__name">{host.name}</div>

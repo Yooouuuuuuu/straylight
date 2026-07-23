@@ -10,14 +10,26 @@ export function Terminal({
   active,
   command,
   initialInput = null,
+  scriptedInput = null,
+  locked = false,
 }: {
   id: string;
   connId: string;
   active: boolean;
   command: string[] | null;
   initialInput?: string | null;
+  scriptedInput?: { text: string; delayMs: number }[] | null;
+  locked?: boolean;
 }) {
-  const containerRef = useTerminal(connId, active, command, id, initialInput);
+  const containerRef = useTerminal(
+    connId,
+    active,
+    command,
+    id,
+    initialInput,
+    scriptedInput,
+    locked,
+  );
   // data-conn-id lets keyboard handlers resolve the focused terminal's host.
   return <div className="terminal-host" data-conn-id={connId} ref={containerRef} />;
 }

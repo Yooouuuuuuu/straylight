@@ -3,7 +3,6 @@
  *  carries its own hidden-files toggle, refresh, and "last refreshed" stamp. */
 import { useEffect, useRef, useState } from "react";
 
-import { PALETTE, paletteName } from "../../lib/connectionColor";
 import { clipboardShortcut } from "../../lib/fileOps";
 import { basename, dirname } from "../../lib/format";
 import { connStateTip, remoteColor } from "../../lib/hostColors";
@@ -62,13 +61,12 @@ export function Sidebar() {
   // (e.g. via the palette) brings the full explorer back until it's gone.
   const localOnly =
     uiConfig.localOnly && wsls.length === 0 && remotes.length === 0;
-  const hostColors = useAppStore((s) => s.hostColors);
-  const setHostColor = useAppStore((s) => s.setHostColor);
+  const swapRemotes = useAppStore((s) => s.swapRemotes);
   const { disconnect, reconnect } = useSSH();
   // "Connect to another server" while one is already attached (the + on the
   // Remote bar); connecting replaces the current remote, as before.
   const [connectOpen, setConnectOpen] = useState(false);
-  /** Which host bar's color menu is open (connId), if any. */
+  /** Which host bar's position menu is open (connId), if any. */
   const [hostMenu, setHostMenu] = useState<string | null>(null);
   // A successful connect (or a disconnect) closes the connect panel.
   useEffect(() => {
@@ -151,29 +149,32 @@ export function Sidebar() {
       <div className="sidebar__header">
         <span className="sidebar__title">Explorer</span>
         <div className="sidebar__actions">
-          {!localOnly &&
-            (
-              [
-                ["local", "L", "var(--section-local)"],
-                ["wsl", "W", "var(--section-wsl)"],
-                ["remote", "R", "var(--section-remote)"],
-              ] as const
-            ).map(([key, letter, color]) => (
-              <Tip
-                key={key}
-                label={`${sections[key] ? "Hide" : "Show"} the ${
-                  letter === "L" ? "Local" : letter === "W" ? "WSL" : "Remote"
-                } section`}
-              >
-                <button
-                  className={`section-toggle ${sections[key] ? "" : "section-toggle--off"}`}
-                  style={sections[key] ? { color } : undefined}
-                  onClick={() => toggleSection(key)}
+          {!localOnly && (
+            <div className="sidebar__lwr">
+              {(
+                [
+                  ["local", "L", "var(--section-local)"],
+                  ["wsl", "W", "var(--section-wsl)"],
+                  ["remote", "R", "var(--section-remote)"],
+                ] as const
+              ).map(([key, letter, color]) => (
+                <Tip
+                  key={key}
+                  label={`${sections[key] ? "Hide" : "Show"} the ${
+                    letter === "L" ? "Local" : letter === "W" ? "WSL" : "Remote"
+                  } section`}
                 >
-                  {letter}
-                </button>
-              </Tip>
-            ))}
+                  <button
+                    className={`section-toggle ${sections[key] ? "" : "section-toggle--off"}`}
+                    style={sections[key] ? { color } : undefined}
+                    onClick={() => toggleSection(key)}
+                  >
+                    {letter}
+                  </button>
+                </Tip>
+              ))}
+            </div>
+          )}
           <Tip label="Minimize EXPLORER (Ctrl+B)">
             <button
               className="icon-btn panel-head__hide"
@@ -311,7 +312,7 @@ export function Sidebar() {
           </button>
           </Tip>
           {remotes.length > 0 && remotes.length < 3 && (
-            <Tip label="Connect a new server">
+            <Tip label="Connect to a server">
               <button
                 className={`icon-btn ${connectOpen ? "icon-btn--active" : ""}`}
                 onClick={() => setConnectOpen((o) => !o)}
@@ -330,41 +331,45 @@ export function Sidebar() {
           <div key={conn.connId}>
             <div
               className="host-bar"
-              style={{ "--host-color": remoteColor(hostColors, conn) } as React.CSSProperties}
+              style={{ "--host-color": remoteColor(conn) } as React.CSSProperties}
               onContextMenu={(e) => {
                 e.preventDefault();
-                setHostMenu((o) => (o === conn.connId ? null : conn.connId));
+                // Only with 2+ remotes is there a position to move to.
+                if (remotes.length > 1)
+                  setHostMenu((o) => (o === conn.connId ? null : conn.connId));
               }}
             >
               {hostMenu === conn.connId && (
                 <div className="color-menu">
                   <span className="color-menu__label">{key}</span>
-                  {[...HOST_COLOR_RAMP, ...PALETTE].map((c) => (
-                    <Tip key={c} label={c.startsWith("var(") ? paletteName(c) : c}>
-                      <button
-                        className="color-menu__swatch"
-                        style={{ background: c }}
-                        onClick={() => {
-                          setHostColor(key, c);
-                          setHostMenu(null);
-                        }}
-                      />
-                    </Tip>
-                  ))}
-                  <Tip label="Back to the default color">
-                    <button
-                      className="color-menu__reset"
-                      onClick={() => {
-                        setHostColor(key, null);
-                        setHostMenu(null);
-                      }}
-                    >
-                      Auto
-                    </button>
-                  </Tip>
+                  {remotes.map((_, slot) =>
+                    slot === rIdx ? null : (
+                      <Tip key={slot} label={`Swap positions (and colors) with Remote ${slot + 1}`}>
+                        <button
+                          className="color-menu__slot"
+                          onClick={() => {
+                            swapRemotes(rIdx, slot);
+                            setHostMenu(null);
+                          }}
+                        >
+                          <span
+                            className="color-menu__dot"
+                            style={{ background: HOST_COLOR_RAMP[slot] }}
+                          />
+                          Make this Remote {slot + 1}
+                        </button>
+                      </Tip>
+                    ),
+                  )}
                 </div>
               )}
-              <Tip label={`${key} — right-click: host color`}>
+              <Tip
+                label={
+                  remotes.length > 1
+                    ? `${key} — right-click: change remote position/color`
+                    : key
+                }
+              >
                 <span className="host-bar__label">
                   {conn.user}@{conn.host}
                 </span>
@@ -390,7 +395,7 @@ export function Sidebar() {
             </div>
             <div
               className="host-tools"
-              style={{ "--host-color": remoteColor(hostColors, conn) } as React.CSSProperties}
+              style={{ "--host-color": remoteColor(conn) } as React.CSSProperties}
             >
               <Tip label="Pin a folder">
                 <button

@@ -10,6 +10,21 @@
   width: 100vw;
   overflow: hidden;
   background: var(--bg-primary);
+
+  /* Explorer L/W/R toggle geometry — shared by the sidebar layout AND the
+     title-bar connection gauge so the clusters sit centered over W and R.
+     Derived from --sidebar-w (set inline on .app). */
+  --toggle-w: 22px;
+  --lwr-gap: var(--space-6); /* the "bigger" space between L/W/R */
+  --lwr-hide-gap: var(--space-4);
+  --hide-w: 24px;
+  --hide-margin: var(--space-3); /* .panel-head__hide margin-left */
+  --header-pad: var(--space-4);
+  --gauge-r-x: calc(
+    var(--sidebar-w, 260px) - var(--header-pad) - var(--hide-w) -
+      var(--lwr-hide-gap) - var(--hide-margin) - var(--toggle-w) / 2
+  );
+  --gauge-w-x: calc(var(--gauge-r-x) - var(--toggle-w) - var(--lwr-gap));
 }
 
 .app-body {
@@ -17,6 +32,9 @@
   min-height: 0;
   display: flex;
   overflow: hidden;
+  /* Positioning context for the focus-view overlay (F11), so it covers the
+     body only — never the title bar. */
+  position: relative;
 }
 
 /* Horizontal layout: explorer + movable columns are fixed-width flex items;
@@ -31,12 +49,21 @@
   flex: 1 1 0;
   min-width: 140px;
 }
-/* A manual drag handle between two columns (the editor flexes to compensate). */
+/* A manual drag handle between two columns (the editor flexes to compensate).
+   It carries the column SEPARATOR — a 1px line centered in its 6px hit area —
+   so every boundary is separated correctly no matter how the columns are
+   ordered (a per-panel border would land on the wrong side once a movable
+   column is dragged past the editor). Full highlight on hover. */
 .hdrag {
   flex: 0 0 6px;
   align-self: stretch;
   cursor: col-resize;
-  background: transparent;
+  background: linear-gradient(
+    to right,
+    transparent 2.5px,
+    var(--border) 2.5px 3.5px,
+    transparent 3.5px
+  );
   transition: background 120ms ease;
 }
 .hdrag:hover {
@@ -68,17 +95,20 @@
 /* ------------------------------------------------------------------ Title bar */
 
 .titlebar {
+  position: relative; /* anchors the connection gauge over the sidebar's width */
   height: var(--titlebar-height);
   flex: 0 0 var(--titlebar-height);
   display: flex;
   align-items: center;
-  /* Themable (settings.json `titlebar` / `titlebar-fg`) — flat color. */
+  /* Themable (settings.json `titlebar` / `titlebar-fg`). A dark bar with the
+     accent as a thin underline reads calmer than a full accent fill. */
   background: var(--titlebar);
   color: var(--titlebar-fg);
   padding-left: var(--space-5);
-  /* Accent tint from the workspace color is applied inline as a left border. */
-  border-left: 3px solid transparent;
+  /* Dimmed accent — a whisper of darkened red, barely a line. */
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 26%, var(--bg-secondary));
 }
+
 
 .titlebar__drag {
   flex: 1 1 auto;
@@ -349,7 +379,7 @@
 .tool-inset {
   position: absolute;
   inset: 6px 34px;
-  border: 1px solid #5ce626;
+  border: 1px solid var(--green);
 }
 
 /* Roomier scrollbars inside the tool views — there's space to spend. */
@@ -366,7 +396,7 @@
 .terminal-panel--toolmode .termgroup__chip--tool.termgroup__chip--active {
   position: relative;
   z-index: 2;
-  border: 1px solid #5ce626;
+  border: 1px solid var(--green);
   border-bottom: none;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   color: var(--fg-primary);
@@ -384,8 +414,8 @@
   width: calc(100% + 2px);
   height: calc(var(--space-2) + 8px);
   background: var(--bg-tertiary);
-  border-left: 1px solid #5ce626;
-  border-right: 1px solid #5ce626;
+  border-left: 1px solid var(--green);
+  border-right: 1px solid var(--green);
 }
 
 /* Ctrl+Tab switcher: a centered overlay; hold the modifier and walk the list
@@ -866,7 +896,7 @@
 
 .titlebar__btn--close:hover {
   background: var(--red);
-  color: #fff;
+  color: var(--section-fg);
 }
 
 /* ------------------------------------------------------------------ Status bar */
@@ -925,7 +955,9 @@
   align-items: center;
   gap: var(--space-3);
   padding: 0 var(--space-3);
-  max-width: 320px;
+  /* Roomy enough for "… · file 3/12 · 740 MB / 2.1 GB" without truncating,
+     but capped on narrow windows. */
+  max-width: min(60vw, 560px);
 }
 
 .statusbar__transfer-track {
@@ -995,7 +1027,6 @@
   flex-direction: column;
   height: 100%;
   background: var(--bg-secondary);
-  border-left: 1px solid var(--border);
   overflow: hidden;
 }
 
@@ -1071,6 +1102,14 @@
   gap: var(--space-1);
   padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--border);
+  /* The title bar carries the host identity — the same tinted-fill treatment
+     as the sidebar host bars (the card's outer border stays the general
+     --border; a colored frame on top of a colored bar was too much). */
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--host-color, var(--border)) 42%, var(--bg-secondary)),
+    color-mix(in srgb, var(--host-color, var(--border)) 12%, var(--bg-secondary))
+  );
 }
 
 .repo-card__backend {
@@ -1085,14 +1124,13 @@
   color: var(--fg-secondary);
 }
 
-.repo-card__backend--jj {
-  background: rgba(189, 147, 249, 0.18);
-  color: var(--purple);
-}
-
+/* Which VCS (git/jj): informational, not a control the user aims for — keep it
+   muted (the label already says which) rather than a colored badge grabbing
+   the eye. Colocated repos can still toggle it; that affordance is the border. */
+.repo-card__backend--jj,
 .repo-card__backend--git {
-  background: rgba(255, 184, 108, 0.16);
-  color: var(--orange);
+  background: var(--bg-tertiary);
+  color: var(--fg-secondary);
 }
 
 .repo-card__name {
@@ -1239,20 +1277,12 @@
   font-size: var(--font-size-xs);
 }
 
-.color-menu__swatch {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  cursor: pointer;
-}
-
-.color-menu__swatch:hover {
-  transform: scale(1.2);
-}
-
-.color-menu__reset {
-  padding: 0 var(--space-2);
+/* Position entry ("Make this Remote N") with the slot's color dot. */
+.color-menu__slot {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 1px var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--fg-secondary);
@@ -1260,8 +1290,16 @@
   cursor: pointer;
 }
 
-.color-menu__reset:hover {
+.color-menu__slot:hover {
   color: var(--fg-primary);
+  background: var(--bg-tertiary);
+}
+
+.color-menu__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 auto;
 }
 
 /* The ⋯ actions dropdown (same interaction as the branch menu) */
@@ -1392,7 +1430,7 @@
   padding: 0 var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  color: var(--cyan, #8be9fd);
+  color: var(--cyan);
   font-family: var(--font-code);
   font-size: 10px;
 }
@@ -1475,7 +1513,7 @@
 }
 
 .md-preview__body a {
-  color: var(--cyan, #8be9fd);
+  color: var(--cyan);
   text-decoration: underline;
   cursor: default;
 }
@@ -1622,11 +1660,11 @@
 
 /* Merge-conflict block highlighting in the editor (ours / theirs) */
 .merge-current {
-  background: rgba(80, 250, 123, 0.08);
+  background: color-mix(in srgb, var(--green) 8%, transparent);
 }
 
 .merge-incoming {
-  background: rgba(139, 233, 253, 0.08);
+  background: color-mix(in srgb, var(--cyan) 8%, transparent);
 }
 
 .repo-card__ab {
@@ -1778,11 +1816,12 @@
 .repo-card__group-act {
   text-transform: none;
   letter-spacing: 0;
-  color: var(--accent);
+  color: var(--fg-secondary);
   cursor: pointer;
 }
 
 .repo-card__group-act:hover {
+  color: var(--fg-primary);
   text-decoration: underline;
 }
 
@@ -1953,7 +1992,6 @@
   flex-direction: column;
   height: 100%;
   background: var(--bg-secondary);
-  border-right: 1px solid var(--border);
   min-width: 0;
 }
 
@@ -1980,7 +2018,69 @@
 .sidebar__actions {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: var(--lwr-hide-gap);
+}
+/* L/W/R toggles as a group with the bigger inter-button gap; the connection
+   gauge in the title bar aligns its clusters over W and R using the same
+   geometry tokens. */
+.sidebar__lwr {
+  display: flex;
+  align-items: center;
+  gap: var(--lwr-gap);
+}
+
+/* Connection tally: one diagonal stroke per attached WSL/remote host. It sits
+   in the TITLE bar, right-aligned over the explorer's L/W/R toggles — the
+   overlay spans the sidebar's width (--sidebar-w, set on .app) and its
+   padding-right clears the section's hide button. Pointer-transparent except
+   the gauge itself, so it never blocks window dragging. */
+.conns-group {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end; /* sit at the bottom of the bar, near the toggles below */
+  padding-bottom: 2px;
+  transform: translateX(-50%); /* center the cluster on its toggle's x */
+  pointer-events: auto; /* the tiny cluster is hoverable; drag the rest */
+}
+.conns-group--wsl {
+  left: var(--gauge-w-x);
+}
+.conns-group--remote {
+  left: var(--gauge-r-x);
+}
+.conns-gauge {
+  display: block;
+}
+.conns-gauge line {
+  stroke: color-mix(in srgb, var(--titlebar-fg) 45%, transparent);
+  stroke-width: 1;
+}
+/* Connecting / reconnecting: amber + a gentle pulse so a flaky link is seen. */
+.conns-gauge line.conns-gauge--active {
+  stroke: var(--warning);
+  stroke-width: 1.5;
+  animation: conns-pulse 1.4s ease-in-out infinite;
+}
+/* Disconnected: stable red — a host that's down, awaiting a manual reconnect. */
+.conns-gauge line.conns-gauge--down {
+  stroke: var(--error);
+  stroke-width: 1.5;
+}
+@keyframes conns-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .conns-gauge line.conns-gauge--active {
+    animation: none;
+  }
 }
 
 .sidebar__content {
@@ -2030,7 +2130,7 @@
 }
 
 .icon-btn--danger:hover {
-  background: rgba(255, 85, 85, 0.16);
+  background: color-mix(in srgb, var(--red) 16%, transparent);
   color: var(--red);
 }
 
@@ -2043,12 +2143,20 @@
   gap: var(--space-1);
 }
 
+/* The Remote section's connect UI carries the REMOTE identity, not the generic
+   accent — accent equals section-local (both crimson), so an accent button
+   here reads as "Local". Host items and the connect button use section-remote. */
+.conn-list .btn--primary {
+  background: var(--section-remote);
+  border-color: var(--section-remote);
+}
+
 .wsl-install {
   margin: 0 var(--space-4) var(--space-3);
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--purple);
   border-radius: var(--radius-md);
-  background: rgba(189, 147, 249, 0.1);
+  background: color-mix(in srgb, var(--purple) 10%, transparent);
 }
 
 .wsl-install__text {
@@ -2165,7 +2273,10 @@
 }
 
 .btn--ghost {
-  background: transparent;
+  /* Solid, not transparent: on a modal (bg-secondary surface) this looks
+     identical to the old flat ghost, but on scrims/overlays (the transfer
+     conflict sheet) the button no longer shows the content through itself. */
+  background: var(--bg-secondary);
 }
 
 .btn--block {
@@ -2177,7 +2288,7 @@
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(13, 14, 20, 0.6);
+  background: var(--overlay);
   backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
@@ -2239,7 +2350,7 @@
   margin-top: var(--space-5);
   padding: var(--space-4) var(--space-5);
   border-radius: var(--radius-md);
-  background: rgba(255, 85, 85, 0.12);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
   border: 1px solid var(--red);
   color: var(--red);
   font-size: var(--font-size-sm);
@@ -2286,7 +2397,7 @@
   margin-bottom: var(--space-5);
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-md);
-  background: rgba(139, 233, 253, 0.1);
+  background: color-mix(in srgb, var(--info) 10%, transparent);
   border: 1px solid var(--info);
   color: var(--info);
   font-size: var(--font-size-sm);
@@ -2592,7 +2703,7 @@
   width: 100%;
   text-align: left;
   padding: var(--space-2) var(--space-5);
-  background: rgba(255, 85, 85, 0.12);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
   color: var(--red);
   font-size: var(--font-size-xs);
   cursor: pointer;
@@ -2635,10 +2746,19 @@
   display: flex;
   flex-direction: column;
   background: var(--bg-secondary);
-  border: 1px solid var(--border);
+  /* Green frame — matches the ports/tool view; the palette's identity outline. */
+  border: 1px solid var(--green);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   overflow: hidden;
+}
+
+/* No stray browser focus ring on the palette or its input — the green frame is
+   the cue (the input is autoFocused, so the UA would otherwise draw its own). */
+.finder:focus,
+.finder:focus-visible,
+.finder__input:focus-visible {
+  outline: none;
 }
 
 .finder__input {
@@ -3073,6 +3193,13 @@ select option {
   background: var(--bg-selected);
 }
 
+/* In-host drag drop target (a folder row / the root header being hovered). */
+.file-node--dropinto,
+.root-tree__header--dropinto {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 .file-node--active::before {
   content: "";
   position: absolute;
@@ -3218,7 +3345,9 @@ select option {
  * the connection is untouched, only the section's rendering hides. */
 .section-toggle {
   flex: 0 0 auto;
-  padding: 0 4px;
+  width: var(--toggle-w);
+  padding: 0;
+  text-align: center;
   font-size: 10px;
   font-weight: 700;
   line-height: 16px;
@@ -3490,7 +3619,7 @@ select option {
 }
 
 .context-menu__item--danger:hover {
-  background: rgba(255, 85, 85, 0.18);
+  background: color-mix(in srgb, var(--red) 18%, transparent);
   color: var(--red);
 }
 
@@ -3504,6 +3633,24 @@ select option {
   height: 1px;
   background: var(--border);
   margin: var(--space-2) 0;
+}
+
+/* Destination label atop the drag-drop Move/Copy popup. */
+.context-menu__head {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+
+/* Click-away layer under the drop popup (sits below the z-1200 menu). */
+.drop-menu__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1150;
 }
 
 /* ------------------------------------------------------------------ Editor area */
@@ -3659,6 +3806,542 @@ select option {
   text-decoration: underline;
 }
 
+/* ---- Focus view (F11): the full-window CHAT workspace -------------------- */
+/* Overlays the normal layout: agent list left, the active agent's live
+   terminal right. The editor is never involved. */
+.focus-view {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  background: var(--bg-primary);
+}
+
+.focus-view__list {
+  /* width/flex-basis set inline (resizable). */
+  position: relative;
+  min-height: 0; /* let the groups scroll instead of growing the list */
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+}
+
+/* Drag strip on the panel's right edge (resize 260–390). */
+.focus-view__resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 2;
+}
+.focus-view__resize:hover {
+  background: var(--accent);
+  opacity: 0.4;
+}
+
+/* Agents scroll; the HOSTS block stays pinned at the bottom. */
+.focus-view__groups {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-2);
+  gap: var(--space-2);
+}
+
+.focus-view__hosts {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--space-2) var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.focus-view__hostshead {
+  padding: var(--space-2) var(--space-3);
+}
+
+/* F11's full-width bottom bar — reuses .statusbar; a quiet left-side hint. */
+.focus-bar__label {
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.06em;
+  color: var(--fg-secondary);
+  opacity: 0.7;
+}
+
+.focus-view__bell {
+  position: relative;
+}
+
+.focus-view__bell .statusbar__attn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+}
+
+.focus-view__hostrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: 17px;
+}
+
+.focus-view__hostlabel {
+  cursor: grab;
+}
+
+/* The host whose usage panel is currently on the right. */
+.focus-view__hostrow--active {
+  background: var(--bg-selected);
+}
+
+.focus-view__hostinfo {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* inherit the row's size (17px) — no override */
+}
+
+.focus-view__hostlabel {
+  font-weight: 700;
+}
+
+/* State word (issue signal, now text not a dot): quiet when connected, warm
+   while connecting, red when down. */
+.focus-view__hoststate {
+  margin-left: var(--space-2);
+  color: var(--fg-secondary);
+  font-size: 13px;
+}
+
+.focus-view__hoststate--connecting,
+.focus-view__hoststate--reconnecting {
+  color: var(--orange);
+}
+
+.focus-view__hoststate--disconnected {
+  color: var(--red);
+}
+
+/* "check usage" — a quiet text button. */
+.focus-view__usage {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  color: var(--fg-secondary);
+  font-size: 13px;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.focus-view__usage:hover {
+  background: var(--bg-tertiary);
+  color: var(--fg-primary);
+}
+
+/* Right pane + its loading overlay (usage probe startup). */
+.focus-view__panewrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  display: flex;
+}
+
+.focus-view__panewrap .focus-view__pane {
+  flex: 1 1 auto;
+}
+
+/* The app-logo backdrop for every not-ready right-pane state (loading usage,
+   nothing selected, and future failures). As an overlay (loading) it covers
+   the terminal; as the pane itself (no agent) it fills it. */
+.focus-view__splash {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-5);
+  background: var(--bg-primary);
+  color: var(--fg-secondary);
+  font-size: var(--font-size-sm);
+  text-align: center;
+  padding: var(--space-8);
+}
+
+.focus-view__splash-logo {
+  width: 96px;
+  height: 96px;
+  opacity: 0.4;
+}
+
+.focus-view__splash-hint {
+  opacity: 0.7;
+  max-width: 32ch;
+}
+
+/* "loading usage" with an animated, length-changing ellipsis (no spinner). */
+.focus-view__loading::after {
+  content: "";
+  animation: ellipsis 1.4s steps(1, end) infinite;
+}
+
+@keyframes ellipsis {
+  0% {
+    content: "";
+  }
+  25% {
+    content: ".";
+  }
+  50% {
+    content: "..";
+  }
+  75% {
+    content: "...";
+  }
+}
+
+/* The focus view's notification pop sits directly ABOVE the HOST block. */
+.bell-pop--focus {
+  position: absolute;
+  left: var(--space-2);
+  right: var(--space-2);
+  bottom: 100%;
+  margin-bottom: var(--space-2);
+  width: auto;
+  z-index: 70;
+}
+
+
+.focus-view__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* Nudged right, with generous room beneath the section label. */
+  padding: var(--space-3) var(--space-3) var(--space-6) var(--space-5);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--fg-secondary);
+}
+
+.focus-view__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* The ＋ host-picker anchors its dropdown below itself, like CHAT's. */
+.focus-view__newwrap {
+  position: relative;
+  display: flex;
+}
+
+.focus-view__menu {
+  position: absolute;
+  top: 24px;
+  right: 0;
+}
+
+.focus-view__list-empty {
+  padding: var(--space-4) var(--space-3);
+  color: var(--fg-secondary);
+  font-size: var(--font-size-sm);
+}
+
+/* One host = one solid block in the host color; a slim colored strip at the
+   top is the identity + drag handle (no name — the color says which host).
+   Blocks are separated by their own borders. */
+.focus-view__group {
+  /* Natural height (all its agents), and never shrink — when the blocks
+     together outgrow the section, `.focus-view__groups` scrolls. */
+  flex: 0 0 auto;
+  position: relative; /* anchors the reorder insertion line (::after) */
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--group-color) 22%, var(--bg-secondary));
+}
+
+/* Subsection labels (only when purposes exist): IN PROGRESS / UNCATEGORIZED.
+   Extra gap ABOVE (separates the two runs) and space UNDER the label. */
+.focus-view__subhead {
+  margin: var(--space-6) 0 var(--space-3);
+  padding: 0 var(--space-2);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--fg-secondary);
+}
+.focus-view__subhead:first-child {
+  /* Snug up under the CHAT label. */
+  margin-top: calc(-1 * var(--space-2));
+}
+
+/* Host block header — the host name, on a colored bar the SAME size as a
+   purpose header; also the reorder drag handle. */
+.focus-view__hosthead,
+.focus-view__purposehead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 5px var(--space-3) 5px var(--space-4);
+  background: color-mix(in srgb, var(--group-color) 34%, var(--bg-secondary));
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--fg-primary);
+  cursor: grab;
+}
+.focus-view__hosthead {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Purpose group: a named block (its own color), header = rename + drag handle
+   + dissolve. Agents inside keep a host-color accent bar. */
+.focus-view__group--purpose {
+  border-color: color-mix(in srgb, var(--group-color) 50%, var(--border));
+}
+.focus-view__purposename {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.focus-view__prename {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-weight: 700;
+  color: var(--fg-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-focus);
+  border-radius: 4px;
+  padding: 0 4px;
+  outline: none;
+}
+.focus-view__purpose-empty {
+  margin: var(--space-2);
+  padding: 10px var(--space-4);
+  border: 1px dashed color-mix(in srgb, var(--group-color) 60%, var(--border));
+  border-radius: var(--radius-sm);
+  color: var(--fg-secondary);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+/* An agent is being dragged over this block — light it as the drop target. */
+.focus-view__group--drop {
+  outline: 2px solid var(--group-color);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--group-color) 30%, var(--bg-secondary));
+}
+
+/* Reordering a group: the WHOLE block is the drop target, with a green
+   insertion line on the edge the cursor is nearest (so the last slot is
+   reachable, and the topmost slot shows the line on the current top group).
+   Drawn as a pseudo-element ABOVE the block's children — an inset shadow
+   would be hidden behind the header's opaque background. */
+.focus-view__group--before::after,
+.focus-view__group--after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: var(--green);
+  z-index: 3;
+  pointer-events: none;
+}
+.focus-view__group--before::after {
+  top: 0;
+}
+.focus-view__group--after::after {
+  bottom: 0;
+}
+/* Host-identity accent at an agent row's left edge (matters in a purpose
+   block, which mixes hosts). */
+.focus-view__accent {
+  flex: 0 0 3px;
+  align-self: stretch;
+  border-radius: 2px;
+  margin-right: var(--space-1);
+  background: var(--fg-secondary);
+}
+
+.focus-view__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  border: none;
+  background: none;
+  text-align: left;
+  /* Roomier rows = a bigger, easier drag/drop target. */
+  padding: 10px var(--space-4);
+  cursor: grab;
+  min-width: 0;
+  color: var(--fg-primary);
+}
+
+/* An agent would be dropped BEFORE this row — a clear green insertion line,
+   not just a cursor change. */
+.focus-view__item--dropover {
+  box-shadow: inset 0 3px 0 var(--green);
+}
+
+/* Hairline between agents in the same block. */
+.focus-view__item + .focus-view__item {
+  border-top: 1px solid color-mix(in srgb, var(--bg-primary) 30%, transparent);
+}
+
+.focus-view__item:hover {
+  background: color-mix(in srgb, var(--fg-primary) 8%, transparent);
+}
+
+.focus-view__item--active {
+  background: color-mix(in srgb, var(--fg-primary) 16%, transparent);
+}
+
+/* State icon, left of the title (with a bit of breathing room after it). */
+.focus-view__icon {
+  flex: 0 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: var(--space-2);
+}
+.focus-view__shell,
+.focus-view__idle,
+.focus-view__read {
+  color: var(--fg-secondary);
+}
+.focus-view__unread {
+  color: var(--green);
+}
+/* Thinking: the chat glyph bounces so an active agent is unmistakable. */
+.focus-view__thinking {
+  color: var(--cyan);
+  animation: thinkbounce 1s ease-in-out infinite;
+}
+@keyframes thinkbounce {
+  0%,
+  100% {
+    transform: translateY(1px);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+/* Title + the last-line status underneath. */
+.focus-view__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.focus-view__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Titles ~1.3× the base row size. */
+  font-size: calc(var(--font-size-md) * 1.3);
+  font-weight: 600;
+}
+
+/* The agent's last line — quiet, but readable (bumped up). */
+.focus-view__status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-md);
+  color: var(--fg-secondary);
+  font-weight: 400;
+}
+
+.focus-view__rename {
+  min-width: 0;
+  font: inherit;
+  font-size: calc(var(--font-size-md) * 1.3);
+  color: var(--fg-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-focus);
+  border-radius: 4px;
+  padding: 0 4px;
+  outline: none;
+}
+
+/* "Ns ago" — top-right, low-pressure. */
+.focus-view__time {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin-top: 1px;
+  margin-left: auto;
+  padding-right: var(--space-1);
+  color: var(--fg-secondary);
+  font-size: 13px;
+}
+/* The live thinking count reads as active. */
+.focus-view__time--think {
+  color: var(--cyan);
+}
+
+/* ✕ to kill an agent — appears on hover, ~1.3× the old size. */
+.focus-view__kill {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.focus-view__item:hover .focus-view__kill {
+  opacity: 0.6;
+}
+
+.focus-view__kill:hover {
+  opacity: 1;
+  background: var(--bg-selected);
+}
+
+/* The active agent's terminal fills the rest — same hosting contract as
+   .terminal-host / .chat-panel__body (a padded box the reparented
+   terminal-host__inner fills 100%×100%). */
+.focus-view__pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  padding: var(--space-3) 0 var(--space-3) var(--space-5);
+  background: var(--bg-primary);
+}
+
 /* An intentionally empty split: the mark centered, its own ✕ top-right. */
 .editor-group__empty {
   position: absolute;
@@ -3776,7 +4459,7 @@ select option {
   flex: 1 1 auto;
   min-width: 0;
   padding: 5px 0;
-  border-bottom: 1px solid rgba(68, 71, 90, 0.4);
+  border-bottom: 1px solid var(--border);
 }
 
 .commit-row__top {
@@ -3814,7 +4497,7 @@ select option {
 }
 
 .commit-row__ref--head {
-  background: rgba(80, 250, 123, 0.16);
+  background: color-mix(in srgb, var(--green) 16%, transparent);
   color: var(--green);
 }
 
@@ -4019,7 +4702,7 @@ select option {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-5);
-  background: rgba(255, 184, 108, 0.12);
+  background: color-mix(in srgb, var(--orange) 12%, transparent);
   border-bottom: 1px solid var(--orange);
   color: var(--orange);
   font-size: var(--font-size-sm);
@@ -4043,7 +4726,7 @@ select option {
 }
 
 .editor-banner__act:hover {
-  background: rgba(255, 184, 108, 0.18);
+  background: color-mix(in srgb, var(--orange) 18%, transparent);
 }
 
 .empty-state {
@@ -4516,17 +5199,68 @@ select option {
   flex-direction: column;
   height: 100%;
   background: var(--bg-secondary);
+  /* Column separators live on the drag handles (.hdrag), not the panels, so
+     they stay correct when SC/Sessions are dragged to either side. */
 }
 .chat-panel__head {
   border-bottom: 1px solid var(--border);
   padding: 4px 8px 6px;
   background: var(--bg-secondary);
 }
-.chat-panel__dots {
+/* Line 1: the CHAT controls. */
+.chat-panel__bar {
   display: flex;
   align-items: center;
   gap: 2px;
   min-height: 24px;
+}
+/* Line 2: the dot clusters — wrap to more lines when they overflow. */
+.chat-panel__dots {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-height: 24px;
+  margin-top: 4px;
+}
+/* Each cluster (purpose group or host) is a PILL in its color — identity
+   lives on the bundle, so the dots inside stay pure lifecycle. */
+.chat-panel__cluster {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: color-mix(
+    in srgb,
+    var(--cluster-color, var(--fg-secondary)) 32%,
+    var(--bg-secondary)
+  );
+}
+/* A purpose pill reads as a distinct chip (outlined) and leads with its name. */
+.chat-panel__cluster--purpose {
+  outline: 1px solid
+    color-mix(in srgb, var(--cluster-color) 60%, transparent);
+  outline-offset: -1px;
+}
+.chat-panel__pname {
+  padding: 0 3px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--fg-primary);
+  white-space: nowrap;
+  cursor: text;
+}
+.chat-panel__prename {
+  width: 8ch;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  color: var(--fg-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-focus);
+  border-radius: 4px;
+  padding: 0 3px;
+  outline: none;
 }
 .chat-panel__spacer {
   flex: 1;
@@ -4537,7 +5271,7 @@ select option {
 }
 .chat-panel__menu {
   top: 24px;
-  right: 0;
+  left: 0; /* the ＋ now lives at the bar's LEFT — open rightward from it */
 }
 /* The hide (minimize-to-status-bar) chevron is set apart from the other header
  * controls so it's not a mis-click target — identical on every bottom-left
@@ -4550,12 +5284,11 @@ select option {
 .chat-panel__kill {
   margin-left: var(--space-3);
 }
-/* A resident dot: 12px visual inside a 22px hit area; the host color carries
- * identity: the host color is always the outline; the FILL is the lifecycle,
- * active only while a tool (Claude Code, vim…) has announced itself via the
- * terminal title — ready (your turn) = green, running (producing output) =
- * yellow; a bare shell stays blank, a dead shell is blank + dimmed. Picked
- * (on screen) fills white, covering whatever the state is. */
+/* A resident dot: 12px visual inside a 22px hit area. The host color lives
+ * on the CLUSTER pill, so the dot is pure lifecycle (the original colors, no
+ * outline): empty socket = bare shell, green = ready (your turn), yellow =
+ * running, dimmed = dead. Picked (on screen) fills white, covering whatever
+ * the state is. */
 .chat-dot {
   display: flex;
   align-items: center;
@@ -4575,7 +5308,8 @@ select option {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  border: 1.5px solid var(--dot-color, var(--fg-secondary));
+  /* Empty socket: a dark recess in the host pill. */
+  background: color-mix(in srgb, var(--bg-primary) 55%, transparent);
   box-sizing: border-box;
 }
 .chat-dot--ready .chat-dot__mark {
@@ -4585,10 +5319,8 @@ select option {
   background: var(--yellow);
 }
 .chat-dot--dead .chat-dot__mark {
-  opacity: 0.55; /* blank fill; the outline dims with the dead shell */
+  opacity: 0.45;
 }
-/* Picked wins last: a white fill covering the state (the state is visible on
- * the terminal itself while you're looking at it). */
 .chat-dot--picked .chat-dot__mark {
   background: var(--fg-primary);
 }
@@ -4688,6 +5420,21 @@ select option {
   height: 1px;
   margin: 4px 2px;
   background: var(--border);
+}
+/* Section label + color swatch inside the CHAT agent menu. */
+.ctx-menu__label {
+  padding: 4px var(--space-3) 2px;
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.06em;
+  color: var(--fg-secondary);
+}
+.ctx-menu__swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: var(--space-2);
+  vertical-align: middle;
 }
 .terminal-menu {
   position: absolute;
@@ -4877,7 +5624,7 @@ select option {
 }
 
 .transfer-row--drop {
-  background: rgba(189, 147, 249, 0.22);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
   outline: 1px solid var(--accent);
   outline-offset: -1px;
 }
@@ -4973,7 +5720,7 @@ select option {
   align-items: center;
   justify-content: center;
   gap: var(--space-4);
-  background: rgba(13, 14, 20, 0.6);
+  background: var(--overlay);
   backdrop-filter: blur(2px);
 }
 
@@ -4990,6 +5737,95 @@ select option {
 
 .transfer-conflict__actions {
   display: flex;
+  gap: var(--space-2);
+}
+
+/* Pre-flight confirm sheet (route + size) for a cross-host copy. */
+.transfer-confirm {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: var(--overlay);
+  backdrop-filter: blur(2px);
+}
+
+.transfer-confirm__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(420px, 100%);
+  max-height: 100%;
+  padding: var(--space-4) var(--space-5);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.transfer-confirm__route {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--fg-primary);
+}
+
+.transfer-confirm__host {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+
+.transfer-confirm__dir {
+  font-weight: 400;
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+}
+
+.transfer-confirm__arrow {
+  color: var(--fg-secondary);
+}
+
+.transfer-confirm__items {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 8.5rem;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.transfer-confirm__item {
+  font-size: var(--font-size-xs);
+  color: var(--fg-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transfer-confirm__more {
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+}
+
+.transfer-confirm__size {
+  font-size: var(--font-size-sm);
+  color: var(--fg-secondary);
+}
+
+.transfer-confirm__actions {
+  display: flex;
+  justify-content: flex-end;
   gap: var(--space-2);
 }
 

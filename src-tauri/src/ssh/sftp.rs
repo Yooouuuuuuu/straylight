@@ -7,13 +7,13 @@ use std::sync::Arc;
 use std::future::Future;
 use std::pin::Pin;
 
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::ssh::connection::Connection;
 use crate::transport::{
     copy_variant, decode_text, join_path, looks_binary, mode_to_rwx, posix_basename, sort_entries,
-    DirListing, FileContent, FileEntry, FileStat, FileTransport, WriteResult, BINARY_SNIFF,
-    MAX_READ_BYTES,
+    DirListing, FileContent, FileEntry, FileStat, FileTransport, TransferSource, WriteResult,
+    BINARY_SNIFF, MAX_READ_BYTES,
 };
 
 /// A [`FileTransport`] backed by an SSH connection's SFTP subsystem.
@@ -286,7 +286,7 @@ impl FileTransport for SftpTransport {
         Ok(dest)
     }
 
-    async fn open_read(&self, path: &str) -> Result<Pin<Box<dyn AsyncRead + Send>>, String> {
+    async fn open_read(&self, path: &str) -> Result<Pin<Box<dyn TransferSource>>, String> {
         let guard = self.0.sftp().await?;
         let sftp = guard.as_ref().expect("sftp session initialized above");
         let file = sftp
@@ -437,7 +437,10 @@ fn copy_recursive(
                 .flush()
                 .await
                 .map_err(|e| format!("could not flush {dst}: {e}"))?;
+            // Await-close both handles; the read side would otherwise leak on a
+            // deep tree (Drop only fires a no-wait close). See `TransferSource`.
             writer.shutdown().await.ok();
+            reader.shutdown().await.ok();
         }
         Ok(())
     })

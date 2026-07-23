@@ -6,8 +6,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Fuse from "fuse.js";
 
+import { copyPath, downloadToLocal } from "../lib/fileOps";
 import { basename } from "../lib/format";
-import { fsFind } from "../lib/ipc";
+import { fsFind, revealPath } from "../lib/ipc";
 import { openFileByPath } from "../lib/openFile";
 import {
   collectRoots,
@@ -18,7 +19,7 @@ import {
   type SearchRoot,
   type SearchScope,
 } from "../lib/searchScope";
-import { useAppStore } from "../store/appStore";
+import { useAppStore, type TreeNode } from "../store/appStore";
 import { ScopePicker } from "./ScopePicker";
 import { Tip } from "./Tooltip";
 
@@ -44,7 +45,22 @@ function FinderModal({ onClose }: { onClose: () => void }) {
   const [failed, setFailed] = useState<Record<string, boolean>>({});
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
+  const [menu, setMenu] = useState<{ entry: Entry; x: number; y: number } | null>(
+    null,
+  );
   const listRef = useRef<HTMLDivElement>(null);
+  const localConnId = useAppStore((s) => s.localConnId);
+  const setClipboard = useAppStore((s) => s.setClipboard);
+  const openProperties = useAppStore((s) => s.openProperties);
+
+  const entryPath = (e: Entry) =>
+    `${e.root.replace(/\\/g, "/").replace(/\/+$/, "")}/${e.rel}`;
+  const entryNode = (e: Entry): TreeNode => ({
+    connId: e.connId,
+    path: entryPath(e),
+    name: basename(e.rel),
+    isDir: false,
+  });
 
   const scopeRoots = useMemo(() => rootsForScope(allRoots, scope), [allRoots, scope]);
   const activeRoots = useMemo(
@@ -219,6 +235,11 @@ function FinderModal({ onClose }: { onClose: () => void }) {
                   className={`finder__item ${i === active ? "finder__item--active" : ""}`}
                   onMouseEnter={() => setActive(i)}
                   onClick={() => openEntry(e)}
+                  onContextMenu={(ev) => {
+                    ev.preventDefault();
+                    setActive(i);
+                    setMenu({ entry: e, x: ev.clientX, y: ev.clientY });
+                  }}
                 >
                   <span className="finder__name">{basename(e.rel)}</span>
                   <span className="finder__path">
@@ -231,6 +252,85 @@ function FinderModal({ onClose }: { onClose: () => void }) {
           )}
         </div>
       </div>
+      {menu && (
+        <>
+          <div
+            style={{ position: "fixed", inset: 0, zIndex: 1150 }}
+            onMouseDown={(ev) => {
+              ev.stopPropagation();
+              setMenu(null);
+            }}
+            onContextMenu={(ev) => {
+              ev.preventDefault();
+              setMenu(null);
+            }}
+          />
+          <div
+            className="context-menu"
+            style={{ left: menu.x, top: menu.y }}
+            onContextMenu={(ev) => ev.preventDefault()}
+          >
+            <button
+              className="context-menu__item"
+              onClick={() => openEntry(menu.entry)}
+            >
+              Open
+            </button>
+            <div className="context-menu__sep" />
+            <button
+              className="context-menu__item"
+              onClick={() => {
+                setClipboard("copy", entryNode(menu.entry));
+                setMenu(null);
+              }}
+            >
+              Copy
+            </button>
+            <button
+              className="context-menu__item"
+              onClick={() => {
+                void copyPath(entryPath(menu.entry));
+                setMenu(null);
+              }}
+            >
+              Copy Path
+            </button>
+            {menu.entry.connId === localConnId ? (
+              <button
+                className="context-menu__item"
+                onClick={() => {
+                  void revealPath(entryPath(menu.entry));
+                  setMenu(null);
+                }}
+              >
+                Reveal in file manager
+              </button>
+            ) : (
+              <Tip label="Downloads to your local machine (Preferences → Download folder)">
+                <button
+                  className="context-menu__item"
+                  onClick={() => {
+                    void downloadToLocal(menu.entry.connId, [entryPath(menu.entry)]);
+                    setMenu(null);
+                  }}
+                >
+                  Download
+                </button>
+              </Tip>
+            )}
+            <div className="context-menu__sep" />
+            <button
+              className="context-menu__item"
+              onClick={() => {
+                openProperties([entryNode(menu.entry)]);
+                onClose();
+              }}
+            >
+              Properties
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -53,6 +53,8 @@ import { CommandPalette } from "./components/CommandPalette";
 import { TabSwitcher } from "./components/TabSwitcher";
 import { StartupAskDialog } from "./components/StartupAskDialog";
 import { TextContextMenu } from "./components/TextContextMenu";
+import { FocusView } from "./components/FocusView";
+import { FocusBar } from "./components/FocusBar";
 import { Finder } from "./components/Finder";
 import { SearchInFiles } from "./components/SearchInFiles";
 import { ToastStack } from "./components/Toast";
@@ -124,6 +126,7 @@ export default function App() {
     s.terminals.some((t) => t.inChat),
   );
   const historyOpen = useVcsStore((s) => s.historyRepo != null);
+  const focusView = useAppStore((s) => s.focusView);
 
   const terminalPanel = useRef<ImperativePanelHandle>(null);
   const restored = useRef(false);
@@ -475,8 +478,17 @@ export default function App() {
   };
 
   return (
-    <div className="app">
+    <div
+      className="app"
+      // Sidebar width drives the connection gauge's W/R alignment. Kept at the
+      // last width even when the explorer is hidden, so the gauge holds place.
+      style={{ "--sidebar-w": `${hw.sidebar}px` } as React.CSSProperties}
+    >
       <TitleBar />
+      {/* The normal layout stays MOUNTED under the focus overlay — unmounting
+          TerminalPanel would dispose every terminal. The overlay covers the
+          body (never the title bar) and reparents the active agent's xterm
+          into its own pane. */}
       <div className="app-body">
         {full.map((t, k) => (
           <Fragment key={t}>
@@ -484,8 +496,12 @@ export default function App() {
             {renderElement(t)}
           </Fragment>
         ))}
+        {/* Focus view (F11): a full-window CHAT workspace over the body. */}
+        {focusView && <FocusView />}
       </div>
-      <StatusBar />
+      {/* In the focus view the status bar is replaced by a slim full-width
+          bar (same footprint, just the notification bell). */}
+      {focusView ? <FocusBar /> : <StatusBar />}
       {dialogOpen && <ConnectionDialog />}
       <PassphraseDialog />
       <HostKeyDialog />
