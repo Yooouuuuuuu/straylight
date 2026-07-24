@@ -83,6 +83,7 @@ impl FileTransport for SftpTransport {
         }
 
         sort_entries(&mut entries);
+        self.0.touch_activity(); // completed SFTP op = proof of life
         Ok(DirListing {
             path: base,
             entries,
@@ -140,6 +141,7 @@ impl FileTransport for SftpTransport {
             .await
             .map_err(|e| format!("could not read {path}: {e}"))?;
 
+        self.0.touch_activity();
         let (content, lossy) = decode_text(buffer);
         Ok(FileContent {
             path: path.to_string(),
@@ -161,6 +163,7 @@ impl FileTransport for SftpTransport {
             .metadata(path.to_string())
             .await
             .map_err(|e| format!("could not stat {path}: {e}"))?;
+        self.0.touch_activity();
         Ok(FileStat {
             path: path.to_string(),
             size: meta.size.unwrap_or(0),
@@ -210,6 +213,7 @@ impl FileTransport for SftpTransport {
             .and_then(|m| m.mtime)
             .map(|m| m as i64)
             .unwrap_or(0);
+        self.0.touch_activity();
         Ok(WriteResult {
             conflict: false,
             modified,
@@ -223,6 +227,7 @@ impl FileTransport for SftpTransport {
         sftp.rename(path.to_string(), new_path.clone())
             .await
             .map_err(|e| format!("could not rename {path}: {e}"))?;
+        self.0.touch_activity();
         Ok(new_path)
     }
 
@@ -293,6 +298,7 @@ impl FileTransport for SftpTransport {
             .open(path.to_string())
             .await
             .map_err(|e| format!("could not open {path}: {e}"))?;
+        self.0.touch_activity();
         Ok(Box::pin(file))
     }
 
@@ -303,6 +309,7 @@ impl FileTransport for SftpTransport {
             .create(path.to_string())
             .await
             .map_err(|e| format!("could not create {path}: {e}"))?;
+        self.0.touch_activity();
         Ok(Box::pin(file))
     }
 

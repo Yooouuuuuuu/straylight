@@ -646,6 +646,11 @@ interface AppState {
   revealTarget: { connId: string; path: string; line: number } | null;
   sidebarVisible: boolean;
   terminalVisible: boolean;
+  /** Panels hidden BY THE WINDOW SIZE (lib/layoutBudget) — a derived overlay
+   *  on top of the user's visibility flags, never mutating them: growing the
+   *  window restores exactly what the resize hid. */
+  suppressed: import("../lib/layoutBudget").Suppressed;
+  setSuppressed: (s: import("../lib/layoutBudget").Suppressed) => void;
   /** User preference for which workspace a new terminal opens on. */
   newTerminalTarget: TerminalTargetPref;
   // Explorer controls are per-section: Local and Remote each keep their own
@@ -1096,6 +1101,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   terminalView: "terminals" as const,
   sidebarVisible: true,
   terminalVisible: true,
+  suppressed: { chat: false, scm: false, sidebar: false, terminal: false },
+  setSuppressed: (suppressed) => set({ suppressed }),
   newTerminalTarget: loadTermTarget(),
   showHiddenLocal: false,
   showHiddenRemote: false,

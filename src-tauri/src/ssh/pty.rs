@@ -109,18 +109,22 @@ async fn open_ssh_pty(
     let keepalive = connection.clone();
 
     tokio::spawn(async move {
-        let _keepalive = keepalive;
+        let conn = keepalive;
         loop {
             tokio::select! {
                 msg = channel.wait() => {
                     match msg {
                         Some(russh::ChannelMsg::Data { data }) => {
+                            // Server output = proof of life; an active terminal
+                            // spares the supervisor its probe.
+                            conn.touch_activity();
                             let _ = task_app.emit(
                                 "pty-output",
                                 PtyOutput { pty_id: task_id.clone(), data: data.to_vec() },
                             );
                         }
                         Some(russh::ChannelMsg::ExtendedData { data, .. }) => {
+                            conn.touch_activity();
                             let _ = task_app.emit(
                                 "pty-output",
                                 PtyOutput { pty_id: task_id.clone(), data: data.to_vec() },

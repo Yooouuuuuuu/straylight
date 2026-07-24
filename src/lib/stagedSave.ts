@@ -452,18 +452,21 @@ function connIdForConnKey(connKey: string): string | null {
   );
 }
 
-/** Whether a host is currently connected. Local always is; a reconnecting or
- *  dropped host is not — reconcile waits for the reconnect to call it. */
+/** Whether a host is currently usable. Local always is; a reconnecting or
+ *  dropped host is not — reconcile waits for the reconnect to call it.
+ *  Degraded counts as usable: the channels are alive (possibly slow), and the
+ *  staged-save protocol is atomic either way. */
 function connReady(connKey: string): boolean {
+  const usable = (state?: string) => state === "connected" || state === "degraded";
   const s = useAppStore.getState();
   if (connKey === "local") return true;
   if (connKey.startsWith("wsl:")) {
-    return s.wsls.find((w) => w.conn.name === connKey.slice(4))?.state === "connected";
+    return usable(s.wsls.find((w) => w.conn.name === connKey.slice(4))?.state);
   }
-  return (
+  return usable(
     s.remotes.find(
       (r) => `${r.conn.user}@${r.conn.host}:${r.conn.port}` === connKey,
-    )?.state === "connected"
+    )?.state,
   );
 }
 

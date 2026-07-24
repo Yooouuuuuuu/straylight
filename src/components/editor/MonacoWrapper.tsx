@@ -70,6 +70,18 @@ export function MonacoWrapper({ groupId }: { groupId: number }) {
       conflictDecos.set(model ? conflictDecorations(model) : []);
     };
 
+    // Minimap auto-off in a narrow editor — a minimap on a squeezed pane
+    // costs more room than it informs. Re-enabled the moment width returns.
+    let minimapOn = true;
+    const minimapObs = new ResizeObserver(() => {
+      const on = host.clientWidth >= 500;
+      if (on !== minimapOn) {
+        minimapOn = on;
+        editor.updateOptions({ minimap: { enabled: on } });
+      }
+    });
+    minimapObs.observe(host);
+
     const cursorSub = editor.onDidChangeCursorPosition((event) => {
       const id = shownTabRef.current;
       if (id) {
@@ -87,6 +99,7 @@ export function MonacoWrapper({ groupId }: { groupId: number }) {
     const modelSub = editor.onDidChangeModel(() => updateConflictDecos());
 
     return () => {
+      minimapObs.disconnect();
       cursorSub.dispose();
       changeSub.dispose();
       modelSub.dispose();

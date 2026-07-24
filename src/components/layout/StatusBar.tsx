@@ -45,11 +45,14 @@ export function StatusBar() {
   const setBellOpen = useAppStore((s) => s.setBellOpen);
 
   // A bell in a HIDDEN home badges that home's button — visible homes show it
-  // on the entry/dot itself.
+  // on the entry/dot itself. Suppressed-by-window-size counts as hidden.
+  const suppressed = useAppStore((s) => s.suppressed);
   const bellInPanel =
-    !terminalVisible && terminals.some((t) => !t.inChat && belled[t.id]);
+    (!terminalVisible || suppressed.terminal) &&
+    terminals.some((t) => !t.inChat && belled[t.id]);
   const bellInChat =
-    !chatVisible && terminals.some((t) => t.inChat && belled[t.id]);
+    (!chatVisible || suppressed.chat) &&
+    terminals.some((t) => t.inChat && belled[t.id]);
   const vcsRepos = useVcsStore((s) => s.repos);
   const toggleScm = useVcsStore((s) => s.toggleScm);
   const setTabLineEnding = useAppStore((s) => s.setTabLineEnding);
@@ -124,10 +127,8 @@ export function StatusBar() {
         onClick={() => toggleTerminal()}
       >
         <IconTerminalGlyph size={13} />
-        <span className="statusbar__panel-label">
-          TERMINAL
-          {bellInPanel && <IconBell size={10} className="statusbar__panelbell" />}
-        </span>
+        <span className="statusbar__panel-label">TERMINAL</span>
+        {bellInPanel && <IconBell size={10} className="statusbar__panelbell" />}
       </span>
 
       {(!uiConfig.disableChat || terminals.some((t) => t.inChat)) && (
@@ -138,10 +139,8 @@ export function StatusBar() {
             onClick={() => toggleChat()}
           >
             <IconChatBubble size={13} />
-            <span className="statusbar__panel-label">
-              SESSIONS
-              {bellInChat && <IconBell size={10} className="statusbar__panelbell" />}
-            </span>
+            <span className="statusbar__panel-label">SESSIONS</span>
+            {bellInChat && <IconBell size={10} className="statusbar__panelbell" />}
           </span>
         </>
       )}
@@ -151,7 +150,7 @@ export function StatusBar() {
           something happens — a light that brightens is calmer than one that
           suddenly appears. The explorer host bars keep their full state dots. */}
       {wsls.length > 0 && (
-        <>
+        <span className="sb-group sb-d1">
           <span className="statusbar__sep" />
           <span className="statusbar__seclabel">WSL</span>
           {wsls.map((w) => (
@@ -167,10 +166,10 @@ export function StatusBar() {
               </span>
             </Tip>
           ))}
-        </>
+        </span>
       )}
       {remotes.length > 0 && (
-        <>
+        <span className="sb-group sb-d2">
           <span className="statusbar__sep" />
           <span className="statusbar__seclabel">REMOTE</span>
           {remotes.map((r) => (
@@ -186,7 +185,7 @@ export function StatusBar() {
               </span>
             </Tip>
           ))}
-        </>
+        </span>
       )}
 
       <span className="statusbar__spacer" />
@@ -194,37 +193,41 @@ export function StatusBar() {
       <TransferProgressBar variant="status" />
 
       {activeRepo?.status && (
-        <Tip label={`${activeRepo.label} · ${activeRepo.status.ref}`}>
-          <span className="statusbar__item statusbar__branch">
-            <IconBranch size={12} /> {activeRepo.status.ref}
-            {activeRepo.status.ahead ? ` ↑${activeRepo.status.ahead}` : ""}
-            {activeRepo.status.behind ? ` ↓${activeRepo.status.behind}` : ""}
-          </span>
-        </Tip>
+        <span className="sb-group sb-d3">
+          <Tip label={`${activeRepo.label} · ${activeRepo.status.ref}`}>
+            <span className="statusbar__item statusbar__branch">
+              <IconBranch size={12} /> {activeRepo.status.ref}
+              {activeRepo.status.ahead ? ` ↑${activeRepo.status.ahead}` : ""}
+              {activeRepo.status.behind ? ` ↓${activeRepo.status.behind}` : ""}
+            </span>
+          </Tip>
+        </span>
       )}
 
       {active && (
         <>
-          <Tip label={activeHost ? `${activeHost}: ${active.path}` : active.path}>
-            <span className="statusbar__item statusbar__path">
-              {/* Non-local files carry their host up front (local stays plain) —
-                  two hosts' identical paths stop looking alike. */}
-              {activeHost && (
-                <span
-                  className="statusbar__pathhost"
-                  style={activeHostColor ? { color: activeHostColor } : undefined}
-                >
-                  {activeHost}:
-                </span>
-              )}
-              {active.path}
-            </span>
-          </Tip>
-          <span className="statusbar__item">
+          <span className="sb-group sb-d4">
+            <Tip label={activeHost ? `${activeHost}: ${active.path}` : active.path}>
+              <span className="statusbar__item statusbar__path">
+                {/* Non-local files carry their host up front (local stays plain) —
+                    two hosts' identical paths stop looking alike. */}
+                {activeHost && (
+                  <span
+                    className="statusbar__pathhost"
+                    style={activeHostColor ? { color: activeHostColor } : undefined}
+                  >
+                    {activeHost}:
+                  </span>
+                )}
+                {active.path}
+              </span>
+            </Tip>
+          </span>
+          <span className="statusbar__item sb-d5">
             Ln {active.cursor.line}, Col {active.cursor.column}
           </span>
           {eolSwitchable ? (
-            <span className="statusbar__eol">
+            <span className="statusbar__eol sb-d6">
               <Tip label="Change line endings">
                 <span
                   className="statusbar__item statusbar__item--button"
@@ -248,12 +251,12 @@ export function StatusBar() {
               )}
             </span>
           ) : (
-            <span className="statusbar__item">{active.lineEnding}</span>
+            <span className="statusbar__item sb-d6">{active.lineEnding}</span>
           )}
-          <span className="statusbar__item">
+          <span className="statusbar__item sb-d7">
             {active.encoding.toUpperCase()}
           </span>
-          <span className="statusbar__item">
+          <span className="statusbar__item sb-d8">
             {active.isBinary ? "Binary" : prettyLanguage(active.language)}
           </span>
         </>

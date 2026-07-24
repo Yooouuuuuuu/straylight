@@ -4,7 +4,7 @@
 
 Built with **Tauri v2** (a Rust backend on the OS-native WebView) and a **React/TypeScript** frontend, Straylight runs far lighter than an Electron IDE — around **~30–50 MB of idle RAM** (versus VS Code's ~500 MB), in a **~10 MB installer**.
 
-**Built for the AI era.** Your coding agent lives in the terminal now — so Straylight gives it a real one. Genuine system PTYs on the host mean tools like Claude Code run right where your code does, next to the files, editor, and source control they touch. (We build Straylight this way, too.)
+**Built for the AI era.** Your coding agent lives in the terminal now — so Straylight gives it a real one. Genuine system PTYs on the host mean tools like Claude Code run right where your code does, next to the files, editor, and source control they touch. A dedicated **Sessions column** docks your agents beside source control with per-agent status lights, and **F11** opens a full-window agent workspace — every session grouped by host, one keystroke from the code. (We build Straylight this way, too.)
 
 **Status:** Runs from source (the 0.9.x test pass). Installers and binaries debut with the 0.10.0 release.
 
@@ -44,7 +44,12 @@ Track multiple repos across different hosts seamlessly in the left panel, keepin
 
 ### ⌨️ Professional Editor & Terminal Experience
 * **Splittable Monaco Editor:** The core text editing experience is identical to VS Code (Monaco). Features up to three split groups, explicit tab pinning, sticky scroll, real-time Markdown preview (`Ctrl+Shift+V`), line-ending conversion (`LF`/`CRLF`), and a lightweight mode for massive log files.
-* **Hardware-Accelerated Terminals:** `xterm.js` driving genuine system PTYs. Terminals are grouped by host, drag-reorder, and feature a **Pop-out (`⇱`)** action that detaches a running terminal into an editor tab without restarting your shell.
+* **Hardware-Accelerated Terminals:** `xterm.js` driving genuine system PTYs. Terminals are grouped by host with drag-reorder, and any shell can move into the **Sessions column** (or the F11 workspace) without restarting — the live terminal is reparented, never respawned.
+
+### 🎨 Themes & Host Identity
+* **Six built-in themes**, each designed end to end: **Straylight** (the crimson dark default), **Straylight Light**, Dracula, Nord, Solarized Light, and Catppuccin Latte (credits in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+* **Everything is themeable** — every color in the UI, editor, and terminal resolves from a slot in hand-editable `settings.json`; a theme pick is pure data. No hardcoded colors anywhere.
+* **Hosts wear identity colors:** Local + WSL read as a near pair, remotes as their own color family — carried consistently across the sidebar, source-control cards, tab markers, and (optionally) each terminal's cursor and selection, so you always know which machine you're touching.
 
 ---
 
@@ -160,7 +165,8 @@ npm run tauri build
 | <kbd>F5</kbd> / <kbd>Ctrl</kbd> + <kbd>R</kbd> | Refresh Workspace States (dirty tabs kept intact) |
 | <kbd>Ctrl</kbd> + <kbd>Tab</kbd> | Contextual Switcher (editor tabs / terminal groups) |
 | <kbd>Ctrl</kbd> + <kbd>`</kbd> | Toggle Bottom Terminal Panel |
-| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>`</kbd> | New Terminal on the focused terminal's host (only while a terminal is focused) |
+| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>`</kbd> | New Terminal (focused terminal's host, else the selected host group) |
+| <kbd>F11</kbd> | Session Focus — the full-window agent workspace |
 | <kbd>Ctrl</kbd> + <kbd>PageDown</kbd> / <kbd>PageUp</kbd> | Cycle Panel Terminals |
 | <kbd>Ctrl</kbd> + <kbd>B</kbd> | Toggle Sidebar |
 | <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>E</kbd> | Focus File Explorer |
@@ -171,7 +177,7 @@ npm run tauri build
 | <kbd>F2</kbd> | Inline Rename |
 | <kbd>Del</kbd> | Delete File/Folder |
 
-*While a terminal has focus, sequences like <kbd>Ctrl</kbd> + <kbd>C</kbd> are routed to the host shell (e.g. `SIGINT`), not captured by the window. Keybindings are fully customizable in the Settings tab or directly in `settings.json`.*
+*While a terminal has focus, sequences like <kbd>Ctrl</kbd> + <kbd>C</kbd> are routed to the host shell (e.g. `SIGINT`), not captured by the window. Keybindings are fully customizable in Preferences or directly in `settings.json`.*
 
 ---
 

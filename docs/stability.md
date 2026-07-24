@@ -21,21 +21,29 @@ anything below are breaking changes.
   - `confirms` — ask-dialog flags (`{ "exit": false }` silences one). Every
     "don't ask again" checkbox writes here; set a key back to `true` to get
     the dialog back.
-  - `autoConnect` — `{ "wsl": "ask" | "always" | "never", "remote": … }` —
-    the startup reconnect-to-last-host behavior.
+  - `autoConnect` — a list of host keys (`["wsl:Ubuntu", "user@host:22"]`)
+    that reconnect on launch without asking; every other host asks. The ask
+    dialog's "don't ask again" checkbox adds one; Storage → Auto-connect
+    removes them.
   - `drafts` — `{ "enabled": true }` — hot-exit caching of unsaved edits
-    (off = nothing is cached; today's behavior).
-  - `restore` — `{ "openFiles": "ask" | "always" }` — whether cached drafts
-    load back into reopened files on launch.
+    (off = nothing is cached; drafts always auto-restore).
   - `panels` — bottom-panel tool groups: per-tool visibility
     (`"ports": false` hides the chip), the two poll intervals (seconds,
     3–3600), the system-port filter, and ignored hosts.
+  - `ui` — `{ "localOnly": false, "disableChat": false }` — interface
+    reduction switches (honored only while nothing depends on the surface).
+  - `download` — `{ "dir": "" }` — where Download drops files (empty = the
+    OS Downloads folder).
+  - `terminalHostColor` — `true` — each terminal's cursor + selection take
+    its host's identity color (the section slots) instead of the scheme's.
   Live theme sections at the bottom (a quick-theme pick copies a library
   entry over them — pure data):
   - `colors` / `editor` — the full UI and Monaco color token sections. Key
-    names mirror the CSS custom properties and Monaco token groups.
-  - `terminalLocal` / `terminalWsl` / `terminalRemote` — one full xterm
-    ITheme section per shell kind (pwsh / WSL / SSH), no inheritance.
+    names mirror the CSS custom properties and Monaco token groups; `colors`
+    includes the five host-identity slots (`section-local` / `section-wsl` /
+    `section-remote` / `-2` / `-3`).
+  - `terminal` — ONE full xterm ITheme section shared by every shell (hosts
+    are told apart by the identity cursor/selection, not per-scope schemes).
 - **The theme library** lives in a non-user-facing `theme.json` next to it
   (`themes`: name → full sections), seeded once with every built-in theme and
   managed via ⚙ → Manage themes (save current / apply / delete — deletions

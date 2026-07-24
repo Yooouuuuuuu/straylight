@@ -15,6 +15,49 @@ history of design changes — lives in the docs: the decision ledger in
 
 - **Auto-update** — ships with 0.10 (updater keypair + GitHub Releases).
 
+## [0.9.13] - 2026-07-25
+
+The resize round: the layout now has a real degradation ladder — shrink,
+densify, suppress, floor — designed surface by surface, plus the seed ledger
+so new built-in themes reach existing installs.
+
+### Added
+
+- **The layout degrades gracefully as the window shrinks.** When the window
+  can't hold every visible panel at its minimum, columns first SHRINK toward
+  their minimums and are then suppressed — Sessions, then Source Control —
+  always preserving the editor's floor; the explorer is never suppressed
+  (the window floor holds it), the last visible column always survives, and
+  the terminal auto-collapses when the height runs out. Suppression never
+  touches your visibility choices: grow the window back and exactly what the
+  resize hid returns, in reverse order (with a hysteresis band so thresholds
+  don't flicker). The surfaces densify along the way: a slim explorer (where
+  its title would touch the L button) hides the L/W/R toggles and per-file
+  sizes — hideable material layers *under* the title and hide button instead
+  of colliding; the status bar's panel buttons drop to icons and compact
+  (bells survive), and its status/file info hides one item at a time, left
+  to right, down to just the panel icons, an active transfer, and the bell;
+  the terminal list auto-switches to icon-only, and the editor minimap turns
+  itself off below ~500px of editor width. The terminal's group bar
+  densifies by ACTUAL collision, in two stages: when the rightmost host chip
+  touches the Ports button, the four tool chips go icon-only; on the next
+  touch, host chips go letter-only and drop their terminal counts (names
+  live in tooltips) — reversing as the bar regains room. The title bar's
+  connection tally never hides: pushed by a shrinking explorer, it stops a
+  few pixels beside the brand instead. Below every rung the window is
+  floored — a 600×600 square (down from 820×520), the explorer minimum plus
+  a roomy editor/terminal column — and the floor stays meaningful at any
+  zoom (the OS minimum rescales with the page-zoom factor). Also: the
+  window's pre-paint background now matches the Straylight theme instead of
+  the old Dracula default.
+
+- **New built-in themes now reach existing installs.** The theme library
+  keeps a ledger of built-in names it has ever seeded; a built-in missing
+  from the ledger (a newly shipped theme) is added on launch — while your
+  edits are never overwritten and your deletions still stick. Previously the
+  library was seeded once and new built-ins never appeared for anyone with
+  an existing theme.json.
+
 ## [0.9.12] - 2026-07-24
 
 The color era: the whole app became themeable to the bone, the Straylight
@@ -66,6 +109,20 @@ of explorer/transfer power features.
 
 ### Changed
 
+- **Connections stopped executing themselves on suspicion** (Phase 0 of
+  [docs/connections-v2.md](docs/connections-v2.md)). A stalled link used to be
+  treated as a dead one — ~45 s of unanswered keepalives or two slow probes
+  tore down the whole connection and **restarted every terminal**, which on a
+  flaky network meant hourly terminal deaths while plain `ssh` on the same
+  machine survived for days. Now doubt is not death: probe timeouts only mark
+  the connection **degraded** (steady amber dot; every channel stays open and
+  usable), traffic itself counts as proof of life (an active terminal or a
+  moving transfer skips the probe entirely), and the keepalive backstop fires
+  only after ~5 minutes of *total* silence. Teardown + reconnect happens only
+  on hard evidence — a transport error, confirmed twice — or when you ask.
+  Every transition logs its cause, and while this bakes, toasts narrate each
+  change generously (stalled / recovered / lost-with-reason / reconnected);
+  they'll be trimmed after field testing.
 - **The Straylight look, fine-tuned and promoted to the default.** A full
   palette pass toward 1.0: `#AF011C` carries the brand on chrome (dark title
   bar with a whisper of crimson underline), pure red is reserved for errors

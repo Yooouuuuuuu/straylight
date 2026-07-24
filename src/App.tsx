@@ -23,6 +23,18 @@ import { connKeyForConnId, useAppStore, type DockToken } from "./store/appStore"
 import { useVcsStore } from "./store/vcsStore";
 import { initDrafts } from "./lib/drafts";
 import { initFileWatching } from "./lib/fileWatch";
+import {
+  BAND,
+  clampedWidths,
+  EDITOR_MIN_Y,
+  SUPPRESS_ORDER,
+  TERMINAL_MIN_Y,
+  useWindowSize,
+  xSuppressionFor,
+  Y_STATUSBAR,
+  Y_TITLEBAR,
+  type SuppressKey,
+} from "./lib/layoutBudget";
 import { initTreeWatching } from "./lib/treeWatch";
 import { initSettings, uiConfig } from "./lib/settings";
 import { reconcilePendingSaves, startSaveSweep } from "./lib/stagedSave";
@@ -229,16 +241,55 @@ export default function App() {
   // stay valid — but the old SFTP/PTY channels are dead, so on recovery we
   // refresh the tree and restart the terminal.
   useEffect(() => {
+    // Generous state-transition toasts (build-phase rule, docs/connections-v2.md):
+    // every distinct transition says what happened and what it means for the
+    // user's terminals. Same-state updates (reconnect attempts, still-stalled
+    // pings) never re-toast. We trim after field testing.
+    const toastTransition = (
+      name: string,
+      prev: string,
+      next: string,
+      message: string | null,
+    ) => {
+      const store = useAppStore.getState();
+      if (prev === next) return;
+      if (next === "degraded") {
+        store.pushNotice(
+          "warn",
+          `${name}: ${message ?? "connection stalled — terminals stay open."}`,
+        );
+      } else if (next === "connected" && prev === "degraded") {
+        store.pushNotice(
+          "info",
+          `${name}: connection recovered — nothing was restarted.`,
+        );
+      } else if (next === "reconnecting") {
+        store.pushNotice(
+          "warn",
+          `${name}: ${message ?? "connection lost — reconnecting…"}`,
+        );
+      } else if (next === "disconnected") {
+        store.pushNotice(
+          message ? "error" : "info",
+          `${name}: disconnected${message ? ` — ${message}` : "."}`,
+        );
+      }
+      // reconnecting → connected keeps its dedicated "Reconnected to X." toast
+      // in the branches below (it also restarts terminals + reconciles saves).
+    };
+
     const unlistenPromise = onSshStatus((status) => {
       const store = useAppStore.getState();
       const entry = store.remotes.find((r) => r.conn.connId === status.connId);
       if (entry) {
-        const wasReconnecting = entry.state === "reconnecting";
+        const prev = entry.state;
+        const wasReconnecting = prev === "reconnecting";
         store.setRemoteState(status.connId, status.state, status.message);
+        toastTransition(entry.conn.name, prev, status.state, status.message);
         if (status.state === "connected" && wasReconnecting) {
           store.refreshRemote(status.connId);
           store.restartConnTerminals(status.connId);
-          store.pushNotice("info", `Reconnected to ${entry.conn.name}.`);
+          store.pushNotice("info", `Reconnected to ${entry.conn.name} — terminals restarted.`);
           // Same recovery as a relaunch: resolve saves stranded by the drop.
           // Anything dispatched before this instant died with the old link.
           const connKey = connKeyForConnId(status.connId);
@@ -252,12 +303,14 @@ export default function App() {
       // only succeeds here if sshd is still alive.)
       const w = store.wsls.find((x) => x.conn.connId === status.connId);
       if (w) {
-        const wasReconnecting = w.state === "reconnecting";
+        const prev = w.state;
+        const wasReconnecting = prev === "reconnecting";
         store.setWslConnState(status.connId, status.state);
+        toastTransition(w.conn.name, prev, status.state, status.message);
         if (status.state === "connected" && wasReconnecting) {
           store.refreshConn(status.connId);
           store.restartConnTerminals(status.connId);
-          store.pushNotice("info", `Reconnected to ${w.conn.name}.`);
+          store.pushNotice("info", `Reconnected to ${w.conn.name} — terminals restarted.`);
           const connKey = connKeyForConnId(status.connId);
           if (connKey) void reconcilePendingSaves(status.connId, connKey, Date.now());
         }
@@ -353,13 +406,50 @@ export default function App() {
     if (historyOpen) setSidebarVisible(true);
   }, [historyOpen, setSidebarVisible]);
 
-  // Drive the terminal panel's collapse state; blur it when hidden. Resizes
-  // flow through useTerminal, which debounces them so ConPTY isn't repainted
-  // per frame.
+  // Window-size budget: suppress panels (Sessions → SC → explorer, plus the
+  // terminal on Y) when the window can't hold them — a derived overlay that
+  // never touches the user's visibility flags, restored in reverse on grow.
+  const win = useWindowSize();
+  const suppressed = useAppStore((s) => s.suppressed);
+  useEffect(() => {
+    const s = useAppStore.getState();
+    const shown: Record<SuppressKey, boolean> = {
+      chat: chatVisible && (!uiConfig.disableChat || hasChatResidents),
+      scm: scmVisible,
+      sidebar: sidebarVisible,
+    };
+    const want = xSuppressionFor(win.w, shown);
+    // Hysteresis: a currently-suppressed panel only comes back when it would
+    // also fit at (width − BAND), so the boundary doesn't flap while dragging.
+    const stable = xSuppressionFor(win.w - BAND, shown);
+    const next = { ...s.suppressed };
+    for (const k of SUPPRESS_ORDER) {
+      next[k] = want.has(k) || (s.suppressed[k] && stable.has(k));
+    }
+    // The explorer is never suppressed (the window floor holds it) — also
+    // clears any state stuck from before this rule.
+    next.sidebar = false;
+    const bodyH = win.h - Y_TITLEBAR - Y_STATUSBAR;
+    next.terminal =
+      bodyH < EDITOR_MIN_Y + TERMINAL_MIN_Y ||
+      (s.suppressed.terminal && bodyH < EDITOR_MIN_Y + TERMINAL_MIN_Y + BAND);
+    if (
+      next.chat !== s.suppressed.chat ||
+      next.scm !== s.suppressed.scm ||
+      next.sidebar !== s.suppressed.sidebar ||
+      next.terminal !== s.suppressed.terminal
+    ) {
+      s.setSuppressed(next);
+    }
+  }, [win, sidebarVisible, scmVisible, chatVisible, hasChatResidents]);
+
+  // Drive the terminal panel's collapse state (user intent OR the Y budget);
+  // blur it when hidden. Resizes flow through useTerminal, which debounces
+  // them so ConPTY isn't repainted per frame.
   useEffect(() => {
     const panel = terminalPanel.current;
     if (!panel) return;
-    if (terminalVisible) {
+    if (terminalVisible && !suppressed.terminal) {
       if (panel.isCollapsed()) panel.expand();
     } else {
       if (!panel.isCollapsed()) panel.collapse();
@@ -368,7 +458,7 @@ export default function App() {
         active.blur();
       }
     }
-  }, [terminalVisible, localConnId]);
+  }, [terminalVisible, suppressed.terminal, localConnId]);
 
   // Left→right layout after the pinned explorer. The editor is one of the
   // tokens, so a column can step past it — sitting the editor next to the
@@ -382,16 +472,29 @@ export default function App() {
   ];
   const editorIdx = full.indexOf("editor");
 
+  // Effective visibility = the user's flag minus the window-size suppression.
   const tokenVisible = (t: FullToken) =>
     t === "explorer"
-      ? sidebarVisible
+      ? sidebarVisible && !suppressed.sidebar
       : t === "editor"
         ? true
         : t === "scm"
-          ? scmVisible
-          : chatVisible;
+          ? scmVisible && !suppressed.scm
+          : chatVisible && !suppressed.chat;
   const widthKeyOf = (t: FullToken): keyof HWidths =>
     t === "explorer" ? "sidebar" : (t as "scm" | "chat");
+  // Before anything is suppressed, columns SHRINK toward their minimums
+  // (Sessions gives first) so the editor holds its floor. Persisted widths
+  // are untouched — grow the window and they come back.
+  const rendered = clampedWidths(
+    win.w,
+    {
+      chat: chatEnabled && tokenVisible("chat"),
+      scm: tokenVisible("scm"),
+      sidebar: tokenVisible("explorer"),
+    },
+    hw,
+  );
 
   const renderElement = (t: FullToken) => {
     if (t === "editor") {
@@ -416,7 +519,12 @@ export default function App() {
                   collapsedSize={0}
                   defaultSize={30}
                   minSize={10}
-                  onCollapse={() => setTerminalVisible(false)}
+                  onCollapse={() => {
+                    // A collapse driven by the Y budget must not rewrite the
+                    // user's intent — only a user collapse hides for real.
+                    if (!useAppStore.getState().suppressed.terminal)
+                      setTerminalVisible(false);
+                  }}
                   onExpand={() => setTerminalVisible(true)}
                 >
                   <TerminalPanel />
@@ -432,7 +540,7 @@ export default function App() {
         <div
           className="hcol hcol--sidebar"
           key="explorer"
-          style={{ width: sidebarVisible ? hw.sidebar : 0 }}
+          style={{ width: tokenVisible("explorer") ? rendered.sidebar : 0 }}
         >
           {/* History takes the whole column while open; the explorer stays
               mounted underneath (hidden) so its state survives. */}
@@ -446,11 +554,11 @@ export default function App() {
       );
     }
     // A movable column (SC / CHAT): fixed width, its own persisted size.
-    // Hidden = width 0 but still mounted, so CHAT residents keep running.
-    const visible = t === "scm" ? scmVisible : chatVisible;
-    const width = t === "scm" ? hw.scm : hw.chat;
+    // Hidden (by the user or the window budget) = width 0 but still mounted,
+    // so CHAT residents keep running.
+    const width = t === "scm" ? rendered.scm : rendered.chat;
     return (
-      <div className="hcol" key={t} style={{ width: visible ? width : 0 }}>
+      <div className="hcol" key={t} style={{ width: tokenVisible(t) ? width : 0 }}>
         {t === "scm" ? <ScmPanel /> : <ChatPanel />}
       </div>
     );
@@ -479,10 +587,18 @@ export default function App() {
 
   return (
     <div
-      className="app"
-      // Sidebar width drives the connection gauge's W/R alignment. Kept at the
-      // last width even when the explorer is hidden, so the gauge holds place.
-      style={{ "--sidebar-w": `${hw.sidebar}px` } as React.CSSProperties}
+      // app--slim-sb: the explorer is too narrow for its trimmings — the
+      // L/W/R toggles, the connection gauge, and file sizes hide (the point
+      // where the "Explorer" title would touch the L button).
+      className={`app${tokenVisible("explorer") && rendered.sidebar < 224 ? " app--slim-sb" : ""}`}
+      // Sidebar width drives the connection gauge's W/R alignment: the LIVE
+      // (clamped) width while shown, held at the last user width when hidden
+      // so the gauge keeps its place.
+      style={
+        {
+          "--sidebar-w": `${tokenVisible("explorer") ? rendered.sidebar : hw.sidebar}px`,
+        } as React.CSSProperties
+      }
     >
       <TitleBar />
       {/* The normal layout stays MOUNTED under the focus overlay — unmounting

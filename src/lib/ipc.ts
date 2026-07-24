@@ -20,6 +20,9 @@ export type AuthMethod =
 export type ConnectionState =
   | "connecting"
   | "connected"
+  /** Probes failing/slow but no hard evidence of death — channels stay open
+   *  and usable (possibly slow). Doubt is not death (docs/connections-v2.md). */
+  | "degraded"
   | "reconnecting"
   | "disconnected";
 

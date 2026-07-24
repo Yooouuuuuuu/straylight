@@ -2,7 +2,7 @@
 //! `ProxyJump` bastions, and the shared [`Connection`] handle that the SFTP and
 //! PTY layers build channels on top of.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -48,6 +48,11 @@ pub const KEY_NEEDS_PASSPHRASE: &str = "KEY_NEEDS_PASSPHRASE:";
 pub enum ConnectionState {
     Connecting,
     Connected,
+    /// Probes are failing or slow but there is NO hard evidence of death —
+    /// every channel stays open and usable (possibly slow). Doubt is not
+    /// death: only a transport error escalates to `Reconnecting`
+    /// (docs/connections-v2.md).
+    Degraded,
     Reconnecting,
     Disconnected,
 }
@@ -103,6 +108,19 @@ pub struct Connection {
     stop: AtomicBool,
     /// Guards against running more than one supervisor task per connection.
     supervising: AtomicBool,
+    /// Unix millis of the last *confirmed* server response — PTY output, a
+    /// completed SFTP op, a successful channel open. Recent activity is proof
+    /// of life: the supervisor skips its probe entirely (an active terminal or
+    /// running transfer IS the health check), so bulk load can never make the
+    /// connection look sick.
+    last_activity: AtomicU64,
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 impl Connection {
@@ -136,7 +154,23 @@ impl Connection {
         // round-trip, so an in-flight channel open never blocks a reconnect
         // (which needs the write lock).
         let handle = self.live.read().await.handle.clone();
-        handle.channel_open_session().await
+        let result = handle.channel_open_session().await;
+        if result.is_ok() {
+            self.touch_activity(); // a confirmed server round-trip
+        }
+        result
+    }
+
+    /// Record a confirmed server response (see `last_activity`).
+    pub fn touch_activity(&self) {
+        self.last_activity.store(now_millis(), Ordering::Relaxed);
+    }
+
+    /// Seconds since the last confirmed server response.
+    pub fn idle_secs(&self) -> u64 {
+        now_millis()
+            .saturating_sub(self.last_activity.load(Ordering::Relaxed))
+            / 1000
     }
 
     /// Open a fresh session channel on the live handle. Used by SFTP, the PTY
@@ -308,10 +342,16 @@ fn client_config() -> Arc<client::Config> {
         // Keep interactive sessions alive; we never want the library to drop an
         // idle terminal out from under the user.
         inactivity_timeout: None,
-        // Probe the peer so a silently-dropped TCP (sleep, Wi-Fi change) surfaces
-        // as a dead handle instead of hanging — the supervisor reconnects.
+        // Keepalive pings double as a NAT refresher and the hard-silence
+        // backstop. `keepalive_max: 20` = ~5 minutes with NO reply getting
+        // through before russh declares the transport dead (a hard error the
+        // supervisor acts on). The old value (3 ≈ 45 s) executed healthy
+        // connections during ordinary stalls — bufferbloat under a transfer, a
+        // standby nap — which is what restarted every terminal hourly on a
+        // flaky link while plain ssh (no keepalive kill at all) survived for
+        // days. Doubt is not death; see docs/connections-v2.md.
         keepalive_interval: Some(Duration::from_secs(15)),
-        keepalive_max: 3,
+        keepalive_max: 20,
         // Prefer compression (atomic-save.md decision 14): text traffic —
         // saves, transfers, terminal scroll — shrinks 3–5× on slow links.
         // `zlib@openssh.com` is what OpenSSH servers offer; servers without
@@ -611,6 +651,7 @@ pub async fn ssh_connect(
         proxy_jump,
         stop: AtomicBool::new(false),
         supervising: AtomicBool::new(false),
+        last_activity: AtomicU64::new(now_millis()),
     });
 
     state
@@ -688,6 +729,7 @@ pub async fn ssh_reconnect(
     match reestablish(&conn).await {
         Ok(()) => {
             conn.reset_sftp().await;
+            conn.touch_activity();
             *conn.state.lock().await = ConnectionState::Connected;
             emit_status(&app, &conn_id, ConnectionState::Connected, None);
             ensure_supervisor(app, conn);
@@ -720,99 +762,226 @@ fn ensure_supervisor(app: AppHandle, conn: Arc<Connection>) {
     });
 }
 
-/// Watch a connection's health; on a dropped transport, transition to
-/// `Reconnecting` and retry with backoff (capped at 30 s) until it recovers or
-/// the user explicitly disconnects — never give up on our own (the house
-/// no-automatic-timeouts rule: the user decides). A long outage costs one
-/// probe every ~30 s.
+/// What one health probe learned. The three-way split is the heart of the v2
+/// doctrine (docs/connections-v2.md): silence is DOUBT (the link may just be
+/// stalled — mark Degraded, touch nothing), only a hard transport error is
+/// CERTAINTY (russh says the handle is gone — reconnect).
+enum Probe {
+    Alive,
+    /// No response inside the timeout — a stalled-or-dead link we can't tell
+    /// apart yet. Never a reason to tear anything down.
+    Doubt,
+    /// The transport itself errored — the connection is factually dead.
+    Dead(String),
+}
+
+/// Watch a connection's health. Doubt (probe timeouts) only marks the
+/// connection `Degraded` — every channel stays open; most stalls recover and
+/// nothing is lost. Only hard evidence (a transport error, confirmed twice)
+/// moves to `Reconnecting` + the reestablish loop, which retries with backoff
+/// (capped at 30 s) until it recovers or the user disconnects — never give up
+/// on our own (the house no-automatic-timeouts rule: the user decides).
 async fn supervise(app: AppHandle, conn: Arc<Connection>) {
+    // When the current Degraded episode started (None = healthy).
+    let mut degraded_since: Option<std::time::Instant> = None;
     loop {
         if sleep_or_stopped(&conn, PROBE_INTERVAL_SECS).await {
             return;
         }
 
-        if probe_alive(&conn).await {
+        // Traffic within the last interval is proof of life — skip the probe
+        // (an active terminal or a moving transfer IS the health check).
+        if conn.idle_secs() < PROBE_INTERVAL_SECS {
+            recover_if_degraded(&app, &conn, &mut degraded_since, "traffic resumed").await;
             continue;
         }
-        if conn.is_stopped() {
-            return;
-        }
-        // One failed probe can be a busy link, not a dead one — confirm with a
-        // second probe after a short beat before tearing anything down: a
-        // false "drop" would restart every terminal on the connection.
-        if sleep_or_stopped(&conn, 2).await {
-            return;
-        }
-        if probe_alive(&conn).await {
-            continue;
-        }
-        if conn.is_stopped() {
-            return;
-        }
 
-        *conn.state.lock().await = ConnectionState::Reconnecting;
-        emit_status(
-            &app,
-            &conn.id,
-            ConnectionState::Reconnecting,
-            Some("connection lost — reconnecting…".to_string()),
-        );
-        log::warn!("connection {} dropped; reconnecting", conn.id);
-
-        let mut delay = 1u64;
-        let mut attempt = 0u32;
-        loop {
-            if conn.is_stopped() {
-                return;
+        match probe(&conn).await {
+            Probe::Alive => {
+                recover_if_degraded(&app, &conn, &mut degraded_since, "probe answered").await;
+                continue;
             }
-            attempt += 1;
-            match reestablish(&conn).await {
-                Ok(()) => {
-                    conn.reset_sftp().await;
-                    *conn.state.lock().await = ConnectionState::Connected;
-                    emit_status(&app, &conn.id, ConnectionState::Connected, None);
-                    log::info!("connection {} reconnected", conn.id);
-                    break;
+            Probe::Doubt => {
+                if conn.is_stopped() {
+                    return;
                 }
-                Err(e) => {
-                    emit_status(
-                        &app,
-                        &conn.id,
-                        ConnectionState::Reconnecting,
-                        Some(format!(
-                            "reconnect attempt {attempt} failed: {e} — retrying in {delay}s"
-                        )),
-                    );
-                    log::info!(
-                        "connection {} reconnect attempt {attempt} failed: {e}",
-                        conn.id
-                    );
-                    if sleep_or_stopped(&conn, delay).await {
+                match degraded_since {
+                    None => {
+                        degraded_since = Some(std::time::Instant::now());
+                        *conn.state.lock().await = ConnectionState::Degraded;
+                        emit_status(
+                            &app,
+                            &conn.id,
+                            ConnectionState::Degraded,
+                            Some(format!(
+                                "connection stalled (no reply in {}s) — terminals stay open",
+                                PROBE_TIMEOUT.as_secs()
+                            )),
+                        );
+                        log::warn!(
+                            "connection {} degraded: probe timeout ({}s), idle {}s — holding, NOT tearing down",
+                            conn.id,
+                            PROBE_TIMEOUT.as_secs(),
+                            conn.idle_secs()
+                        );
+                    }
+                    Some(since) => {
+                        // Still stalled — update the status line (same state, so
+                        // the UI won't re-toast), keep holding.
+                        let secs = since.elapsed().as_secs();
+                        emit_status(
+                            &app,
+                            &conn.id,
+                            ConnectionState::Degraded,
+                            Some(format!("still stalled ({secs}s) — terminals stay open")),
+                        );
+                        log::info!("connection {} still degraded ({secs}s)", conn.id);
+                    }
+                }
+                continue;
+            }
+            Probe::Dead(first) => {
+                if conn.is_stopped() {
+                    return;
+                }
+                // A hard error is near-certain death, but teardown restarts
+                // every terminal — confirm with a second probe after a beat. A
+                // dead handle errors instantly, so this costs ~2 s.
+                if sleep_or_stopped(&conn, 2).await {
+                    return;
+                }
+                let cause = match probe(&conn).await {
+                    Probe::Dead(second) => second,
+                    Probe::Alive => {
+                        log::info!(
+                            "connection {}: transient transport error ({first}) — probe recovered, holding",
+                            conn.id
+                        );
+                        recover_if_degraded(&app, &conn, &mut degraded_since, "probe recovered")
+                            .await;
+                        continue;
+                    }
+                    Probe::Doubt => {
+                        // Error then silence — treat as a stall, not death.
+                        log::warn!(
+                            "connection {}: transport error ({first}) then silence — degrading, not tearing down",
+                            conn.id
+                        );
+                        if degraded_since.is_none() {
+                            degraded_since = Some(std::time::Instant::now());
+                            *conn.state.lock().await = ConnectionState::Degraded;
+                            emit_status(
+                                &app,
+                                &conn.id,
+                                ConnectionState::Degraded,
+                                Some("connection stalled — terminals stay open".to_string()),
+                            );
+                        }
+                        continue;
+                    }
+                };
+                if conn.is_stopped() {
+                    return;
+                }
+
+                let stalled = degraded_since
+                    .take()
+                    .map(|s| format!(" after {}s degraded", s.elapsed().as_secs()))
+                    .unwrap_or_default();
+                *conn.state.lock().await = ConnectionState::Reconnecting;
+                emit_status(
+                    &app,
+                    &conn.id,
+                    ConnectionState::Reconnecting,
+                    Some(format!("connection lost ({cause}) — reconnecting…")),
+                );
+                log::warn!(
+                    "connection {} transport dead ({cause}){stalled}; reconnecting",
+                    conn.id
+                );
+
+                let mut delay = 1u64;
+                let mut attempt = 0u32;
+                loop {
+                    if conn.is_stopped() {
                         return;
                     }
-                    delay = (delay * 2).min(30);
+                    attempt += 1;
+                    match reestablish(&conn).await {
+                        Ok(()) => {
+                            conn.reset_sftp().await;
+                            conn.touch_activity();
+                            *conn.state.lock().await = ConnectionState::Connected;
+                            emit_status(&app, &conn.id, ConnectionState::Connected, None);
+                            log::info!("connection {} reconnected", conn.id);
+                            break;
+                        }
+                        Err(e) => {
+                            emit_status(
+                                &app,
+                                &conn.id,
+                                ConnectionState::Reconnecting,
+                                Some(format!(
+                                    "reconnect attempt {attempt} failed: {e} — retrying in {delay}s"
+                                )),
+                            );
+                            log::info!(
+                                "connection {} reconnect attempt {attempt} failed: {e}",
+                                conn.id
+                            );
+                            if sleep_or_stopped(&conn, delay).await {
+                                return;
+                            }
+                            delay = (delay * 2).min(30);
+                        }
+                    }
                 }
             }
         }
     }
 }
 
+/// Leave `Degraded` for `Connected` when life is confirmed again.
+async fn recover_if_degraded(
+    app: &AppHandle,
+    conn: &Connection,
+    degraded_since: &mut Option<std::time::Instant>,
+    how: &str,
+) {
+    let Some(since) = degraded_since.take() else {
+        return;
+    };
+    let mut state = conn.state.lock().await;
+    if *state == ConnectionState::Degraded {
+        *state = ConnectionState::Connected;
+        drop(state);
+        emit_status(app, &conn.id, ConnectionState::Connected, None);
+        log::info!(
+            "connection {} recovered from degraded after {}s ({how}) — nothing was restarted",
+            conn.id,
+            since.elapsed().as_secs()
+        );
+    }
+}
+
 /// One health probe: open + close a throwaway channel. An active REFUSAL (e.g.
 /// `MaxSessions` reached — every terminal + SFTP + exec counts against it) is
-/// proof of life: the server answered us. Only silence (timeout) or a transport
-/// error reads as dead — a full server must never be mistaken for a dead one
-/// (that mistake restarted every terminal in a loop; F23).
-async fn probe_alive(conn: &Connection) -> bool {
+/// proof of life: the server answered us. A TIMEOUT is only doubt — a stalled
+/// link and a dead one are indistinguishable from silence, and a full server
+/// must never be mistaken for a dead one (that mistake restarted every
+/// terminal in a loop; F23). Only a hard transport error means dead.
+async fn probe(conn: &Connection) -> Probe {
     match tokio::time::timeout(PROBE_TIMEOUT, conn.open_channel_raw()).await {
         Ok(Ok(channel)) => {
             // Close the probe channel so an idle connection doesn't leak one
             // channel per interval — but never block the loop on a half-open
             // socket waiting for the close handshake.
             let _ = tokio::time::timeout(Duration::from_secs(3), channel.close()).await;
-            true
+            Probe::Alive
         }
-        Ok(Err(russh::Error::ChannelOpenFailure(_))) => true,
-        _ => false,
+        Ok(Err(russh::Error::ChannelOpenFailure(_))) => Probe::Alive,
+        Ok(Err(e)) => Probe::Dead(e.to_string()),
+        Err(_) => Probe::Doubt,
     }
 }
 

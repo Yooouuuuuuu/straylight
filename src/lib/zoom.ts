@@ -5,8 +5,10 @@
  *  CSS-zoom fallback — CSS zoom breaks Monaco mouse targets and blurs the
  *  terminal canvas, so failure surfaces as a toast instead of degrading.
  *  The persisted value lives in settings.json ("zoom") — callers persist. */
+import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
+import { WINDOW_MIN } from "./layoutBudget";
 import { useAppStore } from "../store/appStore";
 
 let current = 1;
@@ -24,6 +26,11 @@ export async function applyZoom(factor: number): Promise<number> {
   try {
     await getCurrentWebviewWindow().setZoom(next);
     current = next;
+    // Keep the window floor meaningful in CSS px at any zoom: page zoom
+    // shrinks the effective viewport, so the OS minimum scales with it.
+    getCurrentWebviewWindow()
+      .setMinSize(new LogicalSize(WINDOW_MIN * next, WINDOW_MIN * next))
+      .catch(() => {});
     // Nudge anything that sizes itself from the window (xterm fit, panels).
     window.dispatchEvent(new Event("resize"));
   } catch (e) {

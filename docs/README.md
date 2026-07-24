@@ -45,6 +45,20 @@ published — maintainer material, not user docs.)
 Brief, dated notes on the load-bearing decisions and the places the approach
 **changed** — the archaeology the design docs deliberately omit. Newest first.
 
+- **2026-07 · The color era** ([stability.md](stability.md), 0.9.12) — every
+  hardcoded color was extracted to theme slots (translucent tints via
+  `color-mix`), the Straylight identity was designed for real (restrained
+  crimson: brand on chrome, red reserved for errors, cool accents for rest)
+  and promoted to the shipped defaults — plus a first-party light theme. The
+  three per-scope terminal sections collapsed into ONE `terminal` scheme with
+  a `terminalHostColor` switch (identity cursor/selection per host); host
+  colors became five fixed slots (per-host overrides removed — right-click
+  swaps remote *positions* instead), with each built-in theme designing its
+  own host family (Local+WSL as a near pair, remotes as a ramp). Lineup went
+  from 6 to 6 differently: Crimson and Neon retired, Straylight Light and
+  Catppuccin Latte added. Third-party palettes stay authentic (their dim
+  comments are theirs); only our themes obey the WCAG floors strictly.
+
 - **2026-07 · Data safety** ([data-safety.md](data-safety.md)) — hot-exit
   drafts and staged remote saves designed together (0.9.5). Staged saves first
   shipped with a *synchronous* ack (the tab waited for the server to confirm),

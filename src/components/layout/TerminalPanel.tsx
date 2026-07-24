@@ -5,10 +5,11 @@
  *  Containers · Forwarding) and the collapse chevron. The right-side terminal
  *  list shows the active group's terminals — draggable to reorder,
  *  collapsible to an icon-only rail. */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { remoteColor, SECTION_LOCAL, SECTION_WSL } from "../../lib/hostColors";
 import { listTerminalProfiles, type TerminalProfile } from "../../lib/ipc";
+import { useWindowSize } from "../../lib/layoutBudget";
 import { panelsConfig, uiConfig } from "../../lib/settings";
 import { keyLabelFor } from "../../lib/shortcuts";
 import { remoteHostKey, termDisplayName, useAppStore } from "../../store/appStore";
@@ -65,9 +66,20 @@ export function TerminalPanel() {
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(
     null,
   );
-  /** Terminal-list width, drag-resizable; narrow enough = icon-only. */
+  /** Terminal-list width, drag-resizable; narrow enough = icon-only. A
+   *  narrow WINDOW also forces icon-only, leaving the shell its room. */
   const [listWidth, setListWidth] = useState(168);
-  const listMini = listWidth <= 56;
+  const winSize = useWindowSize();
+  const listMini = listWidth <= 56 || winSize.w < 900;
+
+  /** Group-bar density, driven by ACTUAL collision (the rightmost host chip
+   *  touching the Ports button = the bar overflows): level 1 = the four tool
+   *  chips go icon-only; touch again → level 2 = host chips go letter-only
+   *  (and drop their terminal counts). De-escalates once the bar has grown
+   *  a comfortable margin past where it collided. */
+  const barRef = useRef<HTMLDivElement | null>(null);
+  const [barSlim, setBarSlim] = useState(0);
+  const barMarks = useRef<number[]>([]);
 
   const startListDrag = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -119,6 +131,30 @@ export function TerminalPanel() {
     };
     return [...all].sort((a, b) => rank(a.connId) - rank(b.connId));
   }, [localConnId, wsls, remotes, termGroupOrder]);
+
+  useLayoutEffect(() => {
+    const el = barRef.current;
+    if (!el) return;
+    const check = () => {
+      const overflow = el.scrollWidth > el.clientWidth + 1;
+      setBarSlim((lvl) => {
+        if (overflow && lvl < 2) {
+          barMarks.current[lvl + 1] = el.clientWidth;
+          return lvl + 1;
+        }
+        if (!overflow && lvl > 0 && el.clientWidth > (barMarks.current[lvl] ?? 0) + 64) {
+          return lvl - 1;
+        }
+        return lvl;
+      });
+    };
+    check();
+    const obs = new ResizeObserver(check);
+    obs.observe(el);
+    return () => obs.disconnect();
+    // Re-check after every density change (cascade 0→1→2 without a resize)
+    // and when the chip set itself changes.
+  }, [barSlim, groups.length, terminals.length]);
 
   const activeConn =
     terminals.find((t) => t.id === activeTerminalId)?.connId ?? null;
@@ -185,12 +221,14 @@ export function TerminalPanel() {
   ) => (
     <button
       key={view}
-      className={`termgroup__chip termgroup__chip--tool${terminalView === view ? " termgroup__chip--active" : ""}`}
+      title={label}
+      className={`termgroup__chip termgroup__chip--tool${terminalView === view ? " termgroup__chip--active" : ""}${barSlim >= 1 ? " termgroup__chip--slim" : ""}`}
       onClick={() => setTerminalView(view)}
     >
       <span className="termgroup__toolicon">{icon}</span>
-      {label}
-      {digits && <span className="termgroup__count">{digits}</span>}
+      {/* Level 1 (rightmost host chip touched Ports): icon-only tools. */}
+      {barSlim < 1 && label}
+      {barSlim < 1 && digits && <span className="termgroup__count">{digits}</span>}
     </button>
   );
 
@@ -201,11 +239,12 @@ export function TerminalPanel() {
       // keyboard here after switching to a tool view (no xterm to focus).
       tabIndex={-1}
     >
-      <div className="termgroup__bar">
+      <div className="termgroup__bar" ref={barRef}>
         {groups.map((g) => (
           <button
             key={g.connId}
-            className={`termgroup__chip${terminalView === "terminals" && activeGroup === g.connId ? " termgroup__chip--active" : ""}`}
+            title={g.label}
+            className={`termgroup__chip${terminalView === "terminals" && activeGroup === g.connId ? " termgroup__chip--active" : ""}${barSlim >= 2 ? " termgroup__chip--slim" : ""}`}
             style={{ "--host-color": g.color } as React.CSSProperties}
             draggable
             onDragStart={(e) => e.dataTransfer.setData(GROUP_MIME, g.connId)}
@@ -228,19 +267,22 @@ export function TerminalPanel() {
             {terminals.some((t) => t.connId === g.connId && belled[t.id]) && (
               <IconBell size={10} className="termgroup__bellicon" />
             )}
-            {g.label}
-            {(() => {
-              // "x+y" — x shells here, y living in the CHAT column.
-              const mine = terminals.filter((t) => t.connId === g.connId);
-              const n = mine.filter((t) => !t.inChat).length;
-              const y = mine.length - n;
-              if (n === 0 && y === 0) return null;
-              return (
-                <span className="termgroup__count">
-                  {y > 0 ? `${n}+${y}` : n}
-                </span>
-              );
-            })()}
+            {/* Level 2 (bar collided twice): letter-only chips, counts
+                dropped — the full name lives in the tooltip. */}
+            {barSlim < 2 && g.label}
+            {barSlim < 2 &&
+              (() => {
+                // "x+y" — x shells here, y living in the CHAT column.
+                const mine = terminals.filter((t) => t.connId === g.connId);
+                const n = mine.filter((t) => !t.inChat).length;
+                const y = mine.length - n;
+                if (n === 0 && y === 0) return null;
+                return (
+                  <span className="termgroup__count">
+                    {y > 0 ? `${n}+${y}` : n}
+                  </span>
+                );
+              })()}
           </button>
         ))}
         <span className="termgroup__spacer" />

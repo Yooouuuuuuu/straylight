@@ -80,6 +80,9 @@ export interface Settings {
   /** The theme library: name → full color sections. Quick-theme copies an
    *  entry over the live sections; saving adds one; delete lines to remove. */
   themes?: Record<string, ThemeData>;
+  /** Built-in names ever seeded into the library (theme.json only) — lets
+   *  NEW built-ins reach existing installs while deletions stay deleted. */
+  seeded?: string[];
 }
 
 export type ThemeData = Pick<Settings, "colors" | "editor" | "terminal">;
@@ -91,7 +94,7 @@ const OLD_TERMINAL_KEYS = ["terminalLocal", "terminalWsl", "terminalRemote"];
 
 /** Which top-level keys belong to the hidden library file (theme.json);
  *  everything else — including the live color sections — is settings.json. */
-const THEME_KEYS = new Set(["themes"]);
+const THEME_KEYS = new Set(["themes", "seeded"]);
 
 /** Every confirm-dialog id, so the template documents them all. */
 export const CONFIRM_IDS = [
@@ -574,13 +577,27 @@ async function migrateAndSeed(): Promise<void> {
     await writeJson(settingsFile!, settingsOut);
   }
 
-  // theme.json: the library only. Seed built-ins when there's no usable map.
-  const userThemes = t.data.themes;
-  const hasThemes =
-    userThemes && typeof userThemes === "object" && Object.keys(userThemes).length > 0;
-  const themeOut: Settings = {
-    themes: hasThemes ? userThemes : { ...(templ.themes ?? {}) },
-  };
+  // theme.json: the library plus a LEDGER of built-in names ever seeded.
+  // A built-in whose name isn't in the ledger is ADDED (so new built-ins
+  // reach existing installs); one that is stays untouched — user edits are
+  // never overwritten and deletions stick (the name stays in the ledger).
+  // Pre-ledger files treat whatever is present as already-seeded.
+  const rawThemes = t.data.themes;
+  const themes: Record<string, ThemeData> =
+    rawThemes && typeof rawThemes === "object" ? { ...rawThemes } : {};
+  const rawSeeded = (t.data as { seeded?: unknown }).seeded;
+  const seeded = new Set<string>(
+    Array.isArray(rawSeeded)
+      ? rawSeeded.filter((n): n is string => typeof n === "string")
+      : Object.keys(themes),
+  );
+  for (const [name, data] of Object.entries(templ.themes ?? {})) {
+    if (!seeded.has(name)) {
+      themes[name] = data;
+      seeded.add(name);
+    }
+  }
+  const themeOut: Settings = { themes, seeded: [...seeded].sort() };
   if (t.missing || JSON.stringify(themeOut) !== JSON.stringify(t.data)) {
     await writeJson(themeFile!, themeOut);
   }
