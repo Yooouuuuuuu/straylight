@@ -524,6 +524,10 @@ export function builtinThemeData(): Record<string, ThemeData> {
   );
 }
 
+/** The theme a fresh install wakes up in (its values ARE the shipped
+ *  settings defaults) — tagged "(default)" in the theme lists. */
+export const DEFAULT_THEME_NAME = "Straylight";
+
 /** Names in theme.json's library (built-ins seeded + user-saved). */
 export function savedThemeNames(): string[] {
   return Object.keys(savedThemes);

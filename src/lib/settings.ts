@@ -68,6 +68,10 @@ export interface Settings {
   /** Where the explorer/quick-open "Download" action drops files. Empty = your
    *  OS Downloads folder; either way it downloads on click, no prompt. */
   download?: { dir?: string };
+  /** Session lanes: each session opened from the SESSIONS panel / F11 gets its
+   *  own SSH connection; `max` caps how many per host (past it new sessions
+   *  share the host's main connection; 0 = always share). */
+  sessionConnections?: { max?: number };
   // ---- theme.json sections ----
   colors?: Record<string, string>;
   editor?: Record<string, string>;
@@ -131,6 +135,7 @@ function settingsTemplate(): Settings {
     panels: { ...PANEL_DEFAULTS },
     ui: { localOnly: false, disableChat: false },
     download: { dir: "" },
+    sessionConnections: { max: 10 },
     terminalHostColor: true,
   };
 }
@@ -215,6 +220,10 @@ export let uiConfig: { localOnly: boolean; disableChat: boolean } = {
 };
 /** Download destination (settings `download.dir`); "" = OS Downloads folder. */
 export let downloadConfig: { dir: string } = { dir: "" };
+
+/** Per-host cap on session lanes (dedicated SSH connections for SESSIONS/F11
+ *  agents); 0 = always share the main connection. */
+export let sessionConnConfig: { max: number } = { max: 10 };
 let confirms: Record<string, boolean> = {};
 
 /** Snapshot of the confirm flags (for the settings UI). */
@@ -417,6 +426,13 @@ async function loadAndApply(): Promise<void> {
     dir: typeof s.download?.dir === "string" ? s.download.dir : "",
   };
 
+  sessionConnConfig = {
+    max:
+      typeof s.sessionConnections?.max === "number"
+        ? Math.min(30, Math.max(0, Math.round(s.sessionConnections.max)))
+        : 10,
+  };
+
   const ui = s.ui ?? {};
   if (s.ui !== undefined && (typeof s.ui !== "object" || s.ui === null)) {
     issues.push(
@@ -526,6 +542,72 @@ export async function updateSettings(patch: Partial<Settings>): Promise<void> {
     await writeJson(themeFile, { ...current, ...themePatch });
   }
   await loadAndApply();
+}
+
+/** Guard shared by the reset actions: self-heal after a dev hot-reload and
+ *  refuse loudly (toast) when the files aren't resolvable yet. */
+async function ensureFilesReady(): Promise<boolean> {
+  if (!settingsFile || !connId) {
+    const localConnId = useAppStore.getState().localConnId;
+    if (localConnId) await initSettings(localConnId);
+  }
+  if (!settingsFile || !themeFile || !connId) {
+    useAppStore
+      .getState()
+      .pushNotice("error", "Settings not ready yet — try again in a moment.");
+    return false;
+  }
+  return true;
+}
+
+/** FULL reset: settings.json back to the shipped template — behavior keys
+ *  AND color sections, every key at its default. theme.json (the saved-theme
+ *  library) is untouched. The escape hatch for a hand-edit gone wrong. */
+export async function resetSettingsFile(): Promise<void> {
+  if (!(await ensureFilesReady())) return;
+  const out: Settings = { ...settingsTemplate() };
+  const templ = themeTemplate?.();
+  if (templ) {
+    for (const key of THEME_SECTION_KEYS) {
+      out[key] = { ...(templ[key] ?? {}) } as never;
+    }
+  }
+  await writeJson(settingsFile!, out);
+  await loadAndApply();
+  useAppStore
+    .getState()
+    .pushNotice("info", "settings.json reset to defaults.");
+}
+
+/** Restore the shipped built-in themes: re-added AND renewed to their
+ *  current designs, listed before custom saves; custom-named themes are
+ *  untouched. Also updates the seed ledger so they stay restored. */
+export async function restoreBuiltinThemes(): Promise<void> {
+  if (!(await ensureFilesReady())) return;
+  const issues: string[] = [];
+  const current = (await readJson(themeFile!, "theme.json", issues)).data;
+  const builtins = themeTemplate?.()?.themes ?? {};
+  const existing =
+    current.themes && typeof current.themes === "object" ? current.themes : {};
+  const customs = Object.fromEntries(
+    Object.entries(existing).filter(([name]) => !(name in builtins)),
+  );
+  const rawSeeded = (current as { seeded?: unknown }).seeded;
+  const seeded = new Set<string>(
+    Array.isArray(rawSeeded)
+      ? rawSeeded.filter((n): n is string => typeof n === "string")
+      : [],
+  );
+  for (const name of Object.keys(builtins)) seeded.add(name);
+  // Built-ins first (insertion order is display order), customs after.
+  await writeJson(themeFile!, {
+    themes: { ...builtins, ...customs },
+    seeded: [...seeded].sort(),
+  });
+  await loadAndApply();
+  useAppStore
+    .getState()
+    .pushNotice("info", "Built-in themes restored (your saved themes were kept).");
 }
 
 /** Migration + template seeding, run at every launch. settings.json is kept a

@@ -13,7 +13,75 @@ history of design changes — lives in the docs: the decision ledger in
 
 ### Planned
 
+- **Coalesced lane toasts.** With up to a dozen lanes per host (main + data +
+  sessions), per-lane toasts get loud when a whole host bounces. Planned
+  wording, one toast per host per event: an explicit disconnect reads
+  "Disconnected ubuntu — 7 lanes closed (main + data + 5 sessions)";
+  unexpected losses buffer ~10 s (network blips rarely hit lanes at exactly
+  the same instant) and sum to "ubuntu: 2 lanes lost (data + 1 session) —
+  reconnecting", or, when every lane went down, "Lost ubuntu — all lanes
+  down, reconnecting". Recoveries buffer a few seconds the same way:
+  "ubuntu: back — 7 lanes restored". Per-lane toasts stay while the lane
+  model is under field test; this lands with the trim.
 - **Auto-update** — ships with 0.10 (updater keypair + GitHub Releases).
+
+## [0.9.14] - 2026-07-25
+
+Session lanes — every agent gets its own SSH connection — plus the Restore
+escape hatches for broken config, and the explorer's folder round: pinned
+folders answer right-click, every folder can open a terminal in place.
+
+### Added
+
+- **Restore — two escape hatches for broken config.** Preferences and the
+  Theme tab each end with a "Restore" section (palette: "Restore: …").
+  Restoring settings.json rewrites it with the shipped defaults — for when a
+  hand-edit went wrong and the right format is unknowable; saved themes are
+  untouched. Restoring built-in themes brings the six shipped themes back,
+  renewed to their current designs; edits under their names are replaced,
+  custom-named saved themes are kept. Both are confirm-gated. The Theme tab
+  also reordered — Current colors, Saved themes, Restore.
+- **Connecting a host confirms with a toast** — "Connected to ubuntu." /
+  "Connected to Ubuntu (WSL)." — matching the toasts reconnects already had.
+- **Pinned folders answer right-click.** The root row was the one row in the
+  tree without a menu; now it has one: New File, New Folder, Paste, Download
+  (remote) / Copy Path / Reveal (local), Properties (recursive size, counts,
+  permissions), and Unpin in the danger slot. Cut, Copy, Rename, and Delete
+  are deliberately absent — moving or deleting the folder a pin points at
+  would strand the pin.
+- **Every folder row gained an "Open in Terminal" button** (left of the
+  Source Control button — pinned roots and folders under them). It opens a
+  shell on the folder's host and cds into it; the cd is typed into the
+  prompt, visible and cancelable.
+- **Sessions get their own connections** (Phase D of
+  [docs/connections-v2.md](docs/connections-v2.md) — **session lanes**). Every
+  agent opened from the SESSIONS panel or F11 dials a dedicated SSH connection
+  for its shell alone, so one busy agent can never slow down or take out
+  another terminal — and when a session lane drops, only that one agent
+  restarts. The ＋ you press decides the pipe: SESSIONS/F11 ＋ = own
+  connection; terminal-panel ＋ = the shared main lane (even if you dock it
+  into SESSIONS later); the F11 usage check stays on the shared lane (a
+  ten-second one-shot doesn't need its own pipe). A per-host cap lives in
+  Preferences → **Session connections** (default 10, 0 = always share): at the
+  cap new sessions open on the shared lane with a toast pointing at the
+  setting, and a failed dial opens nothing — the toast says to try again or
+  use a terminal-panel shell instead. Dials are serialized per host, closing
+  an agent hangs up its connection, and disconnecting a host sweeps all of
+  its lanes. The host's other lanes were renamed to match the model: **main
+  lane** (terminals + forwards) and **data lane** (SFTP + commands, formerly
+  "files"; toasts now tagged "(data)").
+
+### Changed
+
+- **Palette titles no longer end with "…"** — in a palette list the ellipsis
+  read as truncated text, not as "opens a dialog."
+- **Straylight is tagged "(default)"** in the theme lists (Theme tab and the
+  Quick theme menu) — the six as a set stay "built-ins"; only the one a fresh
+  install wakes up in is the default.
+- **Pointing Source Control at a non-repo now explains itself** — "…isn't a
+  repository yet — run git init (or jj git init) in a terminal there to
+  create one" instead of the raw backend error. A signpost, not an Init
+  button: git vs jj vs colocate is the user's call.
 
 ## [0.9.13] - 2026-07-25
 
@@ -109,6 +177,27 @@ of explorer/transfer power features.
 
 ### Changed
 
+- **Every host got a second pipe for file work** (Phase 1 of
+  [docs/connections-v2.md](docs/connections-v2.md)). SFTP and remote commands
+  now ride their own SSH connection (the "files lane" — renamed to **data
+  lane** in the next release), dialed silently on the first file operation,
+  while terminals and port forwards keep the original connection to
+  themselves. Heavy transfers can no longer congest your typing or take a
+  terminal down with them, and terminals stop competing with file traffic for
+  the server's ~10 per-connection session slots. Costs one extra sshd process
+  (a few MB) per host; if the second dial fails, the host quietly shares one
+  connection as before. The lane reports its own state — tagged toasts — and
+  reconnecting it refreshes the tree and settles any saves stranded by the
+  drop.
+- **Transfers now survive connection drops** (Phase 2). A transfer whose
+  connection dies pauses — amber pulsing bar, "waiting for connection…" — and
+  resumes by itself when the lane reconnects, continuing from the incomplete
+  file: finished files are never re-copied, a half-written file restarts
+  cleanly through its `.straypart`, and a resumed transfer keeps writing into
+  the same "name copy" it started. Cancel became truly immediate — it now
+  interrupts even a read parked on a dead socket (the old cancel could only
+  act between chunks, so a hung transfer was uncancellable). No give-up
+  timer: the transfer waits as long as it takes; you are the only timeout.
 - **Connections stopped executing themselves on suspicion** (Phase 0 of
   [docs/connections-v2.md](docs/connections-v2.md)). A stalled link used to be
   treated as a dead one — ~45 s of unanswered keepalives or two slow probes

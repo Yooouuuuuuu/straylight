@@ -64,6 +64,9 @@ export function ContextMenu() {
     name: menu.name,
     isDir: menu.isDir,
   };
+  // A pinned root: no cut/copy/rename/delete (moving or deleting the folder
+  // a pin points at strands the pin) — Unpin sits in the danger slot instead.
+  const isRoot = !!menu.root;
   const left = menu.x + nudge.x;
   const top = menu.y + nudge.y;
 
@@ -87,24 +90,28 @@ export function ContextMenu() {
         New Folder
       </button>
       <div className="context-menu__sep" />
-      <button
-        className="context-menu__item"
-        onClick={() => {
-          setClipboard("cut", node);
-          closeContextMenu();
-        }}
-      >
-        Cut<span className="context-menu__key">Ctrl+X</span>
-      </button>
-      <button
-        className="context-menu__item"
-        onClick={() => {
-          setClipboard("copy", node);
-          closeContextMenu();
-        }}
-      >
-        Copy<span className="context-menu__key">Ctrl+C</span>
-      </button>
+      {!isRoot && (
+        <button
+          className="context-menu__item"
+          onClick={() => {
+            setClipboard("cut", node);
+            closeContextMenu();
+          }}
+        >
+          Cut<span className="context-menu__key">Ctrl+X</span>
+        </button>
+      )}
+      {!isRoot && (
+        <button
+          className="context-menu__item"
+          onClick={() => {
+            setClipboard("copy", node);
+            closeContextMenu();
+          }}
+        >
+          Copy<span className="context-menu__key">Ctrl+C</span>
+        </button>
+      )}
       <button
         className="context-menu__item"
         disabled={!clipboard || clipboard.node.connId !== menu.connId}
@@ -115,23 +122,27 @@ export function ContextMenu() {
       >
         Paste<span className="context-menu__key">Ctrl+V</span>
       </button>
-      <div className="context-menu__sep" />
-      <button
-        className="context-menu__item"
-        disabled={selection.length > 1}
-        title={selection.length > 1 ? "Rename works on one item at a time" : undefined}
-        onClick={() => startRename(menu.connId, menu.path)}
-      >
-        Rename<span className="context-menu__key">F2</span>
-      </button>
-      <button
-        className="context-menu__item context-menu__item--danger"
-        onClick={() => openConfirmDelete(selection.length ? selection : [node])}
-      >
-        Delete
-        {selection.length > 1 && ` (${selection.length})`}
-        <span className="context-menu__key">Del</span>
-      </button>
+      {!isRoot && (
+        <>
+          <div className="context-menu__sep" />
+          <button
+            className="context-menu__item"
+            disabled={selection.length > 1}
+            title={selection.length > 1 ? "Rename works on one item at a time" : undefined}
+            onClick={() => startRename(menu.connId, menu.path)}
+          >
+            Rename<span className="context-menu__key">F2</span>
+          </button>
+          <button
+            className="context-menu__item context-menu__item--danger"
+            onClick={() => openConfirmDelete(selection.length ? selection : [node])}
+          >
+            Delete
+            {selection.length > 1 && ` (${selection.length})`}
+            <span className="context-menu__key">Del</span>
+          </button>
+        </>
+      )}
       <div className="context-menu__sep" />
       {menu.connId !== useAppStore.getState().localConnId && (
         <Tip label="Downloads to your local machine (Preferences → Download folder)">
@@ -180,6 +191,20 @@ export function ContextMenu() {
         Properties
         {selection.length > 1 && ` (${selection.length})`}
       </button>
+      {isRoot && menu.unpin && (
+        <>
+          <div className="context-menu__sep" />
+          <button
+            className="context-menu__item context-menu__item--danger"
+            onClick={() => {
+              closeContextMenu();
+              menu.unpin?.();
+            }}
+          >
+            Unpin…
+          </button>
+        </>
+      )}
     </div>
   );
 }

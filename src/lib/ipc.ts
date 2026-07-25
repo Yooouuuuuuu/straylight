@@ -119,6 +119,17 @@ export function sshConnect(args: ConnectArgs): Promise<string> {
   });
 }
 
+/** Open a session lane: a dedicated SSH connection for one SESSIONS/F11 agent
+ *  (docs/connections-v2.md Phase D). Errors with `SESSION_LANE_LIMIT:` at the
+ *  per-host cap so the caller can fall back to the shared main connection. */
+export function sessionLaneConnect(
+  connId: string,
+  label: string,
+  limit: number,
+): Promise<string> {
+  return invoke("session_lane_connect", { connId, label, limit });
+}
+
 export function sshDisconnect(connId: string): Promise<void> {
   return invoke("ssh_disconnect", { connId });
 }
@@ -265,6 +276,9 @@ export function fsCopy(
 
 /** Live progress for a batch transfer (the `transfer-progress` event). */
 export interface TransferProgress {
+  /** A lane died mid-transfer: the copy is parked and auto-resumes on
+   *  reconnect (docs/connections-v2.md Phase 2). */
+  waiting: boolean;
   id: string;
   doneBytes: number;
   totalBytes: number;

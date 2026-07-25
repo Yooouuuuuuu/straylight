@@ -8,6 +8,7 @@
 
 pub mod local;
 
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -17,7 +18,9 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::sync::watch;
 
+use crate::ssh::connection::{Connection, ConnectionState};
 use crate::AppState;
 
 /// Hard cap on how much of a single file we read into memory.
@@ -373,6 +376,9 @@ struct TransferProgress {
     done_files: usize,
     total_files: usize,
     current: String,
+    /// A lane died mid-transfer; the copy is parked until it reconnects, then
+    /// resumes from the incomplete file on its own (Phase 2).
+    waiting: bool,
 }
 
 /// What a finished (or cancelled) batch transfer copied.
@@ -391,13 +397,92 @@ pub struct TransferOutcome {
     skipped_errors: usize,
 }
 
-/// Shared progress + cancellation state threaded (by `&`) through the copy
+/// Interrupt plumbing for one transfer. Two signals share one watch channel
+/// that every long await in the copy races via `subscribe()`:
+///
+/// - **cancel** (user — final): works even mid-hang on a dead socket, because
+///   the raced await is *dropped* rather than waited out.
+/// - **reset** (a lane reconnected — pause and retry): the epoch watcher trips
+///   it the moment `reestablish` swaps the session, yanking the copy off the
+///   corpse immediately; `run_transfer` then waits for the lane and resumes
+///   from the incomplete file (docs/connections-v2.md Phase 2).
+pub struct TransferInterrupt {
+    cancel: AtomicBool,
+    reset: AtomicBool,
+    tx: watch::Sender<u32>,
+}
+
+impl TransferInterrupt {
+    fn new() -> Self {
+        Self {
+            cancel: AtomicBool::new(false),
+            reset: AtomicBool::new(false),
+            tx: watch::Sender::new(0),
+        }
+    }
+
+    pub fn trip_cancel(&self) {
+        self.cancel.store(true, Ordering::SeqCst);
+        self.tx.send_modify(|v| *v = v.wrapping_add(1));
+    }
+
+    fn trip_reset(&self) {
+        self.reset.store(true, Ordering::SeqCst);
+        self.tx.send_modify(|v| *v = v.wrapping_add(1));
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst)
+    }
+
+    fn reset_pending(&self) -> bool {
+        self.reset.load(Ordering::SeqCst)
+    }
+
+    fn clear_reset(&self) {
+        self.reset.store(false, Ordering::SeqCst);
+    }
+
+    fn interrupted(&self) -> bool {
+        self.cancelled() || self.reset_pending()
+    }
+
+    fn subscribe(&self) -> watch::Receiver<u32> {
+        self.tx.subscribe()
+    }
+}
+
+/// Race one transfer await against the interrupt channel. Subscribe-first
+/// ordering makes it airtight: a trip before the subscribe is caught by the
+/// flag check, a trip after it wakes `changed()` — there is no window where an
+/// op can stay parked on a dead session with an interrupt pending.
+enum Raced<T> {
+    Done(T),
+    Interrupted,
+}
+
+async fn race<T>(
+    intr: &TransferInterrupt,
+    fut: impl Future<Output = T>,
+) -> Raced<T> {
+    let mut rx = intr.subscribe();
+    if intr.interrupted() {
+        return Raced::Interrupted;
+    }
+    tokio::select! {
+        r = fut => Raced::Done(r),
+        _ = rx.changed() => Raced::Interrupted,
+    }
+}
+
+/// Shared progress + interrupt state threaded (by `&`) through the copy
 /// recursion. Interior-mutable so the hot path doesn't lock beyond a throttle
-/// timestamp.
+/// timestamp. Lives across retry rounds, so the bar keeps its progress and
+/// completed files are never re-copied.
 struct Progress {
     app: AppHandle,
     id: String,
-    cancel: Arc<AtomicBool>,
+    intr: Arc<TransferInterrupt>,
     // Atomic so a measure running *alongside* the copy can fill the total in
     // mid-flight — when the copy starts before its size is known, the bar shows
     // "N copied · calculating…" until this lands.
@@ -409,12 +494,28 @@ struct Progress {
     skipped_links: AtomicUsize,
     /// Entries skipped because the source stat/list failed (reported too).
     skipped_errors: AtomicUsize,
+    /// The copy is parked waiting for a lane to reconnect (shown in the bar).
+    waiting: AtomicBool,
+    /// Source paths fully copied this transfer — retry rounds skip them (their
+    /// bytes/files stay counted; the bar never goes backwards).
+    done_paths: std::sync::Mutex<HashSet<String>>,
+    /// Top-level collision resolutions (source path → destination name), so a
+    /// retry round continues into the SAME "name copy" it started, instead of
+    /// minting "name copy 2" against its own first attempt.
+    resolved: std::sync::Mutex<HashMap<String, String>>,
     last_emit: std::sync::Mutex<Instant>,
 }
 
 impl Progress {
+    /// User cancel only — decides the final outcome.
     fn cancelled(&self) -> bool {
-        self.cancel.load(Ordering::Relaxed)
+        self.intr.cancelled()
+    }
+
+    /// Cancel OR lane reset — the walk loops stop on either; `run_transfer`
+    /// tells them apart at round end.
+    fn interrupted(&self) -> bool {
+        self.intr.interrupted()
     }
 
     fn skip_link(&self) {
@@ -425,6 +526,25 @@ impl Progress {
         self.skipped_errors.fetch_add(1, Ordering::Relaxed);
     }
 
+    fn mark_done(&self, src_path: &str) {
+        self.done_paths.lock().unwrap().insert(src_path.to_string());
+    }
+
+    fn is_done(&self, src_path: &str) -> bool {
+        self.done_paths.lock().unwrap().contains(src_path)
+    }
+
+    fn resolved_name(&self, src_path: &str) -> Option<String> {
+        self.resolved.lock().unwrap().get(src_path).cloned()
+    }
+
+    fn remember_resolved(&self, src_path: &str, name: &str) {
+        self.resolved
+            .lock()
+            .unwrap()
+            .insert(src_path.to_string(), name.to_string());
+    }
+
     /// Publish the measured total (once known) and push a frame so the bar
     /// switches from "calculating…" to a real denominator right away.
     fn set_total(&self, bytes: u64, files: usize) {
@@ -433,9 +553,26 @@ impl Progress {
         self.emit("", true);
     }
 
+    fn total_unknown(&self) -> bool {
+        self.total_bytes.load(Ordering::Relaxed) == 0
+            && self.total_files.load(Ordering::Relaxed) == 0
+    }
+
+    fn set_waiting(&self, waiting: bool) {
+        self.waiting.store(waiting, Ordering::Relaxed);
+        self.emit("", true);
+    }
+
     fn add_bytes(&self, n: u64, current: &str) {
         self.done_bytes.fetch_add(n, Ordering::Relaxed);
         self.emit(current, false);
+    }
+
+    /// Roll back bytes counted for a file that did NOT complete (interrupted /
+    /// failed) — the retry round re-copies it from zero, so leaving the bytes
+    /// counted would overshoot the total.
+    fn unadd_bytes(&self, n: u64) {
+        self.done_bytes.fetch_sub(n, Ordering::Relaxed);
     }
 
     fn file_done(&self, current: &str) {
@@ -463,6 +600,7 @@ impl Progress {
                 done_files: self.done_files.load(Ordering::Relaxed),
                 total_files: self.total_files.load(Ordering::Relaxed),
                 current: current.to_string(),
+                waiting: self.waiting.load(Ordering::Relaxed),
             },
         );
     }
@@ -531,27 +669,32 @@ pub async fn fs_transfer_batch(
     total_bytes: Option<u64>,
     total_files: Option<usize>,
 ) -> Result<TransferOutcome, String> {
-    let src = state.transport(&src_conn_id).await?;
-    let dest = state.transport(&dest_conn_id).await?;
+    // Resolve transports AND the underlying lane connections (SSH only) — the
+    // transfer subscribes to each lane's reconnect epoch so a swap yanks it
+    // off the dead session instead of leaving it dangling.
+    let (src, src_conn) = state.transfer_endpoint(&src_conn_id).await?;
+    let (dest, dest_conn) = state.transfer_endpoint(&dest_conn_id).await?;
 
-    // Register a cancellation flag the UI can trip via `fs_transfer_cancel`.
-    let cancel = Arc::new(AtomicBool::new(false));
+    // Register the interrupt handle the UI can trip via `fs_transfer_cancel`.
+    let intr = Arc::new(TransferInterrupt::new());
     state
         .transfers
         .lock()
         .await
-        .insert(transfer_id.clone(), cancel.clone());
+        .insert(transfer_id.clone(), intr.clone());
 
     let result = run_transfer(
         &app,
         &transfer_id,
-        cancel,
+        intr,
         src.as_ref(),
         &src_paths,
         dest.as_ref(),
         &dest_dir,
         rename_on_conflict,
         total_bytes.zip(total_files),
+        src_conn,
+        dest_conn,
     )
     .await;
 
@@ -559,14 +702,15 @@ pub async fn fs_transfer_batch(
     result
 }
 
-/// Trip a transfer's cancellation flag; the copy loop stops at the next chunk.
+/// Trip a transfer's cancel signal. Abortive: raced awaits drop immediately,
+/// so cancel works even while a read is parked on a dead socket.
 #[tauri::command]
 pub async fn fs_transfer_cancel(
     state: State<'_, AppState>,
     transfer_id: String,
 ) -> Result<(), String> {
-    if let Some(flag) = state.transfers.lock().await.get(&transfer_id) {
-        flag.store(true, Ordering::Relaxed);
+    if let Some(intr) = state.transfers.lock().await.get(&transfer_id) {
+        intr.trip_cancel();
     }
     Ok(())
 }
@@ -575,74 +719,158 @@ pub async fn fs_transfer_cancel(
 async fn run_transfer(
     app: &AppHandle,
     id: &str,
-    cancel: Arc<AtomicBool>,
+    intr: Arc<TransferInterrupt>,
     src: &dyn FileTransport,
     src_paths: &[String],
     dest: &dyn FileTransport,
     dest_dir: &str,
     rename_on_conflict: bool,
     precomputed_total: Option<(u64, usize)>,
+    src_conn: Option<Arc<Connection>>,
+    dest_conn: Option<Arc<Connection>>,
 ) -> Result<TransferOutcome, String> {
     let prog = Progress {
         app: app.clone(),
         id: id.to_string(),
-        cancel,
+        intr: intr.clone(),
         total_bytes: AtomicU64::new(0),
         total_files: AtomicUsize::new(0),
         done_bytes: AtomicU64::new(0),
         done_files: AtomicUsize::new(0),
         skipped_links: AtomicUsize::new(0),
         skipped_errors: AtomicUsize::new(0),
+        waiting: AtomicBool::new(false),
+        done_paths: std::sync::Mutex::new(HashSet::new()),
+        resolved: std::sync::Mutex::new(HashMap::new()),
         last_emit: std::sync::Mutex::new(Instant::now()),
     };
 
     // If the UI already measured (waited on the confirm sheet's scan), seed the
     // total so the bar shows a denominator from the first frame. Otherwise the
-    // user committed early: start copying NOW and measure ALONGSIDE, so the bar
-    // reads "N copied · calculating…" until the total lands — never a blocking
-    // pre-pass.
-    let need_measure = match precomputed_total {
-        Some((b, f)) => {
-            prog.set_total(b, f);
-            false
-        }
-        None => true,
-    };
+    // user committed early: the copy starts NOW and a measure runs ALONGSIDE,
+    // so the bar reads "N copied · calculating…" until the total lands — never
+    // a blocking pre-pass.
+    if let Some((b, f)) = precomputed_total {
+        prog.set_total(b, f);
+    }
     prog.emit("", true); // show the bar immediately
 
-    let copy = async {
-        for p in src_paths {
-            if prog.cancelled() {
+    let lanes: Vec<Arc<Connection>> = [src_conn, dest_conn].into_iter().flatten().collect();
+
+    // Retry rounds: a lane death pauses the copy (never fails it) and the next
+    // round resumes from the incomplete file — completed files are skipped via
+    // `done_paths`, partial files restart cleanly through their `.straypart`.
+    // No self-imposed give-up: the user cancels, not a timer (house rule).
+    let mut round = 0u32;
+    loop {
+        round += 1;
+        intr.clear_reset();
+
+        // Epoch watchers: trip `reset` the instant a lane's reestablish swaps
+        // the session out from under us. Fresh baselines each round.
+        let mut watchers = Vec::new();
+        for lane in &lanes {
+            let mut epoch_rx = lane.subscribe_epoch();
+            epoch_rx.borrow_and_update();
+            let intr2 = intr.clone();
+            watchers.push(tokio::spawn(async move {
+                if epoch_rx.changed().await.is_ok() {
+                    intr2.trip_reset();
+                }
+            }));
+        }
+
+        let copy = async {
+            for p in src_paths {
+                if prog.interrupted() {
+                    break;
+                }
+                transfer_entry(src, p, dest, dest_dir, rename_on_conflict, true, &prog).await?;
+            }
+            Ok::<(), String>(())
+        };
+
+        let result = if prog.total_unknown() {
+            let measure_total = async {
+                let chain = async {
+                    let mut total_bytes = 0u64;
+                    let mut total_files = 0usize;
+                    for p in src_paths {
+                        let (b, f) = measure(src, p).await?;
+                        total_bytes += b;
+                        total_files += f;
+                    }
+                    prog.set_total(total_bytes, total_files);
+                    Ok::<(), String>(())
+                };
+                // The whole measure races the interrupt in one select — a
+                // measure parked on a dead lane is simply dropped; a later
+                // round re-measures if the total is still unknown.
+                match race(&intr, chain).await {
+                    Raced::Done(r) => {
+                        let _ = r; // non-fatal — the copy carries the run
+                    }
+                    Raced::Interrupted => {}
+                }
+            };
+            // Single task, cooperatively scheduled: the two walks take turns
+            // on the SFTP session lock (measure is metadata-only, so it
+            // settles early in the copy).
+            let (_, copied) = tokio::join!(measure_total, copy);
+            copied
+        } else {
+            copy.await
+        };
+
+        for w in watchers {
+            w.abort();
+        }
+
+        if intr.cancelled() {
+            break;
+        }
+
+        // A lane bounced (reset), or the round errored while a lane was down —
+        // pause, wait for every SSH lane to come back, and go again. A genuine
+        // filesystem error on healthy lanes stays fatal.
+        let mut retry = intr.reset_pending() || (result.is_err() && any_lane_down(&lanes).await);
+        if result.is_err() && !retry && !lanes.is_empty() {
+            // The op may have failed a beat before the supervisor notices the
+            // lane died (probe cadence ~12 s). Give it one interval to rule
+            // before declaring the error fatal — a lane verdict flips this
+            // into a pause-and-resume instead of a failed transfer. Costs a
+            // genuine filesystem error (permissions, disk full) an extra ~15 s
+            // before its toast; correctness of the resume promise wins.
+            let mut rx = intr.subscribe();
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(15)) => {}
+                _ = rx.changed() => {}
+            }
+            if intr.cancelled() {
                 break;
             }
-            transfer_entry(src, p, dest, dest_dir, rename_on_conflict, true, &prog).await?;
+            retry = intr.reset_pending() || any_lane_down(&lanes).await;
         }
-        Ok::<(), String>(())
-    };
-
-    if need_measure {
-        let measure_total = async {
-            let mut total_bytes = 0u64;
-            let mut total_files = 0usize;
-            for p in src_paths {
-                if prog.cancelled() {
-                    return Ok::<(), String>(());
+        match (result, retry) {
+            (_, true) => {
+                log::warn!(
+                    "transfer {id}: round {round} interrupted by a connection drop — waiting to resume"
+                );
+                prog.set_waiting(true);
+                wait_for_lanes(&intr, &lanes).await;
+                prog.set_waiting(false);
+                if intr.cancelled() {
+                    break;
                 }
-                let (b, f) = measure(src, p).await?;
-                total_bytes += b;
-                total_files += f;
+                log::info!("transfer {id}: lane back — resuming (round {})", round + 1);
+                continue;
             }
-            prog.set_total(total_bytes, total_files);
-            Ok(())
-        };
-        // Single task, cooperatively scheduled: the two walks just take turns on
-        // the SFTP session lock (measure is metadata-only, so it finishes early
-        // in the copy). A measure error is non-fatal — the copy carries the run.
-        let (measured, copied) = tokio::join!(measure_total, copy);
-        let _ = measured;
-        copied?;
-    } else {
-        copy.await?;
+            (Ok(()), false) => break, // complete
+            (Err(e), false) => {
+                prog.emit("", true);
+                return Err(e);
+            }
+        }
     }
 
     let cancelled = prog.cancelled();
@@ -654,6 +882,41 @@ async fn run_transfer(
         skipped_links: prog.skipped_links.load(Ordering::Relaxed),
         skipped_errors: prog.skipped_errors.load(Ordering::Relaxed),
     })
+}
+
+/// Whether any SSH lane is currently not `Connected` (degraded / reconnecting).
+async fn any_lane_down(lanes: &[Arc<Connection>]) -> bool {
+    for lane in lanes {
+        if *lane.state.lock().await != ConnectionState::Connected {
+            return true;
+        }
+    }
+    false
+}
+
+/// Park until every SSH lane reports `Connected` again (their supervisors do
+/// the reconnecting), waking early on user cancel. Unbounded by design — the
+/// transfer "can wait, just has to finish"; the user is the only timeout.
+async fn wait_for_lanes(intr: &TransferInterrupt, lanes: &[Arc<Connection>]) {
+    let mut rx = intr.subscribe();
+    loop {
+        if intr.cancelled() {
+            return;
+        }
+        let mut ready = true;
+        for lane in lanes {
+            if *lane.state.lock().await != ConnectionState::Connected {
+                ready = false;
+            }
+        }
+        if ready {
+            return;
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+            _ = rx.changed() => {}
+        }
+    }
 }
 
 /// Size of a pending transfer, measured with the copy walk's *exact* rules, so
@@ -786,15 +1049,17 @@ fn transfer_entry<'a>(
     prog: &'a Progress,
 ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
     Box::pin(async move {
-        if prog.cancelled() {
+        if prog.interrupted() {
             return Ok(());
         }
         // Tolerant: a source entry we can't stat (dangling link, broken
         // gitlink) is skipped and reported, not fatal — matches `measure`, so
-        // one bad entry never aborts the batch.
-        let meta = match src.stat(src_path).await {
-            Ok(m) => m,
-            Err(e) => {
+        // one bad entry never aborts the batch. The stat races the interrupt
+        // so a hang on a dead lane can't park the walk.
+        let meta = match race(&prog.intr, src.stat(src_path)).await {
+            Raced::Interrupted => return Ok(()),
+            Raced::Done(Ok(m)) => m,
+            Raced::Done(Err(e)) => {
                 // The toast only reports a count (a folder of broken links could
                 // be a wall of names); the paths land in the log for when you
                 // need to know exactly what was skipped.
@@ -807,31 +1072,50 @@ fn transfer_entry<'a>(
         let mut name = base.to_string();
         let mut dest_path = dest.join(dest_dir, &name);
         // Resolve a top-level collision; nested entries just overwrite/merge.
+        // The resolution is remembered across retry rounds, so a resumed
+        // transfer continues into the SAME "name copy" instead of minting a
+        // fresh one against its own first attempt.
         if top {
-            let mut n = 1;
-            while dest.stat(&dest_path).await.is_ok() {
-                if !rename_on_conflict {
-                    break;
-                }
-                name = copy_variant(base, n);
+            if let Some(cached) = prog.resolved_name(src_path) {
+                name = cached;
                 dest_path = dest.join(dest_dir, &name);
-                n += 1;
+            } else {
+                let mut n = 1;
+                loop {
+                    match race(&prog.intr, dest.stat(&dest_path)).await {
+                        Raced::Interrupted => return Ok(()),
+                        Raced::Done(Ok(_)) => {
+                            if !rename_on_conflict {
+                                break;
+                            }
+                            name = copy_variant(base, n);
+                            dest_path = dest.join(dest_dir, &name);
+                            n += 1;
+                        }
+                        Raced::Done(Err(_)) => break, // free slot
+                    }
+                }
+                prog.remember_resolved(src_path, &name);
             }
         }
         if meta.is_dir {
             // Create (or reuse) the destination folder, then recurse. If the
             // source dir can't be listed, skip it (reported) rather than abort.
-            let _ = dest.create_entry(dest_dir, &name, true).await;
-            let entries = match src.list_dir(src_path).await {
-                Ok(listing) => listing.entries,
-                Err(e) => {
+            match race(&prog.intr, dest.create_entry(dest_dir, &name, true)).await {
+                Raced::Interrupted => return Ok(()),
+                Raced::Done(_) => {} // exists-already errors are fine (merge)
+            }
+            let entries = match race(&prog.intr, src.list_dir(src_path)).await {
+                Raced::Interrupted => return Ok(()),
+                Raced::Done(Ok(listing)) => listing.entries,
+                Raced::Done(Err(e)) => {
                     log::warn!("transfer: skipping unlistable {src_path}: {e}");
                     prog.skip_error();
                     return Ok(());
                 }
             };
             for entry in entries {
-                if prog.cancelled() {
+                if prog.interrupted() {
                     break;
                 }
                 // Never descend a symlinked directory — a link cycle
@@ -864,76 +1148,138 @@ async fn stream_file(
     name: &str,
     prog: &Progress,
 ) -> Result<(), String> {
+    // Completed in an earlier round of this transfer — never re-copy (its
+    // bytes/files are already counted; the bar never moves backwards).
+    if prog.is_done(src_path) {
+        return Ok(());
+    }
+    let intr = &prog.intr;
     let part_path = format!("{dest_path}.straypart");
-    let mut reader = src.open_read(src_path).await?;
-    let mut writer = dest.open_write(&part_path).await?;
+    let mut reader = match race(intr, src.open_read(src_path)).await {
+        Raced::Interrupted => return Ok(()),
+        Raced::Done(r) => r?,
+    };
+    let mut writer = match race(intr, dest.open_write(&part_path)).await {
+        Raced::Interrupted => {
+            let _ = tokio::time::timeout(Duration::from_secs(3), reader.shutdown()).await;
+            return Ok(());
+        }
+        Raced::Done(w) => w?,
+    };
     let mut buf = vec![0u8; TRANSFER_CHUNK];
 
     let mut error: Option<String> = None;
     let mut completed = true;
+    // Bytes this file added to the bar — rolled back if it doesn't complete
+    // (the retry round restarts the file from zero).
+    let mut counted = 0u64;
     loop {
-        if prog.cancelled() {
+        if prog.interrupted() {
             completed = false;
             break;
         }
-        let n = match reader.read(&mut buf).await {
-            Ok(0) => break,
-            Ok(n) => n,
-            Err(e) => {
+        let n = match race(intr, reader.read(&mut buf)).await {
+            Raced::Interrupted => {
+                completed = false;
+                break;
+            }
+            Raced::Done(Ok(0)) => break,
+            Raced::Done(Ok(n)) => n,
+            Raced::Done(Err(e)) => {
                 error = Some(format!("could not read {src_path}: {e}"));
                 completed = false;
                 break;
             }
         };
-        if let Err(e) = writer.write_all(&buf[..n]).await {
-            error = Some(format!("could not write {dest_path}: {e}"));
-            completed = false;
-            break;
+        match race(intr, writer.write_all(&buf[..n])).await {
+            Raced::Interrupted => {
+                completed = false;
+                break;
+            }
+            Raced::Done(Ok(())) => {}
+            Raced::Done(Err(e)) => {
+                error = Some(format!("could not write {dest_path}: {e}"));
+                completed = false;
+                break;
+            }
         }
+        counted += n as u64;
         prog.add_bytes(n as u64, name);
     }
 
     // Close the read handle explicitly (awaited) in every exit path — success,
     // cancel, or error. russh-sftp's `Drop` only fires a no-wait close, which
-    // lags a many-file copy until the server's handle table fills; an awaited
-    // shutdown keeps one read handle open at a time. (No-op for local files.)
-    reader.shutdown().await.ok();
+    // lags a many-file copy until the server's handle table fills. Bounded: on
+    // a dead lane the close handshake would otherwise park us forever.
+    let _ = tokio::time::timeout(Duration::from_secs(3), reader.shutdown()).await;
     drop(reader);
 
     // A failed final flush means bytes never landed — that's an error, not a
     // completed copy.
     if completed {
-        if let Err(e) = writer.flush().await {
-            error = Some(format!("could not write {dest_path}: {e}"));
-            completed = false;
+        match race(intr, writer.flush()).await {
+            Raced::Interrupted => completed = false,
+            Raced::Done(Ok(())) => {}
+            Raced::Done(Err(e)) => {
+                error = Some(format!("could not write {dest_path}: {e}"));
+                completed = false;
+            }
         }
     }
 
     if completed {
-        writer.shutdown().await.ok();
+        let _ = tokio::time::timeout(Duration::from_secs(3), writer.shutdown()).await;
         drop(writer);
         // Commit: rename the temp file over the destination. Plain SFTP rename
         // refuses to replace an existing target on most servers, so on failure
-        // remove the destination and retry once.
-        if dest.rename(&part_path, name).await.is_err() {
-            let _ = dest.remove(dest_path).await;
-            if let Err(e) = dest.rename(&part_path, name).await {
-                // The destination is already gone, so the part file is now the
-                // ONLY copy of the data — keep it for manual recovery rather
-                // than deleting both.
-                return Err(format!(
-                    "could not finish {dest_path}: {e} — the copied data was kept as {part_path}; rename it by hand"
-                ));
+        // remove the destination and retry once. Raced: an interrupt mid-commit
+        // just retries the file next round.
+        let renamed = match race(intr, dest.rename(&part_path, name)).await {
+            Raced::Interrupted => {
+                prog.unadd_bytes(counted);
+                return Ok(());
+            }
+            Raced::Done(r) => r,
+        };
+        if renamed.is_err() {
+            match race(intr, async {
+                let _ = dest.remove(dest_path).await;
+                dest.rename(&part_path, name).await
+            })
+            .await
+            {
+                Raced::Interrupted => {
+                    prog.unadd_bytes(counted);
+                    return Ok(());
+                }
+                Raced::Done(Ok(_)) => {}
+                Raced::Done(Err(e)) => {
+                    // The destination is already gone, so the part file is now
+                    // the ONLY copy of the data — keep it for manual recovery
+                    // rather than deleting both.
+                    return Err(format!(
+                        "could not finish {dest_path}: {e} — the copied data was kept as {part_path}; rename it by hand"
+                    ));
+                }
             }
         }
+        prog.mark_done(src_path);
         prog.file_done(name);
         Ok(())
     } else {
         drop(writer);
+        prog.unadd_bytes(counted);
+        if prog.interrupted() {
+            // Interrupted (cancel or lane reset): do NOT try to remove the
+            // temp over a possibly-dead lane — a retry round overwrites the
+            // stale `.straypart` anyway (open_write truncates), and on cancel
+            // a leftover temp is documented recovery behavior.
+            return Ok(());
+        }
         let _ = dest.remove(&part_path).await;
         match error {
             Some(e) => Err(e),
-            None => Ok(()), // cancelled — not an error
+            None => Ok(()),
         }
     }
 }

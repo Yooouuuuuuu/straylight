@@ -68,7 +68,8 @@ import {
   loadExpanded,
   saveExpanded,
 } from "../../lib/treeExpansion";
-import { IconBranch, IconChevron, IconClose } from "../icons";
+import { IconBranch, IconChevron, IconClose, IconTerminal } from "../icons";
+import { openTerminalAt } from "../../lib/terminalTarget";
 import { Tip } from "../Tooltip";
 
 interface DirState {
@@ -474,6 +475,30 @@ export function RootTree({
           setSelected({ connId, path: rootPath, name: label, isDir: true });
           setCollapsed((c) => !c);
         }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          openContextMenu(
+            {
+              connId,
+              path: rootPath,
+              name: label,
+              isDir: true,
+              root: true,
+              // The ✕ action, so the menu and the button stay one behavior.
+              unpin: removable
+                ? () =>
+                    askConfirm(
+                      "Unpin folder?",
+                      `Remove "${label}" from the sidebar? Nothing on disk is touched — you can pin it again any time.`,
+                      () => onRemove?.(),
+                      "unpin-folder",
+                    )
+                : undefined,
+            },
+            e.clientX,
+            e.clientY,
+          );
+        }}
         onDragOver={(e) => {
           if (canDropInto(connId, rootPath)) {
             e.preventDefault();
@@ -512,6 +537,17 @@ export function RootTree({
           >
             {label}
           </span>
+        </Tip>
+        <Tip label="Open in Terminal">
+          <button
+            className="root-tree__remove root-tree__term"
+            onClick={(event) => {
+              event.stopPropagation();
+              openTerminalAt(connId, rootPath);
+            }}
+          >
+            <IconTerminal size={13} />
+          </button>
         </Tip>
         <Tip
           label={

@@ -22,20 +22,22 @@ export function TransferProgressBar({ variant }: { variant: "panel" | "status" }
       ? Math.min(100, (t.doneBytes / t.totalBytes) * 100)
       : Math.min(100, (t.doneFiles / t.totalFiles) * 100);
 
-  const detail = !known
-    ? t.doneBytes > 0
-      ? `${formatSize(t.doneBytes)} · calculating total…`
-      : "Starting…"
-    : [
-        t.totalFiles > 1
-          ? `file ${Math.min(t.doneFiles + 1, t.totalFiles)}/${t.totalFiles}`
-          : "",
-        t.totalBytes > 0
-          ? `${formatSize(t.doneBytes)} / ${formatSize(t.totalBytes)}`
-          : "",
-      ]
-        .filter(Boolean)
-        .join(" · ");
+  const detail = t.waiting
+    ? "waiting for connection… (resumes by itself)"
+    : !known
+      ? t.doneBytes > 0
+        ? `${formatSize(t.doneBytes)} · calculating total…`
+        : "Starting…"
+      : [
+          t.totalFiles > 1
+            ? `file ${Math.min(t.doneFiles + 1, t.totalFiles)}/${t.totalFiles}`
+            : "",
+          t.totalBytes > 0
+            ? `${formatSize(t.doneBytes)} / ${formatSize(t.totalBytes)}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
 
   if (variant === "status") {
     return (
@@ -43,7 +45,7 @@ export function TransferProgressBar({ variant }: { variant: "panel" | "status" }
         <Tip label={`${t.label} · ${detail}`}>
           <span className="statusbar__transfer-track">
             <span
-              className="statusbar__transfer-fill"
+              className={`statusbar__transfer-fill ${t.waiting ? "statusbar__transfer-fill--waiting" : ""}`}
               style={{ width: `${pct}%` }}
             />
           </span>
@@ -61,7 +63,10 @@ export function TransferProgressBar({ variant }: { variant: "panel" | "status" }
   return (
     <div className="transfer-progress">
       <div className="transfer-progress__track">
-        <div className="transfer-progress__fill" style={{ width: `${pct}%` }} />
+        <div
+          className={`transfer-progress__fill ${t.waiting ? "transfer-progress__fill--waiting" : ""}`}
+          style={{ width: `${pct}%` }}
+        />
       </div>
       <div className="transfer-progress__row">
         <span className="transfer-progress__text">

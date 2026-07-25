@@ -939,6 +939,13 @@
   white-space: nowrap;
 }
 
+/* Muted "(default)" tag on the shipped starting theme (Theme tab + Quick
+   theme menu — the six as a set are "built-ins"; only this one is default). */
+.theme-badge {
+  color: var(--fg-secondary);
+  font-size: 11px;
+}
+
 /* "Don't ask again" checkbox in confirm dialogs (persists to settings.json). */
 .confirm-silence {
   display: flex;
@@ -1036,6 +1043,13 @@
   height: 100%;
   background: var(--accent);
   transition: width 120ms ease;
+}
+
+/* Parked on a dead connection, auto-resuming: amber, gently pulsing. */
+.statusbar__transfer-fill--waiting,
+.transfer-progress__fill--waiting {
+  background: var(--orange);
+  animation: pulse 1.2s ease-in-out infinite;
 }
 
 .statusbar__transfer-text {
@@ -3601,6 +3615,12 @@ select option {
   opacity: 0.55;
 }
 
+/* The >_ open-in-terminal button on a root header (left of ⑂; shares the
+ * remove styling but hovers accent, not red). */
+.root-tree__term:hover {
+  color: var(--accent);
+}
+
 /* The ⑂ source-control button on a root header (shares the remove styling,
  * but hovers purple and stays visible once the repo is tracked) */
 .root-tree__vcs {
@@ -3621,12 +3641,13 @@ select option {
   color: var(--purple);
 }
 
-/* Every folder row gets the same button (any depth, not just pinned roots),
- * revealed on row hover at the row's RIGHT edge (matching the root header);
- * a tracked repo root colors it via inline style. */
+/* Every folder row gets the same buttons (any depth, not just pinned roots),
+ * revealed on row hover at the row's RIGHT edge (matching the root header):
+ * >_ open-in-terminal, then ⑂ source-control (repo color via inline style).
+ * The terminal button anchors the right cluster (margin-left: auto). */
+.file-node__termbtn,
 .file-node__vcsbtn {
   flex: 0 0 auto;
-  margin-left: auto;
   border: none;
   background: transparent;
   color: var(--fg-secondary);
@@ -3637,11 +3658,19 @@ select option {
   display: inline-flex;
   transition: opacity 120ms ease, color 120ms ease;
 }
+.file-node__termbtn {
+  margin-left: auto;
+}
+.file-node:hover .file-node__termbtn,
 .file-node:hover .file-node__vcsbtn {
   opacity: 1;
 }
+.file-node__termbtn:hover,
 .file-node__vcsbtn:hover {
   background: var(--bg-selected);
+}
+.file-node__termbtn:hover {
+  color: var(--accent);
 }
 
 .root-tree__body {

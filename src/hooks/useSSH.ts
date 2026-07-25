@@ -93,6 +93,7 @@ export function useSSH() {
         await consumePendingRemoteTabs(remote);
         // Give the new connection a ready-to-use remote shell.
         store.openTerminal(remote.connId, remote.name);
+        store.pushNotice("info", `Connected to ${remote.name}.`);
       } catch (error) {
         const message = String(error);
         store.setConnState("disconnected", message);

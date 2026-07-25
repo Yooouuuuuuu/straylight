@@ -13,7 +13,11 @@ import {
   settingsFilePath,
 } from "../../lib/settings";
 import { toggleFocusView } from "../../lib/focusMode";
-import { applyTheme, savedThemeNames } from "../../lib/themes";
+import {
+  applyTheme,
+  DEFAULT_THEME_NAME,
+  savedThemeNames,
+} from "../../lib/themes";
 import { useDialogKeys } from "../../hooks/useDialogKeys";
 import { useAppStore } from "../../store/appStore";
 import { ConnectionGauge } from "../ConnectionGauge";
@@ -216,6 +220,9 @@ export function TitleBar() {
                   }}
                 >
                   {name}
+                  {name === DEFAULT_THEME_NAME && (
+                    <span className="theme-badge">default</span>
+                  )}
                 </button>
               ))}
             </div>

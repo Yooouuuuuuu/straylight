@@ -366,10 +366,19 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
     try {
       info = await vcsOpen(connId, dir);
     } catch (e) {
-      // Not a repo (or unreachable): toast and leave the panel closed.
+      // Not a repo (or unreachable): toast and leave the panel closed. The
+      // not-a-repo case points at the terminal — no Init button by design
+      // (git vs jj vs colocate is the user's call, not ours).
+      const msg = String(e);
+      const name = basename(dir) || dir;
       useAppStore
         .getState()
-        .pushNotice("error", `${basename(dir) || dir}: ${String(e)}`);
+        .pushNotice(
+          "error",
+          /not a git or jj repository/i.test(msg)
+            ? `${name} isn't a repository yet — run git init (or jj git init) in a terminal there to create one.`
+            : `${name}: ${msg}`,
+        );
       return;
     }
     const root = info.root;

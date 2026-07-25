@@ -11,6 +11,8 @@ import { basename } from "../lib/format";
 import {
   fsTransferBatch,
   fsTransferCancel,
+  sessionLaneConnect,
+  sshDisconnect,
   type ConnectionState,
   type SshHostEntry,
   type TransferProgress,
@@ -28,6 +30,8 @@ export interface ActiveTransfer {
   doneFiles: number;
   totalFiles: number;
   current: string;
+  /** Parked on a dead connection — auto-resumes when the lane reconnects. */
+  waiting: boolean;
 }
 
 export interface CursorPosition {
@@ -193,8 +197,13 @@ export interface RemoteConnection {
  *  `id`; `epoch` is bumped to force a restart (e.g. after a reconnect). */
 export interface TerminalSession {
   id: string;
-  /** The session this terminal runs on (local or remote). */
+  /** The HOST this terminal belongs to (local or remote) — grouping, colors,
+   *  and labels all key off this. */
   connId: string;
+  /** The dedicated connection actually carrying the PTY, when this agent got
+   *  its own session lane (docs/connections-v2.md Phase D). Absent = the PTY
+   *  rides the host's shared main lane. */
+  laneConnId?: string;
   /** The clean default label ("pwsh", "myserver 2"), set at open and never
    *  overwritten — it's the fallback name. */
   title: string;
@@ -684,7 +693,16 @@ interface AppState {
   selected: TreeNode | null;
   /** The full multi-selection (always within one connection; includes the anchor). */
   selection: TreeNode[];
-  contextMenu: (TreeNode & { x: number; y: number }) | null;
+  /** Right-click target. Pinned-root headers set `root` (the menu drops
+   *  cut/rename/delete) and pass `unpin` (the ✕ action) when removable. */
+  contextMenu:
+    | (TreeNode & {
+        x: number;
+        y: number;
+        root?: boolean;
+        unpin?: () => void;
+      })
+    | null;
   /** Items shown in the Properties dialog (one or many), or null when closed. */
   propertiesFor: TreeNode[] | null;
   /** The one in-flight transfer, or null when idle. */
@@ -894,8 +912,18 @@ interface AppState {
   openTerminalInChat: (
     connId: string,
     label: string,
-    opts?: Pick<TerminalSession, "scriptedInput" | "locked" | "usageProbe">,
+    opts?: Pick<
+      TerminalSession,
+      "scriptedInput" | "locked" | "usageProbe" | "laneConnId"
+    >,
   ) => string;
+  /** Open a SESSIONS/F11 agent. On SSH/WSL hosts the agent gets its own
+   *  dedicated connection (a session lane) so a busy agent can't slow or
+   *  break any other terminal. At the per-host cap (Preferences → Session
+   *  connections) it falls back to the shared main connection with a toast;
+   *  on a dial failure nothing opens — the host is struggling, and that is
+   *  surfaced rather than masked. Local agents just open (no SSH). */
+  openAgentInChat: (connId: string, label: string) => Promise<string | null>;
   /** Left→right arrangement of the editor + the two movable columns, after the
    *  pinned explorer. Persisted. */
   dockOrder: DockToken[];
@@ -996,7 +1024,11 @@ interface AppState {
   toggleSelected: (node: TreeNode) => void;
   /** Shift+click: replace the selection with a computed range, keeping `anchor`. */
   setSelection: (nodes: TreeNode[], anchor: TreeNode) => void;
-  openContextMenu: (node: TreeNode, x: number, y: number) => void;
+  openContextMenu: (
+    node: TreeNode & { root?: boolean; unpin?: () => void },
+    x: number,
+    y: number,
+  ) => void;
   closeContextMenu: () => void;
   openProperties: (nodes: TreeNode[]) => void;
   closeProperties: () => void;
@@ -1495,7 +1527,43 @@ export const useAppStore = create<AppState>()((set, get) => ({
     return id;
   },
 
-  closeTerminal: (id) =>
+  openAgentInChat: async (connId, label) => {
+    const s = get();
+    // Lazy import — settings.ts imports this store, so a static import here
+    // would be a module cycle.
+    const { sessionConnConfig } = await import("../lib/settings");
+    // Local agents have no SSH; max 0 = "always share" (documented setting).
+    if (connId === s.localConnId || sessionConnConfig.max === 0) {
+      return s.openTerminalInChat(connId, label);
+    }
+    try {
+      const laneId = await sessionLaneConnect(connId, label, sessionConnConfig.max);
+      get().pushNotice("info", `"${label}": dedicated connection opened.`);
+      return get().openTerminalInChat(connId, label, { laneConnId: laneId });
+    } catch (e) {
+      const msg = String(e);
+      if (msg.includes("SESSION_LANE_LIMIT:")) {
+        get().pushNotice(
+          "warn",
+          `Session connection limit reached (${sessionConnConfig.max}) — "${label}" shares the main connection. Raise the cap in Preferences → Session connections.`,
+        );
+        return get().openTerminalInChat(connId, label);
+      }
+      get().pushNotice(
+        "error",
+        `Couldn't open a dedicated connection for "${label}": ${msg} — try again, or open a terminal from the terminal panel (it shares the main connection).`,
+      );
+      return null;
+    }
+  },
+
+  closeTerminal: (id) => {
+    // A session-lane agent owns its connection — closing the agent hangs the
+    // dedicated SSH connection up with it (the backend frees the sshd slot).
+    const lane = get().terminals.find((t) => t.id === id)?.laneConnId;
+    if (lane && lane.includes("::session-")) {
+      void sshDisconnect(lane).catch(() => {});
+    }
     set((s) => {
       const sess = s.terminals.find((t) => t.id === id);
       if (!sess) return {};
@@ -1552,7 +1620,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
         ptyDead,
         chatPurposes,
       };
-    }),
+    });
+  },
 
   setActiveTerminal: (activeTerminalId) =>
     set({ activeTerminalId, terminalView: "terminals" }),
@@ -1698,8 +1767,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   restartConnTerminals: (connId) =>
     set((s) => ({
+      // Match by the lane actually carrying the PTY: a main-lane reconnect
+      // restarts only the shared terminals (agents on their own session lanes
+      // never died with it), and a session-lane reconnect restarts just its
+      // one agent.
       terminals: s.terminals.map((t) =>
-        t.connId === connId ? { ...t, epoch: t.epoch + 1 } : t,
+        (t.laneConnId ?? t.connId) === connId ? { ...t, epoch: t.epoch + 1 } : t,
       ),
     })),
 
@@ -2302,6 +2375,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         doneFiles: 0,
         totalFiles: total?.files ?? 0,
         current: "",
+        waiting: false,
       },
     });
     try {
@@ -2348,21 +2422,31 @@ export const useAppStore = create<AppState>()((set, get) => ({
       set({ activeTransfer: null });
     }
   },
-  updateTransferProgress: (p) =>
-    set((s) =>
-      s.activeTransfer && s.activeTransfer.id === p.id
-        ? {
-            activeTransfer: {
-              ...s.activeTransfer,
-              doneBytes: p.doneBytes,
-              totalBytes: p.totalBytes,
-              doneFiles: p.doneFiles,
-              totalFiles: p.totalFiles,
-              current: p.current,
-            },
-          }
-        : {},
-    ),
+  updateTransferProgress: (p) => {
+    const cur = get().activeTransfer;
+    if (!cur || cur.id !== p.id) return;
+    // Generous toasts on the pause/resume transitions (build-phase rule):
+    // the bar shows it too, but the toast says what will happen next.
+    if (p.waiting && !cur.waiting) {
+      get().pushNotice(
+        "warn",
+        "Transfer paused — connection lost; it will resume by itself.",
+      );
+    } else if (!p.waiting && cur.waiting) {
+      get().pushNotice("info", "Transfer resumed.");
+    }
+    set({
+      activeTransfer: {
+        ...cur,
+        doneBytes: p.doneBytes,
+        totalBytes: p.totalBytes,
+        doneFiles: p.doneFiles,
+        totalFiles: p.totalFiles,
+        current: p.current,
+        waiting: p.waiting,
+      },
+    });
+  },
   cancelActiveTransfer: () => {
     const t = get().activeTransfer;
     if (t) void fsTransferCancel(t.id);

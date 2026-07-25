@@ -367,6 +367,7 @@ export function TerminalPanel() {
                 initialInput={t.initialInput ?? null}
                 scriptedInput={t.scriptedInput ?? null}
                 locked={!!t.locked}
+                ptyConnId={t.laneConnId ?? null}
               />
             </div>
           ))}

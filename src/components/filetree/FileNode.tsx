@@ -8,7 +8,8 @@ import type { FileEntry } from "../../lib/ipc";
 import { canDropInto } from "../../lib/treeDrag";
 import { repoColorForPath, useVcsStore } from "../../store/vcsStore";
 import { vcsClass, vcsLetter } from "../../lib/vcsDecorations";
-import { IconBranch, IconChevron } from "../icons";
+import { IconBranch, IconChevron, IconTerminal } from "../icons";
+import { openTerminalAt } from "../../lib/terminalTarget";
 import { Tip } from "../Tooltip";
 import { FileIcon } from "./FileIcons";
 
@@ -283,6 +284,19 @@ export function FileNode({
             !entry.isDir && (
               <span className="file-node__meta">{formatSize(entry.size)}</span>
             )
+          )}
+          {entry.isDir && (
+            <Tip label="Open in Terminal">
+              <button
+                className="file-node__termbtn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openTerminalAt(connId, entry.path);
+                }}
+              >
+                <IconTerminal size={12} />
+              </button>
+            </Tip>
           )}
           {entry.isDir && (
             <Tip

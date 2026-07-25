@@ -10,7 +10,12 @@ import { copyPath } from "./fileOps";
 import { sshReconnect } from "./ipc";
 import { openFileByPath } from "./openFile";
 import { saveActiveFile } from "./saveFile";
-import { settingsFilePath, updateSettings } from "./settings";
+import {
+  resetSettingsFile,
+  restoreBuiltinThemes,
+  settingsFilePath,
+  updateSettings,
+} from "./settings";
 import { closeAllTabs, closeSavedTabs } from "./tabActions";
 import { keyLabelFor } from "./shortcuts";
 import { toggleFocusView } from "./focusMode";
@@ -85,7 +90,7 @@ export function allCommands(): Command[] {
   return [
     { id: "app.commandPalette", title: "App: Show All Commands", run: () => app().setPaletteOpen(true) },
     { id: "app.refreshAll", title: "App: Refresh Everything", run: () => refreshApp() },
-    { id: "connection.connect", title: "Connection: Connect to Server…", run: () => app().openDialog() },
+    { id: "connection.connect", title: "Connection: Connect to Server", run: () => app().openDialog() },
     {
       id: "connection.reconnect",
       title: "Connection: Reconnect Remote",
@@ -134,7 +139,7 @@ export function allCommands(): Command[] {
     },
     { id: "explorer.refreshTrees", title: "Explorer: Refresh Trees", run: () => { app().refreshLocal(); app().refreshRemote(); app().refreshWsl(); } },
     { id: "file.markdownPreview", title: "File: Markdown Preview", run: openMarkdownPreview },
-    { id: "file.quickOpen", title: "File: Quick Open…", run: () => app().setFinderOpen(true) },
+    { id: "file.quickOpen", title: "File: Quick Open", run: () => app().setFinderOpen(true) },
     { id: "file.save", title: "File: Save", run: () => saveActiveFile() },
     {
       id: "preferences.settings",
@@ -156,6 +161,30 @@ export function allCommands(): Command[] {
       },
     },
     {
+      id: "restore.settings",
+      title: "Restore: settings.json defaults",
+      run: () =>
+        useVcsStore
+          .getState()
+          .askConfirm(
+            "Restore settings.json defaults?",
+            "Every setting returns to its shipped value — keybindings, confirmations, auto-connect hosts, panels, and colors. Your saved themes (theme.json) are untouched.",
+            () => void resetSettingsFile(),
+          ),
+    },
+    {
+      id: "restore.builtinThemes",
+      title: "Restore: built-in themes",
+      run: () =>
+        useVcsStore
+          .getState()
+          .askConfirm(
+            "Restore built-in themes?",
+            "The six shipped themes come back at the top of the list, renewed to their current designs — any edits under their names are replaced. Your own saved themes are kept.",
+            () => void restoreBuiltinThemes(),
+          ),
+    },
+    {
       id: "storage.drafts",
       title: "Storage: Drafts",
       run: () => app().openAppTab("drafts"),
@@ -170,7 +199,7 @@ export function allCommands(): Command[] {
       title: "Storage: Auto-connect hosts",
       run: () => app().openAppTab("autoconnect"),
     },
-    { id: "search.inFiles", title: "Search: In Files…", run: () => app().setSearchOpen(true) },
+    { id: "search.inFiles", title: "Search: In Files", run: () => app().setSearchOpen(true) },
     {
       id: "terminal.new",
       title: "Terminal: New",
@@ -207,7 +236,7 @@ export function allCommands(): Command[] {
       },
     },
     { id: "terminal.toggle", title: "Terminal: Toggle", run: () => app().setTerminalVisible(!app().terminalVisible) },
-    { id: "view.portForwarding", title: "View: Port Forwarding…", run: () => { app().setTerminalView("forwarding"); app().setTerminalVisible(true); } },
+    { id: "view.portForwarding", title: "View: Port Forwarding", run: () => { app().setTerminalView("forwarding"); app().setTerminalVisible(true); } },
     { id: "view.toggleSidebar", title: "View: Toggle Sidebar", run: () => app().toggleSidebar() },
     { id: "view.toggleSourceControl", title: "View: Toggle Source Control", run: () => vcs().toggleScm() },
     { id: "view.toggleChat", title: "View: Toggle CHAT", run: () => app().toggleChat() },

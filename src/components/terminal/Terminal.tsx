@@ -12,6 +12,7 @@ export function Terminal({
   initialInput = null,
   scriptedInput = null,
   locked = false,
+  ptyConnId = null,
 }: {
   id: string;
   connId: string;
@@ -20,6 +21,9 @@ export function Terminal({
   initialInput?: string | null;
   scriptedInput?: { text: string; delayMs: number }[] | null;
   locked?: boolean;
+  /** Dedicated session-lane connection carrying the PTY (null = `connId`).
+   *  Theme/colors/tree-refresh still key off the host `connId`. */
+  ptyConnId?: string | null;
 }) {
   const containerRef = useTerminal(
     connId,
@@ -29,6 +33,7 @@ export function Terminal({
     initialInput,
     scriptedInput,
     locked,
+    ptyConnId,
   );
   // data-conn-id lets keyboard handlers resolve the focused terminal's host.
   return <div className="terminal-host" data-conn-id={connId} ref={containerRef} />;

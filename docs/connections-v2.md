@@ -101,7 +101,22 @@ On the existing single transport:
 Expected effect: the hourly machine drops to plain-ssh rates (~days), and when
 drops do happen they're real. Terminals survive stalls they used to die in.
 
-## Phase 1 — two pipes (planned)
+## The lanes — one host, three kinds of connection
+
+| Lane | id | Carries | Per host |
+|---|---|---|---|
+| **Main lane** | `<connId>` | quick terminals (terminal-panel ＋), port forwards, the F11 usage probe | exactly 1 |
+| **Data lane** | `<connId>::data` | SFTP + exec — everything that moves *data* rather than keystrokes (transfers, saves, listings, VCS/finders) | at most 1 (lazy) |
+| **Session lanes** | `<connId>::session-<k>` | ONE agent's PTY, nothing else | 0…cap (Preferences → Session connections, default 10) |
+
+Two invariants: the data lane never carries a PTY, and a session lane carries
+exactly one session channel (so `MaxSessions` can't touch it). **The ＋ you
+press decides the pipe, forever**: SESSIONS panel / F11 ＋ → session lane;
+terminal-panel ＋ → main lane, even if the terminal is later docked into the
+SESSIONS column. The usage probe stays on main by design — it's a ~10-second
+one-shot, the opposite of the long-lived streamers session lanes exist for.
+
+## Phase 1 — two pipes (implemented)
 
 Today's "lanes" are channels — streams inside **one** pipe sharing one TCP
 queue, one event loop, one death, one MaxSessions budget. Phase 1 gives each
@@ -116,7 +131,18 @@ Lazy-open lane B on first file op; hosts where a second auth can't be silent
 (keyboard-interactive/2FA) fall back to sharing one pipe. MaxSessions pressure
 halves as a side effect.
 
-## Phase 2 — transfers that finish (planned)
+*As built:* the lane is `Connection::data_lane` — dialed on first file op
+(`open_sibling`, the `reestablish` flow with a fresh id `<connId>::data`),
+supervised in place forever (its `Arc` stays valid across reconnects, which
+in-flight transfers rely on), shared-fallback with a 60 s redial cooldown when
+the dial fails, torn down with its host on disconnect. SFTP **and exec** ride
+it; PTYs and forwards stay on the main lane. Its status events carry the
+`::data` id — the UI toasts them with a "(data)" tag and refreshes the tree +
+reconciles stranded saves when it reconnects; the host's dot stays owned by
+the main lane. Server cost: one extra sshd session process (a few MB) per
+host.
+
+## Phase 2 — transfers that finish (implemented)
 
 On lane B: abortive cancel (`select!` against a cancel/epoch signal — cancel
 works even mid-hang), epoch-abort when the lane reconnects under a transfer,
@@ -125,6 +151,47 @@ and **auto-resume** — the batch continues from the incomplete file
 until done or cancelled. The progress bar gains a `waiting for connection…`
 state. House rule holds: no self-imposed timeouts; the user cancels, not a
 timer.
+
+*As built:* every await in the copy (opens, reads, writes, stats, listings,
+the commit renames, the parallel measure) races a `TransferInterrupt` watch
+channel; user cancel and lane-epoch bumps both trip it. `run_transfer` runs
+retry rounds: completed files are remembered (never re-copied; the bar never
+moves backwards — an incomplete file's bytes roll back), top-level collision
+resolutions are remembered too (a resumed transfer continues into the same
+"name copy"), and between rounds the copy parks — amber pulsing bar,
+"waiting for connection…" — until every SSH lane reports Connected again.
+An op that errors just before the supervisor notices the lane died gets one
+probe interval (~15 s) of grace before the error counts as fatal, so a drop
+is never misread as a filesystem failure. Genuine filesystem errors on
+healthy lanes still fail the transfer immediately after that check.
+
+## Phase D — session lanes (implemented)
+
+Every agent created from the SESSIONS panel or F11 gets **its own SSH
+connection** — the per-terminal isolation argument, applied only to the
+terminals that earn it (long-lived, output-streaming, precious). A busy agent
+can't slow or break any other terminal; an agent's lane dying restarts only
+that one agent.
+
+- **Cap + graceful fallback:** per-host cap from Preferences → Session
+  connections (default 10, clamp 0–30; 0 = always share). At the cap the
+  agent still opens — on the shared main lane, with a toast pointing at the
+  setting. A cap only stops connection growth, never work.
+- **Dial failure is loud, not masked:** if the dedicated dial fails, nothing
+  opens and the toast says why — try again, or open a terminal from the
+  terminal panel (shared main lane). Silently sharing would hide a struggling
+  host.
+- **Serialized dials** per host (cap check + handshake under one lock):
+  sshd's MaxStartups never sees a burst from us, and the cap can't be raced
+  past.
+- **Lifecycle:** closing the agent hangs up its connection (sshd slot freed);
+  disconnecting the host sweeps all its session lanes; agents are
+  session-only, so there is no restore burst at launch.
+- **Plumbing:** the terminal keeps the HOST's `connId` (grouping, colors,
+  labels unchanged) and carries `laneConnId` for the PTY only. A main-lane
+  reconnect restarts only shared terminals — agents on their own lanes never
+  died with it — and vice versa. Toasts name the agent:
+  `ubuntu · web-fix: connection lost — reconnecting`.
 
 ## Phase 2.5 — soft-restore for general terminals (planned)
 

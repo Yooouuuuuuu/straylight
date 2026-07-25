@@ -63,6 +63,9 @@ export function useTerminal(
   initialInput: string | null = null,
   scriptedInput: { text: string; delayMs: number }[] | null = null,
   locked = false,
+  // Dedicated session-lane connection carrying the PTY (null = connId). Only
+  // the PTY rides it — theme, host color, and tree refresh stay on connId.
+  ptyConnId: string | null = null,
 ) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -235,8 +238,9 @@ export function useTerminal(
       else unlisten = un;
     });
 
-    // Open the PTY sized to the current terminal.
-    void ptyOpen(connId, term.cols, term.rows, command)
+    // Open the PTY sized to the current terminal (on the session lane when
+    // this agent has one).
+    void ptyOpen(ptyConnId ?? connId, term.cols, term.rows, command)
       .then((openedId) => {
         if (disposed) {
           void ptyClose(openedId);
@@ -369,7 +373,8 @@ export function useTerminal(
       if (id) unregisterTerminalSlot(id, host);
       host.remove();
     };
-  }, [connId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connId, ptyConnId]);
 
   // A terminal that was hidden (display:none) couldn't measure itself. Refit it
   // the moment it becomes the active tab — synchronously, after React has

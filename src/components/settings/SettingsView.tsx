@@ -11,6 +11,8 @@ import {
   confirmFlags,
   downloadConfig,
   keybindingOverrides,
+  resetSettingsFile,
+  sessionConnConfig,
   settingsZoom,
   terminalFontConfig,
   terminalHostColorConfig,
@@ -18,6 +20,7 @@ import {
   updateSettings,
 } from "../../lib/settings";
 import { useAppStore } from "../../store/appStore";
+import { useVcsStore } from "../../store/vcsStore";
 import { IconUndo } from "../icons";
 import { Tip } from "../Tooltip";
 
@@ -248,6 +251,31 @@ export function SettingsView() {
         </label>
       ))}
 
+      <h3 className="app-tab__section">Session connections</h3>
+      <div className="app-tab__hint">
+        Every session opened from the SESSIONS panel (or F11) gets its own SSH
+        connection, so one busy agent can't slow down or take out the others.
+        This caps how many per host — past it, new sessions share the host's
+        main connection instead. Each one costs an extra sshd process on the
+        server (a few MB): raising it is fine on your own machines, heavier on
+        shared or corporate hosts. 0 = never dedicate, always share.
+      </div>
+      <div className="settings-row">
+        <span className="settings-row__label">Max per host</span>
+        <input
+          type="number"
+          className="input settings-row__num"
+          min={0}
+          max={30}
+          value={sessionConnConfig.max}
+          onChange={(e) => {
+            const v = Math.round(Number(e.target.value));
+            if (v >= 0 && v <= 30)
+              void updateSettings({ sessionConnections: { max: v } });
+          }}
+        />
+      </div>
+
       <h3 className="app-tab__section">Keybindings</h3>
       <div className="app-tab__hint">
         Click a key, then press the new combination (Esc cancels). The undo
@@ -277,6 +305,29 @@ export function SettingsView() {
           )}
         </div>
       ))}
+
+      <h3 className="app-tab__section">Restore</h3>
+      <div className="app-tab__hint">
+        Hand-edited settings.json into a broken state? This rewrites it with the
+        shipped defaults. Saved themes (theme.json) are untouched.
+      </div>
+      <div className="settings-row">
+        <span className="settings-row__label">Restore settings.json defaults</span>
+        <button
+          className="btn btn--ghost"
+          onClick={() =>
+            useVcsStore
+              .getState()
+              .askConfirm(
+                "Restore settings.json defaults?",
+                "Every setting returns to its shipped value — keybindings, confirmations, auto-connect hosts, panels, and colors. Your saved themes (theme.json) are untouched.",
+                () => void resetSettingsFile(),
+              )
+          }
+        >
+          Restore
+        </button>
+      </div>
     </div>
   );
 }

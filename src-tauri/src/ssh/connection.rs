@@ -11,7 +11,7 @@ use russh::Channel;
 use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
+use tokio::sync::{watch, Mutex, OwnedMutexGuard, RwLock};
 use uuid::Uuid;
 
 use crate::AppState;
@@ -114,6 +114,25 @@ pub struct Connection {
     /// running transfer IS the health check), so bulk load can never make the
     /// connection look sick.
     last_activity: AtomicU64,
+    /// The lazily-dialed **data lane** — a SECOND SSH connection to the same
+    /// host carrying SFTP + exec (everything that moves data rather than
+    /// keystrokes), so heavy file traffic can never congest or kill the
+    /// terminals riding this main lane (docs/connections-v2.md Phase 1). Only
+    /// used on main-lane objects; a data lane's own slot stays None. Held in a
+    /// tokio Mutex so one dial at a time.
+    data: Mutex<Option<Arc<Connection>>>,
+    /// When the last data-lane dial failed (cooldown: retry at most once a
+    /// minute; between tries data work shares this lane).
+    data_fail: std::sync::Mutex<Option<std::time::Instant>>,
+    /// Serializes **session lane** dials for this host (one handshake at a
+    /// time — politeness toward sshd's MaxStartups; also makes the cap check
+    /// race-free). Session lanes are per-agent connections created by the
+    /// SESSIONS ＋ (docs/connections-v2.md Phase D).
+    session_dial: Mutex<()>,
+    /// Bumped on every `reestablish` (the live handle was swapped). In-flight
+    /// transfers subscribe and yank themselves off the dead session the moment
+    /// the lane reconnects, then auto-resume (docs/connections-v2.md Phase 2).
+    epoch: watch::Sender<u64>,
 }
 
 fn now_millis() -> u64 {
@@ -171,6 +190,50 @@ impl Connection {
         now_millis()
             .saturating_sub(self.last_activity.load(Ordering::Relaxed))
             / 1000
+    }
+
+    /// Subscribe to reconnects: the value bumps each time `reestablish` swaps
+    /// the live handle (see the `epoch` field).
+    pub fn subscribe_epoch(&self) -> watch::Receiver<u64> {
+        self.epoch.subscribe()
+    }
+
+    /// The data lane for this host — dialed on first use, supervised and
+    /// reestablished IN PLACE forever after (the Arc stays valid across
+    /// reconnects, which in-flight transfers rely on). On dial failure the
+    /// main lane is shared instead, retried at most once a minute.
+    pub async fn data_lane(self: &Arc<Self>, app: &AppHandle) -> Arc<Connection> {
+        let mut slot = self.data.lock().await;
+        if let Some(lane) = slot.as_ref() {
+            return lane.clone();
+        }
+        if let Some(failed_at) = *self.data_fail.lock().unwrap() {
+            if failed_at.elapsed() < Duration::from_secs(60) {
+                return self.clone(); // cooldown — share the main lane
+            }
+        }
+        let id = format!("{}::data", self.id);
+        emit_status(app, &id, ConnectionState::Connecting, None);
+        match open_sibling(self, id.clone()).await {
+            Ok(sibling) => {
+                emit_status(app, &id, ConnectionState::Connected, None);
+                log::info!("data lane {id} opened");
+                ensure_supervisor(app.clone(), sibling.clone());
+                *slot = Some(sibling.clone());
+                sibling
+            }
+            Err(e) => {
+                log::warn!("data lane {id} failed to open ({e}) — sharing the main lane");
+                emit_status(
+                    app,
+                    &id,
+                    ConnectionState::Disconnected,
+                    Some(format!("data lane unavailable ({e}) — sharing the main connection")),
+                );
+                *self.data_fail.lock().unwrap() = Some(std::time::Instant::now());
+                self.clone()
+            }
+        }
     }
 
     /// Open a fresh session channel on the live handle. Used by SFTP, the PTY
@@ -652,6 +715,10 @@ pub async fn ssh_connect(
         stop: AtomicBool::new(false),
         supervising: AtomicBool::new(false),
         last_activity: AtomicU64::new(now_millis()),
+        data: Mutex::new(None),
+        data_fail: std::sync::Mutex::new(None),
+        session_dial: Mutex::new(()),
+        epoch: watch::Sender::new(0),
     });
 
     state
@@ -677,6 +744,52 @@ pub async fn ssh_disconnect(
         // Stop the supervisor before dropping the transport, so it doesn't see
         // the close as a drop and try to reconnect.
         connection.mark_stopped();
+        // The data lane goes down with its host (bounded — its socket may be
+        // a corpse already).
+        if let Some(lane) = connection.data.lock().await.take() {
+            lane.mark_stopped();
+            let _ = tokio::time::timeout(Duration::from_secs(3), async {
+                let _ = lane
+                    .live
+                    .read()
+                    .await
+                    .handle
+                    .disconnect(russh::Disconnect::ByApplication, "", "en")
+                    .await;
+            })
+            .await;
+            emit_status(&app, &format!("{conn_id}::data"), ConnectionState::Disconnected, None);
+        }
+        // Session lanes (per-agent connections) go down with their host too.
+        let lanes: Vec<(String, Arc<Connection>)> = {
+            let mut sessions = state.sessions.lock().await;
+            let prefix = format!("{conn_id}::session-");
+            let ids: Vec<String> = sessions
+                .keys()
+                .filter(|k| k.starts_with(&prefix))
+                .cloned()
+                .collect();
+            ids.into_iter()
+                .filter_map(|id| match sessions.remove(&id) {
+                    Some(crate::Session::Ssh(c)) => Some((id, c)),
+                    _ => None,
+                })
+                .collect()
+        };
+        for (id, lane) in lanes {
+            lane.mark_stopped();
+            let _ = tokio::time::timeout(Duration::from_secs(3), async {
+                let _ = lane
+                    .live
+                    .read()
+                    .await
+                    .handle
+                    .disconnect(russh::Disconnect::ByApplication, "", "en")
+                    .await;
+            })
+            .await;
+            emit_status(&app, &id, ConnectionState::Disconnected, None);
+        }
         let _ = connection
             .live
             .read()
@@ -739,6 +852,66 @@ pub async fn ssh_reconnect(
         Err(e) => {
             *conn.state.lock().await = ConnectionState::Disconnected;
             emit_status(&app, &conn_id, ConnectionState::Disconnected, Some(e.clone()));
+            Err(e)
+        }
+    }
+}
+
+/// Error prefix the frontend matches to fall back to the main lane when the
+/// per-host session-lane cap is reached (Preferences → Session connections).
+pub const SESSION_LANE_LIMIT: &str = "SESSION_LANE_LIMIT:";
+
+/// Open a **session lane**: a dedicated SSH connection for ONE agent created
+/// from the SESSIONS panel / F11 (docs/connections-v2.md Phase D) — its PTY
+/// rides alone, so a busy agent can't slow or break any other terminal. Dials
+/// are serialized per host (MaxStartups politeness) and capped by `limit`
+/// (the user's Preferences value): at the cap this returns
+/// `SESSION_LANE_LIMIT:` and the frontend opens the agent on the shared main
+/// lane instead. A dial failure is a plain error — the frontend explains and
+/// does NOT silently share (that would mask a struggling host).
+#[tauri::command]
+pub async fn session_lane_connect(
+    state: State<'_, crate::AppState>,
+    app: AppHandle,
+    conn_id: String,
+    label: String,
+    limit: u32,
+) -> Result<String, String> {
+    let parent = state.ssh_connection(&conn_id).await?;
+    // Serialize the cap check + dial per host: no race can overshoot the cap,
+    // and sshd never sees more than one handshake from us at a time.
+    let _dial = parent.session_dial.lock().await;
+    let prefix = format!("{conn_id}::session-");
+    let count = state
+        .sessions
+        .lock()
+        .await
+        .keys()
+        .filter(|k| k.starts_with(&prefix))
+        .count() as u32;
+    if count >= limit {
+        return Err(format!("{SESSION_LANE_LIMIT}{limit}"));
+    }
+    let id = format!(
+        "{conn_id}::session-{}",
+        &Uuid::new_v4().to_string()[..8]
+    );
+    emit_status(&app, &id, ConnectionState::Connecting, None);
+    match open_sibling(&parent, id.clone()).await {
+        Ok(lane) => {
+            state
+                .sessions
+                .lock()
+                .await
+                .insert(id.clone(), crate::Session::Ssh(lane.clone()));
+            emit_status(&app, &id, ConnectionState::Connected, None);
+            ensure_supervisor(app, lane);
+            log::info!("session lane {id} opened for \"{label}\"");
+            Ok(id)
+        }
+        Err(e) => {
+            emit_status(&app, &id, ConnectionState::Disconnected, Some(e.clone()));
+            log::warn!("session lane for \"{label}\" failed to open: {e}");
             Err(e)
         }
     }
@@ -1003,6 +1176,53 @@ async fn sleep_or_stopped(conn: &Connection, secs: u64) -> bool {
 
 /// Re-open and re-authenticate the transport, swapping the live handle in place
 /// so the connection id and all channels opened afterwards target the new link.
+/// Dial a second, independent SSH connection to the same host — the "files
+/// lane" (docs/connections-v2.md Phase 1). Silent like `reestablish`: no
+/// prompting — the host key was verified at first connect, and the retained
+/// auth (key path / in-memory password) replays.
+async fn open_sibling(conn: &Connection, id: String) -> Result<Arc<Connection>, String> {
+    let outcome = Arc::new(std::sync::Mutex::new(HostKeyOutcome::Pending));
+    let connect = open_handle(
+        client_config(),
+        &conn.info.host,
+        conn.info.port,
+        &conn.info.user,
+        conn.proxy_jump.as_deref(),
+        outcome,
+    );
+    let (mut handle, jump) = match tokio::time::timeout(Duration::from_secs(10), connect).await {
+        Ok(Ok(pair)) => pair,
+        Ok(Err(e)) => return Err(e),
+        Err(_) => {
+            return Err(format!(
+                "connection to {}:{} timed out",
+                conn.info.host, conn.info.port
+            ))
+        }
+    };
+    authenticate(&mut handle, &conn.info.user, &conn.auth).await?;
+    Ok(Arc::new(Connection {
+        id,
+        info: ConnectionInfo {
+            host: conn.info.host.clone(),
+            port: conn.info.port,
+            user: conn.info.user.clone(),
+        },
+        live: RwLock::new(Live { handle: Arc::new(handle), _jump: jump }),
+        sftp: RwLock::new(Arc::new(Mutex::new(None))),
+        state: Mutex::new(ConnectionState::Connected),
+        auth: conn.auth.clone(),
+        proxy_jump: conn.proxy_jump.clone(),
+        stop: AtomicBool::new(false),
+        supervising: AtomicBool::new(false),
+        last_activity: AtomicU64::new(now_millis()),
+        data: Mutex::new(None),
+        data_fail: std::sync::Mutex::new(None),
+        session_dial: Mutex::new(()),
+        epoch: watch::Sender::new(0),
+    }))
+}
+
 async fn reestablish(conn: &Connection) -> Result<(), String> {
     // A reconnect can't prompt; on a known host the key still verifies (and a
     // changed key correctly refuses — the supervisor keeps retrying).
@@ -1030,6 +1250,9 @@ async fn reestablish(conn: &Connection) -> Result<(), String> {
         let mut live = conn.live.write().await;
         std::mem::replace(&mut *live, Live { handle: Arc::new(handle), _jump: jump })
     };
+    // Tell in-flight work (transfers) the old session is a corpse — they yank
+    // themselves off it and auto-resume on the fresh one (Phase 2).
+    conn.epoch.send_modify(|v| *v = v.wrapping_add(1));
     // Tear the old transport down off the critical path, time-bounded so a dead
     // socket can't hang us and a still-live bastion tunnel isn't leaked.
     tokio::spawn(async move {

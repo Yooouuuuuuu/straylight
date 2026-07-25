@@ -17,7 +17,6 @@ pub mod watch;
 pub mod wsl;
 
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
@@ -37,12 +36,20 @@ pub enum Session {
 
 /// Global application state, shared across all Tauri commands.
 pub struct AppState {
-    /// Active sessions, keyed by the connection id the frontend holds.
+    /// The Tauri app handle, set once at startup — lets deep code (the lazy
+    /// data-lane dial) emit events and spawn supervisors without threading an
+    /// `AppHandle` through every command signature.
+    pub app: std::sync::OnceLock<tauri::AppHandle>,
+    /// Active sessions, keyed by the connection id the frontend holds. An SSH
+    /// entry is a host's MAIN lane (terminals + forwards); its data lane hangs
+    /// off the connection itself (`Connection::data_lane`), and per-agent
+    /// session lanes live here too under `<id>::session-<k>` keys.
     pub sessions: Mutex<HashMap<String, Session>>,
     /// Open PTY/terminal sessions, keyed by the id from [`ssh::pty::pty_open`].
     pub ptys: Mutex<HashMap<String, PtyHandle>>,
-    /// Cancellation flags for in-flight transfers, keyed by transfer id.
-    pub transfers: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    /// Interrupt handles for in-flight transfers, keyed by transfer id
+    /// (user cancel + connection-reset signals; see `TransferInterrupt`).
+    pub transfers: Mutex<HashMap<String, Arc<transport::TransferInterrupt>>>,
     /// Per-repo locks (keyed by `connId::root`) serializing VCS mutations so two
     /// commits/stages can't race on git's `index.lock`.
     pub vcs_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
@@ -72,6 +79,7 @@ pub struct AppState {
 impl AppState {
     fn new() -> Self {
         Self {
+            app: std::sync::OnceLock::new(),
             sessions: Mutex::new(HashMap::new()),
             ptys: Mutex::new(HashMap::new()),
             transfers: Mutex::new(HashMap::new()),
@@ -86,13 +94,40 @@ impl AppState {
         }
     }
 
-    /// Resolve a session id to a file transport (SFTP or local).
+    /// Resolve a session id to a file transport (SFTP or local). SFTP rides
+    /// the data lane — a second SSH connection dialed on first use —
+    /// so file traffic can't congest or kill the terminals on the interactive
+    /// lane (docs/connections-v2.md Phase 1; falls back to sharing when the
+    /// second dial fails).
     pub async fn transport(&self, conn_id: &str) -> Result<Box<dyn FileTransport>, String> {
-        let sessions = self.sessions.lock().await;
-        match sessions.get(conn_id) {
-            Some(Session::Ssh(conn)) => Ok(Box::new(ssh::sftp::SftpTransport(conn.clone()))),
-            Some(Session::Local) => Ok(Box::new(LocalTransport)),
-            None => Err(format!("session '{conn_id}' is not open")),
+        Ok(self.transfer_endpoint(conn_id).await?.0)
+    }
+
+    /// Like [`transport`](Self::transport), but also hands back the underlying
+    /// lane connection for SSH endpoints — transfers subscribe to its
+    /// reconnect epoch so a lane swap aborts the current file instead of
+    /// leaving it dangling on a dead session (Phase 2).
+    pub async fn transfer_endpoint(
+        &self,
+        conn_id: &str,
+    ) -> Result<(Box<dyn FileTransport>, Option<Arc<Connection>>), String> {
+        let conn = {
+            let sessions = self.sessions.lock().await;
+            match sessions.get(conn_id) {
+                Some(Session::Ssh(conn)) => Some(conn.clone()),
+                Some(Session::Local) => None,
+                None => return Err(format!("session '{conn_id}' is not open")),
+            }
+        };
+        match conn {
+            Some(conn) => {
+                let lane = match self.app.get() {
+                    Some(app) => conn.data_lane(app).await,
+                    None => conn, // startup edge: no handle yet — share lane A
+                };
+                Ok((Box::new(ssh::sftp::SftpTransport(lane.clone())), Some(lane)))
+            }
+            None => Ok((Box::new(LocalTransport), None)),
         }
     }
 
@@ -229,6 +264,14 @@ pub fn run() {
         // Remember window size / position / maximized across launches.
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(AppState::new())
+        .setup(|app| {
+            // Stash the handle so deep code (lazy data-lane dial) can emit
+            // events + spawn supervisors without an AppHandle parameter.
+            use tauri::Manager;
+            let state = app.state::<AppState>();
+            let _ = state.app.set(app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             ssh::config::ssh_list_config_hosts,
             ssh::config::ssh_config_path,
@@ -236,6 +279,7 @@ pub fn run() {
             ssh::connection::ssh_disconnect,
             ssh::connection::ssh_reconnect,
             ssh::connection::ssh_trust_host,
+            ssh::connection::session_lane_connect,
             ui_close_devtools,
             reveal_path,
             open_external,

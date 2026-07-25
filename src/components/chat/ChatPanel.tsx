@@ -35,7 +35,7 @@ export function ChatPanel() {
   const setChatVisible = useAppStore((s) => s.setChatVisible);
   const returnTerminalFromChat = useAppStore((s) => s.returnTerminalFromChat);
   const closeTerminal = useAppStore((s) => s.closeTerminal);
-  const openTerminalInChat = useAppStore((s) => s.openTerminalInChat);
+  const openAgentInChat = useAppStore((s) => s.openAgentInChat);
   const renameTerminal = useAppStore((s) => s.renameTerminal);
   const dockOrder = useAppStore((s) => s.dockOrder);
   const stepDock = useAppStore((s) => s.stepDock);
@@ -126,7 +126,7 @@ export function ChatPanel() {
                         className="terminal-menu__item"
                         onClick={() => {
                           setMenuOpen(false);
-                          openTerminalInChat(h.connId, h.label);
+                          void openAgentInChat(h.connId, h.label);
                         }}
                       >
                         {h.label}

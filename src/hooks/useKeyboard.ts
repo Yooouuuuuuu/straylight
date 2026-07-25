@@ -46,7 +46,7 @@ export function useKeyboard() {
                   store.remotes.find((r) => r.conn.connId === connId)?.conn
                     .name ??
                   "shell");
-            store.openTerminalInChat(connId, label);
+            void store.openAgentInChat(connId, label);
           }
         } else {
           const t = chatSections(
@@ -127,7 +127,7 @@ export function useKeyboard() {
                     store.remotes.find((r) => r.conn.connId === connId)?.conn
                       .name ??
                     "shell");
-              store.openTerminalInChat(connId, label);
+              void store.openAgentInChat(connId, label);
             }
             event.preventDefault();
             return;

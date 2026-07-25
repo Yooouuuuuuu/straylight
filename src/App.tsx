@@ -278,8 +278,55 @@ export default function App() {
       // in the branches below (it also restarts terminals + reconciles saves).
     };
 
+    // Last-seen state of each secondary lane (`<connId>::data`,
+    // `<connId>::session-<k>`) — they aren't in the store (no dot of their
+    // own); tracked here so their transitions toast without fighting the main
+    // lane's state.
+    const lanePrev = new Map<string, string>();
+
     const unlistenPromise = onSshStatus((status) => {
       const store = useAppStore.getState();
+      // Secondary lanes (docs/connections-v2.md): the data lane (SFTP + exec)
+      // and per-agent session lanes. Toast their transitions with a clear
+      // tag; the host's dot stays owned by the main lane.
+      const sep = status.connId.indexOf("::");
+      if (sep !== -1) {
+        const parent = status.connId.slice(0, sep);
+        const kind = status.connId.slice(sep + 2); // "data" | "session-<k>"
+        const host =
+          store.remotes.find((r) => r.conn.connId === parent)?.conn.name ??
+          store.wsls.find((w) => w.conn.connId === parent)?.conn.name;
+        if (!host) return;
+        const isData = kind === "data";
+        // A session lane is named after its agent when we can find it.
+        const agent = store.terminals.find(
+          (t) => t.laneConnId === status.connId,
+        );
+        const label = isData
+          ? `${host} (data)`
+          : `${host} · ${agent?.customName ?? agent?.title ?? "session"}`;
+        const prev = lanePrev.get(status.connId) ?? "connected";
+        lanePrev.set(status.connId, status.state);
+        // A session lane's clean close (agent tab closed → no message) is the
+        // user's own action — don't toast it.
+        if (!(status.state === "disconnected" && !status.message && !isData)) {
+          toastTransition(label, prev, status.state, status.message);
+        }
+        if (status.state === "connected" && prev === "reconnecting") {
+          store.pushNotice("info", `${label}: reconnected.`);
+          if (isData) {
+            // File ops rode this lane — refresh the tree and settle any saves
+            // stranded by the drop (terminals were never involved).
+            store.refreshConn(parent);
+            const connKey = connKeyForConnId(parent);
+            if (connKey) void reconcilePendingSaves(parent, connKey, Date.now());
+          } else {
+            // The agent's shell died with its lane — restart just that one.
+            store.restartConnTerminals(status.connId);
+          }
+        }
+        return;
+      }
       const entry = store.remotes.find((r) => r.conn.connId === status.connId);
       if (entry) {
         const prev = entry.state;

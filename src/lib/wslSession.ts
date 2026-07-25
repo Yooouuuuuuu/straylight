@@ -47,5 +47,6 @@ export async function connectWslDistro(
   };
   useAppStore.getState().addWsl(conn, listing.path);
   useAppStore.getState().openTerminal(connId, distro);
+  useAppStore.getState().pushNotice("info", `Connected to ${distro} (WSL).`);
   await onConnected?.(conn);
 }

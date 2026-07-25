@@ -122,6 +122,7 @@ export function FocusView() {
   const setChatActive = useAppStore((s) => s.setChatActive);
   const clearBell = useAppStore((s) => s.clearBell);
   const openTerminalInChat = useAppStore((s) => s.openTerminalInChat);
+  const openAgentInChat = useAppStore((s) => s.openAgentInChat);
   const closeTerminal = useAppStore((s) => s.closeTerminal);
   const renameTerminal = useAppStore((s) => s.renameTerminal);
   const pushNotice = useAppStore((s) => s.pushNotice);
@@ -816,7 +817,7 @@ export function FocusView() {
                 <Tip label={`New session on ${info.name}`}>
                   <button
                     className="icon-btn"
-                    onClick={() => openTerminalInChat(connId, newLabel(connId))}
+                    onClick={() => void openAgentInChat(connId, newLabel(connId))}
                   >
                     <IconPlus size={12} />
                   </button>
