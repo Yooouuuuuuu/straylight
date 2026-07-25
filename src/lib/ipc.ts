@@ -130,6 +130,13 @@ export function sessionLaneConnect(
   return invoke("session_lane_connect", { connId, label, limit });
 }
 
+/** Sweep everything a PREVIOUS page left in the backend (connections, lanes,
+ *  transfers, PTYs, forwards). Called once at webview boot — after a dev
+ *  reload or renderer crash-recovery, all of it is orphaned. */
+export function backendReset(): Promise<void> {
+  return invoke("backend_reset");
+}
+
 export function sshDisconnect(connId: string): Promise<void> {
   return invoke("ssh_disconnect", { connId });
 }

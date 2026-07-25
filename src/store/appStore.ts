@@ -1045,6 +1045,12 @@ interface AppState {
     /** Pre-flight size (from the confirm sheet's fsMeasure) so the bar shows
      *  the real total immediately and the backend skips a second size walk. */
     total?: { bytes: number; files: number } | null;
+    /** "download" flavors the toasts ("Downloaded N files to Downloads.") —
+     *  same engine, same bar, same cancel; only the words change. */
+    kind?: "download";
+    /** Where the download landed, for its completion toast ("Downloads" or the
+     *  configured folder). */
+    destLabel?: string;
   }) => Promise<void>;
   updateTransferProgress: (progress: TransferProgress) => void;
   cancelActiveTransfer: () => void;
@@ -1543,9 +1549,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
     } catch (e) {
       const msg = String(e);
       if (msg.includes("SESSION_LANE_LIMIT:")) {
+        const host =
+          s.wsls.find((w) => w.conn.connId === connId)?.conn.name ??
+          s.remotes.find((r) => r.conn.connId === connId)?.conn.name ??
+          "this host";
         get().pushNotice(
           "warn",
-          `Session connection limit reached (${sessionConnConfig.max}) — "${label}" shares the main connection. Raise the cap in Preferences → Session connections.`,
+          `New session "${label}" opened on ${host}'s shared connection — all ${sessionConnConfig.max} dedicated session connections are already taken by other sessions. It works normally; to give more sessions their own connection, raise Preferences → Session connections.`,
         );
         return get().openTerminalInChat(connId, label);
       }
@@ -1584,10 +1594,16 @@ export const useAppStore = create<AppState>()((set, get) => ({
       }
       let chatActiveId = s.chatActiveId;
       if (sess.inChat && s.chatActiveId === id) {
-        const residents = s.terminals.filter((t) => t.inChat);
+        // Usage probes are never AUTO-selected (only "check usage" shows
+        // one) — closing the last real session lands on the splash, not
+        // the hidden usage terminal.
+        const residents = s.terminals.filter((t) => t.inChat && !t.usageProbe);
         const cIdx = residents.findIndex((t) => t.id === id);
         const rest = residents.filter((t) => t.id !== id);
-        chatActiveId = rest[cIdx - 1]?.id ?? rest[cIdx]?.id ?? null;
+        chatActiveId =
+          cIdx >= 0
+            ? (rest[cIdx - 1]?.id ?? rest[cIdx]?.id ?? null)
+            : (rest[0]?.id ?? null);
       }
       let belled = s.belled;
       if (belled[id]) {
@@ -1787,7 +1803,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         (t) => t.id === s.chatActiveId && t.inChat,
       )
         ? s.chatActiveId
-        : (terminals.find((t) => t.inChat)?.id ?? null);
+        : (terminals.find((t) => t.inChat && !t.usageProbe)?.id ?? null);
       return { terminals, activeTerminalId, chatActiveId };
     }),
 
@@ -2019,10 +2035,14 @@ export const useAppStore = create<AppState>()((set, get) => ({
       );
       let chatActiveId = s.chatActiveId;
       if (chatActiveId === terminalId) {
-        const before = s.terminals.filter((t) => t.inChat);
+        // Never auto-fall to a hidden usage probe (see closeTerminal).
+        const before = s.terminals.filter((t) => t.inChat && !t.usageProbe);
         const cIdx = before.findIndex((t) => t.id === terminalId);
         const rest = before.filter((t) => t.id !== terminalId);
-        chatActiveId = rest[cIdx - 1]?.id ?? rest[cIdx]?.id ?? null;
+        chatActiveId =
+          cIdx >= 0
+            ? (rest[cIdx - 1]?.id ?? rest[cIdx]?.id ?? null)
+            : (rest[0]?.id ?? null);
       }
       // The returned shell becomes the panel's active terminal so it lands
       // somewhere visible instead of vanishing into the list.
@@ -2362,6 +2382,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
     label,
     firstName,
     total,
+    kind,
+    destLabel,
   }) => {
     set({
       activeTransfer: {
@@ -2390,10 +2412,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
       );
       // Refresh whichever section owns the destination (explorer + any panel).
       get().refreshConn(destConnId);
+      const noun = kind === "download" ? "Download" : "Transfer";
+      const did = kind === "download" ? "downloaded" : "copied";
       if (outcome.cancelled) {
         get().pushNotice(
           "info",
-          `Transfer cancelled — ${outcome.files} file${outcome.files === 1 ? "" : "s"} copied`,
+          `${noun} cancelled — ${outcome.files} file${outcome.files === 1 ? "" : "s"} ${did}`,
         );
       } else {
         // Report anything skipped rather than passing off a silent partial
@@ -2409,15 +2433,20 @@ export const useAppStore = create<AppState>()((set, get) => ({
             `${outcome.skippedErrors} unreadable item${outcome.skippedErrors === 1 ? "" : "s"}`,
           );
         const skipped = parts.length ? ` (${parts.join(", ")} skipped)` : "";
+        const to = kind === "download" && destLabel ? ` to ${destLabel}` : "";
         get().pushNotice(
           "info",
           (outcome.files === 1
-            ? `Copied ${firstName}`
-            : `Copied ${outcome.files} items`) + skipped,
+            ? `${kind === "download" ? "Downloaded" : "Copied"} ${firstName}${to}`
+            : `${kind === "download" ? "Downloaded" : "Copied"} ${outcome.files} files${to}`) +
+            skipped,
         );
       }
     } catch (e) {
-      get().pushNotice("error", `Transfer failed: ${String(e)}`);
+      get().pushNotice(
+        "error",
+        `${kind === "download" ? "Download" : "Transfer"} failed: ${String(e)}`,
+      );
     } finally {
       set({ activeTransfer: null });
     }

@@ -1,58 +1,50 @@
 /** File-tree operations: rename, create, delete, copy path, download. Each
  *  updates open tabs and refreshes the tree as needed. */
 import { basename, dirname } from "./format";
-import {
-  fsCopy,
-  fsCreate,
-  fsMove,
-  fsRemove,
-  fsRename,
-  fsTransferBatch,
-} from "./ipc";
+import { fsCopy, fsCreate, fsMove, fsRemove, fsRename } from "./ipc";
 import { openFileByPath } from "./openFile";
 import { downloadConfig } from "./settings";
 import { useAppStore } from "../store/appStore";
 import { useVcsStore } from "../store/vcsStore";
 
 /** Download remote/WSL files to the local machine — to the configured folder
- *  (settings `download.dir`), or the OS Downloads folder when unset. No
- *  prompt; a toast reports the result. Shared by the explorer and quick-open. */
+ *  (settings `download.dir`), or the OS Downloads folder when unset. Runs as a
+ *  full transfer: status-bar progress with ✕ to cancel, pause/auto-resume on
+ *  a drop, and a completion toast with the real file count. Shared by the
+ *  explorer and quick-open. */
 export async function downloadToLocal(
   connId: string,
   paths: string[],
 ): Promise<void> {
   const store = useAppStore.getState();
   if (!store.localConnId || paths.length === 0) return;
+  if (store.activeTransfer) {
+    store.pushNotice("info", "A transfer is already running — let it finish first.");
+    return;
+  }
   try {
     let dest = downloadConfig.dir.trim();
     if (!dest) {
       const { downloadDir } = await import("@tauri-apps/api/path");
       dest = await downloadDir();
     }
-    const now = Date.now();
-    const outcome = await fsTransferBatch(
-      `dl-${now}`,
-      connId,
-      paths,
-      store.localConnId,
-      dest,
-      true,
-    );
-    const parts: string[] = [];
-    if (outcome.skippedLinks)
-      parts.push(
-        `${outcome.skippedLinks} linked folder${outcome.skippedLinks === 1 ? "" : "s"}`,
-      );
-    if (outcome.skippedErrors)
-      parts.push(
-        `${outcome.skippedErrors} unreadable item${outcome.skippedErrors === 1 ? "" : "s"}`,
-      );
-    const skipped = parts.length ? ` (${parts.join(", ")} skipped)` : "";
     const where = downloadConfig.dir.trim() ? dest : "Downloads";
-    store.pushNotice(
-      "info",
-      `Downloaded ${paths.length} item(s) to ${where}.${skipped}`,
-    );
+    const host =
+      store.wsls.find((w) => w.conn.connId === connId)?.conn.name ??
+      store.remotes.find((r) => r.conn.connId === connId)?.conn.name ??
+      "host";
+    await store.runTransfer({
+      transferId: `dl-${Date.now()}`,
+      srcConnId: connId,
+      srcPaths: paths,
+      destConnId: store.localConnId,
+      destDir: dest,
+      rename: true,
+      label: `${host} → ${where}`,
+      firstName: basename(paths[0]),
+      kind: "download",
+      destLabel: where,
+    });
   } catch (e) {
     store.pushNotice("error", `Download failed: ${String(e)}`);
   }

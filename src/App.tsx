@@ -13,6 +13,7 @@ import {
 } from "react-resizable-panels";
 
 import {
+  backendReset,
   localConnect,
   onPortForwardError,
   onSshStatus,
@@ -176,13 +177,19 @@ export default function App() {
 
   useKeyboard();
 
-  // Open the always-present local session once.
+  // Open the always-present local session once. First, sweep whatever a
+  // PREVIOUS page left in the backend — after a dev reload or a renderer
+  // crash-recovery this page knows no connection ids, so every session, lane,
+  // PTY, forward, and (worst) still-running transfer back there is an orphan
+  // that would keep holding server slots and bandwidth forever.
   useEffect(() => {
     if (localConnId) return;
     let active = true;
-    localConnect()
+    backendReset()
+      .catch(() => {})
+      .then(() => localConnect())
       .then((id) => {
-        if (active) setLocalConnId(id);
+        if (active && id) setLocalConnId(id);
       })
       .catch((error) =>
         useAppStore

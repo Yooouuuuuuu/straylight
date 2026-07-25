@@ -267,7 +267,7 @@ export function FocusView() {
       setUsageFailed(hostName(connId));
       pushNotice(
         "warn",
-        `Couldn't load Claude usage on ${hostName(connId)} — is Claude Code installed there? Click "check usage" to retry.`,
+        `Couldn't load usage on ${hostName(connId)} — install Claude Code there and set up the environment so the "claude" command works in its terminal. Then click "check usage" to retry.`,
       );
     }
   };
@@ -835,8 +835,9 @@ export function FocusView() {
         <div className="focus-view__pane focus-view__splash">
           <img src={appIcon} className="focus-view__splash-logo" alt="" />
           <p className="focus-view__splash-hint">
-            Couldn't load usage on {usageFailed}. Check Claude Code is
-            installed, then click “check usage” to retry.
+            Couldn't load usage on {usageFailed}. Install Claude Code there and
+            set up the environment so the “claude” command works in its
+            terminal, then click “check usage” to retry.
           </p>
         </div>
       ) : active ? (
@@ -853,7 +854,9 @@ export function FocusView() {
         <div className="focus-view__pane focus-view__splash">
           <img src={appIcon} className="focus-view__splash-logo" alt="" />
           <p className="focus-view__splash-hint">
-            Pick a session, or ＋ beside a host to start one.
+            Pick a session,
+            <br />
+            or ＋ beside a host to start one.
           </p>
         </div>
       )}

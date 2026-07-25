@@ -280,6 +280,7 @@ pub fn run() {
             ssh::connection::ssh_reconnect,
             ssh::connection::ssh_trust_host,
             ssh::connection::session_lane_connect,
+            ssh::connection::backend_reset,
             ui_close_devtools,
             reveal_path,
             open_external,

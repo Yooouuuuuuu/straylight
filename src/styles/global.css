@@ -188,6 +188,16 @@
   transition: background 120ms ease, color 120ms ease;
 }
 
+/* Locked (F11 focus): the ⌘ palette button stays visible, not clickable. */
+.titlebar__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.titlebar__btn:disabled:hover {
+  background: transparent;
+  color: color-mix(in srgb, var(--titlebar-fg) 85%, transparent);
+}
+
 /* The ⌘ button warns when settings.json has problems (details in the palette). */
 .titlebar__btn--warn {
   color: var(--error);
@@ -540,6 +550,10 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  /* Rigid: the buttons never get squeezed with labels showing — crowding
+     pressure goes to the shrinkable info items / the sb-dN ladder, and the
+     ONLY size change is the <720px jump straight to icon-only. */
+  flex: 0 0 auto;
   width: 92px;
   min-width: 0;
   padding: 0 0 0 var(--space-4);
@@ -1029,24 +1043,8 @@
   max-width: min(60vw, 560px);
 }
 
-.statusbar__transfer-track {
-  width: 90px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--bg-tertiary);
-  overflow: hidden;
-  flex: 0 0 auto;
-}
-
-.statusbar__transfer-fill {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-  transition: width 120ms ease;
-}
-
-/* Parked on a dead connection, auto-resuming: amber, gently pulsing. */
-.statusbar__transfer-fill--waiting,
+/* Parked on a dead connection, auto-resuming: amber. The status-bar readout
+   is text-only (no track); the transfer panel keeps its bar. */
 .transfer-progress__fill--waiting {
   background: var(--orange);
   animation: pulse 1.2s ease-in-out infinite;
@@ -1058,6 +1056,10 @@
   white-space: nowrap;
   font-family: var(--font-code);
   font-size: var(--font-size-xs);
+}
+
+.statusbar__transfer-text--waiting {
+  color: var(--orange);
 }
 
 .statusbar__transfer-cancel {
@@ -4603,6 +4605,10 @@ select option {
 
 .commit-row__ref {
   flex: 0 0 auto;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 0 var(--space-2);
   border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
@@ -4615,6 +4621,12 @@ select option {
 .commit-row__ref--head {
   background: color-mix(in srgb, var(--green) 16%, transparent);
   color: var(--green);
+}
+
+/* The "+N" fold chip — visible refs cap at two everywhere; the commit row's
+ * own tooltip carries the full list (HEAD to message). */
+.commit-row__ref--more {
+  color: var(--fg-secondary);
 }
 
 .commit-row__meta {
@@ -5583,6 +5595,15 @@ select option {
 }
 .terminal-menu__item:hover {
   background: var(--bg-selected);
+}
+/* Locked (F11 focus): visible but not clickable — no hover feedback. */
+.terminal-menu__item:disabled {
+  color: var(--fg-secondary);
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.terminal-menu__item:disabled:hover {
+  background: transparent;
 }
 .terminal-menu__hint {
   color: var(--fg-secondary);

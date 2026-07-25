@@ -145,49 +145,9 @@ export function StatusBar() {
         </>
       )}
 
-      {/* Connected hosts, always listed (they matter). Each carries an ISSUE
-          LIGHT: near-invisible while the host is fine, colored the moment
-          something happens — a light that brightens is calmer than one that
-          suddenly appears. The explorer host bars keep their full state dots. */}
-      {wsls.length > 0 && (
-        <span className="sb-group sb-d1">
-          <span className="statusbar__sep" />
-          <span className="statusbar__seclabel">WSL</span>
-          {wsls.map((w) => (
-            <Tip
-              key={w.conn.connId}
-              label={`${w.conn.name} ${w.state} (${w.conn.user}@${w.conn.host})`}
-            >
-              <span className="statusbar__item statusbar__host">
-                <span
-                  className={`dot ${w.state === "connected" ? "dot--fine" : `dot--${w.state}`}`}
-                />
-                {w.conn.user}
-              </span>
-            </Tip>
-          ))}
-        </span>
-      )}
-      {remotes.length > 0 && (
-        <span className="sb-group sb-d2">
-          <span className="statusbar__sep" />
-          <span className="statusbar__seclabel">REMOTE</span>
-          {remotes.map((r) => (
-            <Tip
-              key={r.conn.connId}
-              label={`${r.conn.name} ${r.state} (${r.conn.user}@${r.conn.host})`}
-            >
-              <span className="statusbar__item statusbar__host">
-                <span
-                  className={`dot ${r.state === "connected" ? "dot--fine" : `dot--${r.state}`}`}
-                />
-                {r.conn.user}@{r.conn.host}
-              </span>
-            </Tip>
-          ))}
-        </span>
-      )}
-
+      {/* Connection state deliberately does NOT live here — the title-bar
+          gauge and the explorer host bars carry it; the bar stays about
+          panels, the active file, and in-flight work. */}
       <span className="statusbar__spacer" />
 
       <TransferProgressBar variant="status" />

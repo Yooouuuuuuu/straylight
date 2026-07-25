@@ -577,7 +577,12 @@ impl Progress {
 
     fn file_done(&self, current: &str) {
         self.done_files.fetch_add(1, Ordering::Relaxed);
-        self.emit(current, true);
+        // NOT a forced emit: between same-machine endpoints (WSL ⇄ local VM)
+        // small files complete by the hundreds per second, and a forced IPC
+        // event per boundary floods the webview — the prime suspect for a
+        // renderer crash under exactly that load. The 100 ms throttle keeps
+        // the "file x/N" counter fresh enough; the final frame is still forced.
+        self.emit(current, false);
     }
 
     /// Emit a progress event, throttled to ~100 ms unless `force` (a file
@@ -1166,45 +1171,64 @@ async fn stream_file(
         }
         Raced::Done(w) => w?,
     };
-    let mut buf = vec![0u8; TRANSFER_CHUNK];
+    // Double-buffered relay: write the chunk we HAVE while reading the NEXT
+    // one. The old serial loop (read, then write, then read…) left each leg
+    // idle while the other worked — on a relay both legs cost real time, so
+    // overlapping them is worth up to ~2×.
+    let mut front = vec![0u8; TRANSFER_CHUNK];
+    let mut back = vec![0u8; TRANSFER_CHUNK];
 
     let mut error: Option<String> = None;
     let mut completed = true;
     // Bytes this file added to the bar — rolled back if it doesn't complete
     // (the retry round restarts the file from zero).
     let mut counted = 0u64;
-    loop {
+
+    // Prime the pipeline with the first chunk.
+    let mut pending = match race(intr, reader.read(&mut front)).await {
+        Raced::Interrupted => {
+            completed = false;
+            0
+        }
+        Raced::Done(Ok(n)) => n,
+        Raced::Done(Err(e)) => {
+            error = Some(format!("could not read {src_path}: {e}"));
+            completed = false;
+            0
+        }
+    };
+
+    while completed && pending > 0 {
         if prog.interrupted() {
             completed = false;
             break;
         }
-        let n = match race(intr, reader.read(&mut buf)).await {
+        let write_front = writer.write_all(&front[..pending]);
+        let read_back = reader.read(&mut back);
+        match race(intr, async { tokio::join!(write_front, read_back) }).await {
             Raced::Interrupted => {
                 completed = false;
                 break;
             }
-            Raced::Done(Ok(0)) => break,
-            Raced::Done(Ok(n)) => n,
-            Raced::Done(Err(e)) => {
-                error = Some(format!("could not read {src_path}: {e}"));
-                completed = false;
-                break;
-            }
-        };
-        match race(intr, writer.write_all(&buf[..n])).await {
-            Raced::Interrupted => {
-                completed = false;
-                break;
-            }
-            Raced::Done(Ok(())) => {}
-            Raced::Done(Err(e)) => {
-                error = Some(format!("could not write {dest_path}: {e}"));
-                completed = false;
-                break;
+            Raced::Done((wrote, read)) => {
+                if let Err(e) = wrote {
+                    error = Some(format!("could not write {dest_path}: {e}"));
+                    completed = false;
+                    break;
+                }
+                counted += pending as u64;
+                prog.add_bytes(pending as u64, name);
+                match read {
+                    Ok(n) => pending = n, // 0 = EOF, and its write just landed
+                    Err(e) => {
+                        error = Some(format!("could not read {src_path}: {e}"));
+                        completed = false;
+                        break;
+                    }
+                }
             }
         }
-        counted += n as u64;
-        prog.add_bytes(n as u64, name);
+        std::mem::swap(&mut front, &mut back);
     }
 
     // Close the read handle explicitly (awaited) in every exit path — success,

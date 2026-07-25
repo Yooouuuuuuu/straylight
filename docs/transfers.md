@@ -69,8 +69,12 @@ files in RAM behind a 512 MB limit; streaming replaced it.)
   entry no longer takes the rest of the selection down with it.
 
 WSL is its own transport, so a WSL ⇄ remote copy is relayed through the app
-(read one SSH endpoint, write the other). SSH-level `zlib` compression, when
-negotiated, shrinks transfer bytes on the wire for free.
+(read one SSH endpoint, write the other). The relay is **double-buffered**:
+the chunk in hand is written while the next one is read, so neither leg idles
+waiting on the other. Transfers ride the **data lane**, which negotiates **no
+SSH compression** — bulk payloads are often incompressible, and
+single-threaded zlib capped same-machine links at a few dozen MB/s (terminal
+lanes keep zlib: their traffic is text, where it's a slow-link win).
 
 ## Why not rsync
 

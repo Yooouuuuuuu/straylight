@@ -45,6 +45,11 @@ function Logo({ size = 16 }: { size?: number }) {
 export function TitleBar() {
   const remote = useAppStore((s) => s.remote);
   const settingsIssues = useAppStore((s) => s.settingsIssues);
+  // F11: the palette button and the ⚙ menu (except Quick theme) LOCK — still
+  // visible, not clickable. Disabled buttons don't fire the themed Tip, so
+  // the explainer rides the native title.
+  const focusView = useAppStore((s) => s.focusView);
+  const lockedTitle = focusView ? "Locked in session focus (F11)" : undefined;
   const [menuOpen, setMenuOpen] = useState(false);
   const [exitAsk, setExitAsk] = useState(false);
   const [exitSilence, setExitSilence] = useState(false);
@@ -129,6 +134,8 @@ export function TitleBar() {
         >
           <button
             className={`titlebar__btn ${settingsIssues.length > 0 ? "titlebar__btn--warn" : ""}`}
+            disabled={focusView}
+            title={lockedTitle}
             onClick={() => useAppStore.getState().setPaletteOpen(true)}
           >
             ⌘
@@ -156,6 +163,8 @@ export function TitleBar() {
               <div className="titlebar__menu-label">Settings</div>
               <button
                 className="terminal-menu__item"
+                disabled={focusView}
+                title={lockedTitle}
                 onClick={() => {
                   setMenuOpen(false);
                   useAppStore.getState().openAppTab("settings");
@@ -165,6 +174,8 @@ export function TitleBar() {
               </button>
               <button
                 className="terminal-menu__item"
+                disabled={focusView}
+                title={lockedTitle}
                 onClick={() => {
                   setMenuOpen(false);
                   useAppStore.getState().openAppTab("themes");
@@ -174,6 +185,8 @@ export function TitleBar() {
               </button>
               <button
                 className="terminal-menu__item"
+                disabled={focusView}
+                title={lockedTitle}
                 onClick={() => openPrefFile(settingsFilePath(), "settings.json")}
               >
                 Open settings.json
@@ -183,6 +196,8 @@ export function TitleBar() {
               <div className="titlebar__menu-label">Storage</div>
               <button
                 className="terminal-menu__item"
+                disabled={focusView}
+                title={lockedTitle}
                 onClick={() => {
                   setMenuOpen(false);
                   useAppStore.getState().openAppTab("drafts");
@@ -192,6 +207,8 @@ export function TitleBar() {
               </button>
               <button
                 className="terminal-menu__item"
+                disabled={focusView}
+                title={lockedTitle}
                 onClick={() => {
                   setMenuOpen(false);
                   useAppStore.getState().openAppTab("pins");
@@ -201,6 +218,8 @@ export function TitleBar() {
               </button>
               <button
                 className="terminal-menu__item"
+                disabled={focusView}
+                title={lockedTitle}
                 onClick={() => {
                   setMenuOpen(false);
                   useAppStore.getState().openAppTab("autoconnect");

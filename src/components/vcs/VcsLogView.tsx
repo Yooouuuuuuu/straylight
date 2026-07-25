@@ -271,8 +271,18 @@ export function VcsLogView({
               : c.parents.length > 1
                 ? "var(--purple)"
                 : laneColor(row?.lane ?? 0);
+            // One tip per commit: everything the row holds, HEAD to message
+            // (folded chips and clipped subjects included). Deduped, so a
+            // tag commit whose message IS the tag reads as one line.
+            const refs = c.refs.filter((r) => !/\/HEAD$/.test(r));
+            const tipLines = [
+              ...(c.current ? [isJj ? "@" : "HEAD"] : []),
+              ...refs,
+              c.subject || "(no description)",
+            ].filter((line, idx, all) => all.indexOf(line) === idx);
             return (
               <div className="commit-group" key={`${c.id}-${i}`}>
+                <Tip label={tipLines.join("\n")}>
                 <div
                   className="commit-row"
                   onClick={() => toggle(c.id)}
@@ -327,11 +337,16 @@ export function VcsLogView({
                           {isJj ? "@" : "HEAD"}
                         </span>
                       )}
-                      {c.refs.map((r) => (
+                      {refs.slice(0, 2).map((r) => (
                         <span className="commit-row__ref" key={r}>
                           {r}
                         </span>
                       ))}
+                      {refs.length > 2 && (
+                        <span className="commit-row__ref commit-row__ref--more">
+                          +{refs.length - 2}
+                        </span>
+                      )}
                       <span className="commit-row__subject">
                         {c.subject || "(no description)"}
                       </span>
@@ -349,6 +364,7 @@ export function VcsLogView({
                     </div>
                   </div>
                 </div>
+                </Tip>
                 {open && (
                   <div className="commit-files" style={{ paddingLeft: railW + 4 }}>
                     {fs === "loading" ? (

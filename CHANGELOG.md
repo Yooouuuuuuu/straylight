@@ -25,6 +25,63 @@ history of design changes — lives in the docs: the decision ledger in
   model is under field test; this lands with the trim.
 - **Auto-update** — ships with 0.10 (updater keypair + GitHub Releases).
 
+## [0.9.15] - 2026-07-25
+
+The stability-under-fire round: a reloaded page sweeps its orphans instead of
+wedging the backend, transfers stopped paying the compression tax and got a
+double-buffered relay, and the Source Control history rows learned to fold.
+
+### Changed
+
+- **History ref chips fold instead of overflowing.** A tip commit carrying
+  HEAD + branch + remote branch + tag was wider than the Source Control
+  panel, crushing the subject. Rows now show at most two ref chips and fold
+  the rest into a "+N" chip, and every commit row carries ONE tooltip with
+  the full story — HEAD, every ref, and the commit message (deduped, so a
+  tag commit whose message is the tag reads as one line). `origin/HEAD` —
+  the remote's default-branch pointer, which always shadows `origin/main` —
+  is hidden, and long branch names clip at a max chip width. Rows stay one
+  line, so the commit graph keeps its fixed geometry.
+- **The four panel buttons never squeeze.** In a crowded status bar (between
+  the info ladder's breakpoints) the buttons could be compressed with their
+  labels still showing. They're rigid now: full width with labels, one jump
+  to icon-only below 720px — no crushed in-between state.
+- **Session focus (F11) locks the title bar's app surfaces.** The ⌘ palette
+  button and the ⚙ menu's Settings/Storage entries are visibly locked (not
+  hidden) while focused — Quick theme stays live. Matches the keymap, which
+  already swallowed app shortcuts in focus.
+- **A hidden usage terminal never resurfaces on its own.** Closing (or
+  returning) the last real session used to fall back to the usage-check
+  terminal if one had run earlier; usage probes are now excluded from every
+  auto-selection — with no sessions left, the pane shows the app-logo
+  splash. "check usage" remains the only way a probe is shown.
+
+- **Transfers stopped paying the compression tax.** The data lane now
+  negotiates no SSH compression: bulk payloads are often already compressed,
+  and single-threaded zlib was a hard CPU ceiling — a few dozen MB/s even
+  between two machines on the same metal, paid TWICE on a relay
+  (decompress one leg, recompress the other). Terminal lanes keep zlib, where
+  text over a slow link genuinely wins. scp and rsync ship uncompressed by
+  default for the same reason.
+- **The relay pipeline overlaps its legs.** The copy loop used to read a
+  chunk, then write it, then read the next — each leg idle half the time. It
+  now writes the chunk in hand while reading the next (double-buffered),
+  worth up to ~2× on relays where both legs cost real time.
+
+### Fixed
+
+- **A crashed page can no longer wedge the backend.** If the webview reloads
+  (a renderer crash-recovery, a dev reload), the fresh page now sweeps
+  everything the previous one left behind — connections and all their lanes,
+  PTYs, forwards, and above all any still-running transfer that would
+  otherwise keep pumping headlessly with nobody able to cancel it, starving
+  new dials (this is what made WSL unreachable after a crash mid-transfer).
+- **Many small files no longer flood the UI with progress events.** A
+  transfer between fast endpoints (WSL ⇄ a local VM) completes hundreds of
+  files per second, and each one force-pushed a progress event into the
+  webview — the prime suspect for the renderer crash above. File boundaries
+  now respect the normal ~100 ms throttle.
+
 ## [0.9.14] - 2026-07-25
 
 Session lanes — every agent gets its own SSH connection — plus the Restore
@@ -73,6 +130,20 @@ folders answer right-click, every folder can open a terminal in place.
 
 ### Changed
 
+- **Downloads became first-class transfers.** The explorer/quick-open Download
+  now runs through the same machinery as the Transfers tool: live progress in
+  the status bar with ✕ to cancel, pause + auto-resume when the connection
+  drops, and a completion toast with the real file count ("Downloaded 37 files
+  to Downloads"), not the top-level item count. One transfer at a time still
+  holds — starting a download while one runs says so instead of doing nothing.
+- **The status bar let go of connection status.** The WSL/REMOTE host entries
+  and their issue lights left the bar — connection state lives on the
+  title-bar gauge and the explorer host bars; the bar is now about panels, the
+  active file, and in-flight work. Transfers/downloads show as a plain text
+  readout there — `ubuntu → Downloads · file 34/1200 · 45 MB/2.1 GB · 34% ✕`
+  — no mini progress bar; the percent carries it, ✕ cancels, and the text
+  turns amber while waiting out a dropped connection. (The Transfers panel
+  keeps its full-width bar.)
 - **Palette titles no longer end with "…"** — in a palette list the ellipsis
   read as truncated text, not as "opens a dialog."
 - **Straylight is tagged "(default)"** in the theme lists (Theme tab and the
