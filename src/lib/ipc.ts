@@ -21,7 +21,7 @@ export type ConnectionState =
   | "connecting"
   | "connected"
   /** Probes failing/slow but no hard evidence of death — channels stay open
-   *  and usable (possibly slow). Doubt is not death (docs/connections-v2.md). */
+   *  and usable (possibly slow). Doubt is not death (docs/connections.md). */
   | "degraded"
   | "reconnecting"
   | "disconnected";
@@ -120,7 +120,7 @@ export function sshConnect(args: ConnectArgs): Promise<string> {
 }
 
 /** Open a session lane: a dedicated SSH connection for one SESSIONS/F11 agent
- *  (docs/connections-v2.md Phase D). Errors with `SESSION_LANE_LIMIT:` at the
+ *  (docs/connections.md Phase D). Errors with `SESSION_LANE_LIMIT:` at the
  *  per-host cap so the caller can fall back to the shared main connection. */
 export function sessionLaneConnect(
   connId: string,
@@ -284,7 +284,7 @@ export function fsCopy(
 /** Live progress for a batch transfer (the `transfer-progress` event). */
 export interface TransferProgress {
   /** A lane died mid-transfer: the copy is parked and auto-resumes on
-   *  reconnect (docs/connections-v2.md Phase 2). */
+   *  reconnect (docs/connections.md Phase 2). */
   waiting: boolean;
   id: string;
   doneBytes: number;
@@ -320,6 +320,8 @@ export function fsTransferBatch(
   destDir: string,
   renameOnConflict: boolean,
   total?: { bytes: number; files: number } | null,
+  mode?: "full" | "background",
+  limitBps?: number,
 ): Promise<TransferOutcome> {
   return invoke("fs_transfer_batch", {
     transferId,
@@ -330,6 +332,8 @@ export function fsTransferBatch(
     renameOnConflict,
     totalBytes: total?.bytes ?? null,
     totalFiles: total?.files ?? null,
+    mode: mode ?? null,
+    limitBps: limitBps ?? null,
   });
 }
 

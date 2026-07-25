@@ -1,6 +1,6 @@
 [package]
 name = "straylight"
-version = "0.9.15"
+version = "0.9.16"
 description = "Lightweight SSH file manager, terminal, and code viewer"
 authors = ["Straylight contributors"]
 edition = "2021"
@@ -62,3 +62,11 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# Dependencies get full optimization even in dev builds. Debug-profile crypto
+# ran at ~8 MB/s (russh's chacha20/aes in opt-level 0) vs 330 MB/s in release —
+# every `tauri dev` transfer was CPU-bound on unoptimized cipher code, which
+# masqueraded as a network/protocol problem for an entire hunt. Our own crate
+# stays at opt-level 0 for fast incremental rebuilds and real debugging.
+[profile.dev.package."*"]
+opt-level = 3

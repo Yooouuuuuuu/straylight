@@ -9,7 +9,11 @@ import { hostColorForConnKey, SECTION_LOCAL, SECTION_WSL } from "../../lib/hostC
 import { fsTransferCheck } from "../../lib/ipc";
 import type { DragItem } from "../../lib/transferDrag";
 import { remoteHostKey, useAppStore } from "../../store/appStore";
-import { TransferConfirm, type TransferTotal } from "./TransferConfirm";
+import {
+  TransferConfirm,
+  type TransferSpeedMode,
+  type TransferTotal,
+} from "./TransferConfirm";
 import { TransferPane } from "./TransferPane";
 import { TransferProgressBar } from "./TransferProgressBar";
 import type { TransferConn } from "./TransferPanel";
@@ -40,6 +44,7 @@ export function TransfersView() {
       roots: w.pins,
       label: w.conn.name,
       color: SECTION_WSL,
+      sub: `${w.conn.user}@${w.conn.host}`,
     });
   for (const r of remotes)
     conns.push({
@@ -47,6 +52,7 @@ export function TransfersView() {
       roots: r.pins,
       label: r.conn.name,
       color: hostColorForConnKey(remoteHostKey(r.conn)),
+      sub: `${r.conn.user}@${r.conn.host}`,
     });
 
   const [sides, setSides] = useState(remembered);
@@ -69,7 +75,9 @@ export function TransfersView() {
     srcLabel: string;
     destLabel: string;
     destDir: string;
-    resolve: (r: { total: TransferTotal | null } | null) => void;
+    resolve: (
+      r: { total: TransferTotal | null; mode: TransferSpeedMode } | null,
+    ) => void;
   } | null>(null);
   const busyRef = useRef(false);
 
@@ -98,7 +106,10 @@ export function TransfersView() {
       // 1. Confirm sheet — route + a size that fills in while scanning. Returns
       //    null on cancel, else the pre-flight total (null if committed before
       //    the scan finished, so the backend measures instead).
-      const confirmed = await new Promise<{ total: TransferTotal | null } | null>(
+      const confirmed = await new Promise<{
+        total: TransferTotal | null;
+        mode: TransferSpeedMode;
+      } | null>(
         (resolve) =>
           setSheet({
             items: xfer,
@@ -140,6 +151,7 @@ export function TransfersView() {
         label: `${label(srcConnId)} → ${label(destConnId)}`,
         firstName: xfer[0].name,
         total: confirmed.total,
+        mode: confirmed.mode,
       });
     } catch (e) {
       pushNotice("error", `Transfer failed: ${String(e)}`);
@@ -150,11 +162,13 @@ export function TransfersView() {
 
   const side = (which: "left" | "right", conn: TransferConn | null) => {
     const otherId = which === "left" ? right?.connId : left?.connId;
-    return (
-    <div className="transfers-side">
+    const picker = (
+      // The select IS the identity: options read "host (user@ip)", and the
+      // control's text takes the chosen host's color.
       <select
         className="select transfers-side__host"
         value={conn?.connId ?? ""}
+        style={conn?.color ? { color: conn.color } : undefined}
         onChange={(e) => pick(which, e.target.value || null)}
       >
         {/* Placeholder is display-only, and the other side's host is out. */}
@@ -168,23 +182,32 @@ export function TransfersView() {
           .map((c) => (
             <option key={c.connId} value={c.connId}>
               {c.label}
+              {c.sub ? ` (${c.sub})` : ""}
             </option>
           ))}
       </select>
+    );
+    return (
+    <div className="transfers-side">
       {conn ? (
+        // ONE header line inside the pane: picker · colored user@host · buttons.
         <TransferPane
           key={conn.connId}
           connId={conn.connId}
           roots={conn.roots}
           label={conn.label}
           color={conn.color}
+          picker={picker}
           onDropInto={(items, destDir) => void onDropInto(items, conn.connId, destDir)}
         />
       ) : (
-        <div className="transfers-side__empty">
-          Pick a host to copy {which === "left" ? "from" : "to"} (either
-          direction works).
-        </div>
+        <>
+          {picker}
+          <div className="transfers-side__empty">
+            Pick a host to copy {which === "left" ? "from" : "to"} (either
+            direction works).
+          </div>
+        </>
       )}
     </div>
     );
@@ -205,7 +228,7 @@ export function TransfersView() {
           destLabel={sheet.destLabel}
           destDir={sheet.destDir}
           onCancel={() => sheet.resolve(null)}
-          onConfirm={(total) => sheet.resolve({ total })}
+          onConfirm={(total, mode) => sheet.resolve({ total, mode })}
         />
       )}
       {conflict && (

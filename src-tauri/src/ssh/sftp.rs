@@ -302,6 +302,59 @@ impl FileTransport for SftpTransport {
         Ok(Box::pin(file))
     }
 
+    async fn open_read_fast(
+        &self,
+        path: &str,
+        size_hint: u64,
+        depth: usize,
+    ) -> Result<Pin<Box<dyn TransferSource>>, String> {
+        // Small files: the pipeline's setup (channel + subsystem + open ≈ 3
+        // round trips) costs more than it saves. The serial reader wins there.
+        const PIPELINE_MIN: u64 = 4 * 1024 * 1024;
+        if size_hint < PIPELINE_MIN || depth <= 1 {
+            return self.open_read(path).await;
+        }
+        // A dedicated raw SFTP session on its own channel, so 32 in-flight
+        // reads never contend with the shared session's everyday requests.
+        let channel = self.0.open_channel().await?;
+        channel
+            .request_subsystem(true, "sftp")
+            .await
+            .map_err(|e| format!("failed to start SFTP subsystem: {e}"))?;
+        let mut raw = russh_sftp::client::RawSftpSession::new(channel.into_stream());
+        raw.init()
+            .await
+            .map_err(|e| format!("could not initialize SFTP: {e}"))?;
+        // The server's advertised per-request read limit (OpenSSH: ~255 KB);
+        // conservative fallback where the limits extension is absent.
+        let req_len = match raw.limits().await {
+            Ok(ext) => {
+                let limits = russh_sftp::client::rawsession::Limits::from(ext);
+                let req = limits.read_len.unwrap_or(32 * 1024).min(261_120) as u32;
+                raw.set_limits(limits);
+                req
+            }
+            Err(_) => 32 * 1024,
+        };
+        let handle = raw
+            .open(
+                path.to_string(),
+                russh_sftp::protocol::OpenFlags::READ,
+                russh_sftp::protocol::FileAttributes::default(),
+            )
+            .await
+            .map_err(|e| format!("could not open {path}: {e}"))?
+            .handle;
+        self.0.touch_activity();
+        Ok(Box::pin(crate::transport::pipeline::start(
+            std::sync::Arc::new(raw),
+            handle,
+            size_hint,
+            req_len,
+            depth,
+        )))
+    }
+
     async fn open_write(&self, path: &str) -> Result<Pin<Box<dyn AsyncWrite + Send>>, String> {
         let guard = self.0.sftp().await?;
         let sftp = guard.as_ref().expect("sftp session initialized above");

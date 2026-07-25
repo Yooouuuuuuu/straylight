@@ -7,9 +7,15 @@ import { useEffect, useRef, useState } from "react";
 
 import { formatSize } from "../../lib/format";
 import { fsTransferMeasure } from "../../lib/ipc";
+import { transfersConfig } from "../../lib/settings";
 import type { DragItem } from "../../lib/transferDrag";
 
 export type TransferTotal = { bytes: number; files: number };
+export type TransferSpeedMode = "full" | "background";
+
+// The sheet remembers the last pick for the session; the first sheet starts
+// from Preferences → Transfers → Default speed.
+let lastMode: TransferSpeedMode | null = null;
 
 export function TransferConfirm({
   items,
@@ -26,13 +32,22 @@ export function TransferConfirm({
   destLabel: string;
   destDir: string;
   onCancel: () => void;
-  onConfirm: (total: TransferTotal | null) => void;
+  onConfirm: (total: TransferTotal | null, mode: TransferSpeedMode) => void;
 }) {
   const [total, setTotal] = useState<TransferTotal | null>(null);
   const [scanning, setScanning] = useState(true);
+  const [mode, setMode] = useState<TransferSpeedMode>(
+    () => lastMode ?? transfersConfig.default,
+  );
+  const pickMode = (m: TransferSpeedMode) => {
+    lastMode = m;
+    setMode(m);
+  };
   // Read at click/Enter time so the latest scan result is used even if it
   // landed after the last render (the keydown closure would otherwise be stale).
   const totalRef = useRef<TransferTotal | null>(null);
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
 
   useEffect(() => {
     let alive = true;
@@ -66,7 +81,7 @@ export function TransferConfirm({
         onCancel();
       } else if (e.key === "Enter") {
         e.preventDefault();
-        onConfirm(totalRef.current);
+        onConfirm(totalRef.current, modeRef.current);
       }
     };
     window.addEventListener("keydown", onKey, true);
@@ -109,12 +124,31 @@ export function TransferConfirm({
               : "Size unavailable"}
         </div>
         <div className="transfer-confirm__actions">
+          <div className="transfer-confirm__speed">
+            <button
+              className={`btn btn--ghost ${mode === "full" ? "transfer-confirm__speed--on" : ""}`}
+              onClick={() => pickMode("full")}
+            >
+              Full
+            </button>
+            <button
+              className={`btn btn--ghost ${mode === "background" ? "transfer-confirm__speed--on" : ""}`}
+              onClick={() => pickMode("background")}
+              title={
+                transfersConfig.backgroundLimitMBps > 0
+                  ? `Capped at ${transfersConfig.backgroundLimitMBps} MB/s (Preferences → Transfers)`
+                  : "Shallow pipeline, no cap (Preferences → Transfers)"
+              }
+            >
+              Background
+            </button>
+          </div>
           <button className="btn btn--ghost" onClick={onCancel}>
             Cancel
           </button>
           <button
             className="btn btn--primary"
-            onClick={() => onConfirm(totalRef.current)}
+            onClick={() => onConfirm(totalRef.current, modeRef.current)}
           >
             Copy
           </button>

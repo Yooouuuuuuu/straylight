@@ -1,9 +1,9 @@
-# Connections v2 — terminals never die on suspicion
+# Connections — lanes, doubt-is-not-death, and the transfer engine
 
-**Status: v2 design, being implemented and field-tested. Supersedes the current
-supervisor behavior (and its description in architecture.md) once proven on the
-machine that exposed the problem; until then this doc is the spec and the old
-behavior is the fallback we can revert to.**
+How Straylight holds SSH connections: the four lane kinds, the supervision
+doctrine (doubt is not death), and the transfer engine that rides them. The
+history of how this replaced the original single-connection design lives in
+the [docs/README.md](README.md) ledger.
 
 ## The evidence that forced this
 
@@ -108,6 +108,7 @@ drops do happen they're real. Terminals survive stalls they used to die in.
 | **Main lane** | `<connId>` | quick terminals (terminal-panel ＋), port forwards, the F11 usage probe | exactly 1 |
 | **Data lane** | `<connId>::data` | SFTP + exec — everything that moves *data* rather than keystrokes (transfers, saves, listings, VCS/finders) | at most 1 (lazy) |
 | **Session lanes** | `<connId>::session-<k>` | ONE agent's PTY, nothing else | 0…cap (Preferences → Session connections, default 10) |
+| **Transfer lanes** | `<connId>::transfer-<k>` | ONE running transfer's bytes | 0…1 per host while a transfer runs (one on each SSH endpoint of a relay) |
 
 Two invariants: the data lane never carries a PTY, and a session lane carries
 exactly one session channel (so `MaxSessions` can't touch it). **The ＋ you
@@ -193,6 +194,67 @@ that one agent.
   died with it — and vice versa. Toasts name the agent:
   `ubuntu · web-fix: connection lost — reconnecting`.
 
+## Phase T — transfer lanes (implemented)
+
+Every running transfer dials an **ephemeral connection of its own** on each
+SSH endpoint — tuned purely for throughput (no compression, 16 MiB receive
+window) — so bulk bytes can't congest the data lane's everyday work
+(listings, saves, VCS), and a mid-transfer lane death touches nothing else.
+
+- **Profiles per lane kind** (`LaneProfile`): main/session = zlib, ~5 min
+  keepalive tolerance, 2 MiB window; data = no zlib, ~5 min, 16 MiB;
+  transfer = no zlib, **~1 min** keepalive, 16 MiB — transfer lanes have no
+  supervisor, so the impatient keepalive is what declares a silent corpse,
+  and misjudging a stall costs nothing (the retry round just redials).
+- **Redial, don't nurse:** each retry round resolves fresh endpoints — a new
+  transfer lane per side (data-lane fallback if the dial fails), backoff
+  between rounds (1→30 s, reset whenever a round moves bytes), racing user
+  cancel. The old wait-for-supervised-lane logic is gone.
+- **Error classification by probing:** when a round errors, the lanes are
+  probed *before* being hung up — a lane that answers means the error was a
+  genuine filesystem error (fatal); silence means redial and resume.
+- **Lifecycle:** registered under `<connId>::transfer-<k>` so the
+  host-disconnect sweep and `backend_reset` kill them with everything else;
+  dropped (bounded) at round end; clean closes are toast-silent.
+
+## Phase T3 — deep-pipelined SFTP (implemented)
+
+Two truths came out of the speed hunt (see `examples/sftp_bench.rs`, the
+standalone harness that settled it): the ~7 MB/s dev-build ceiling was
+**unoptimized crypto in the dev profile** (fixed via
+`[profile.dev.package."*"] opt-level = 3` — same stack does 330+ MB/s
+optimized), and, independently, russh_sftp drives reads ONE request at a
+time — a real chunk-per-round-trip ceiling on high-latency routes that this
+phase removes.
+
+- **Reads:** files ≥ 4 MiB stream through `transport/pipeline.rs` — a
+  dedicated raw SFTP channel with **32 requests (~8 MiB) standing**, the grid
+  planned from the stat'd size, short reads rescheduled, completions
+  reassembled strictly in order. Cancel aborts the pump and closes the handle
+  detached + bounded (at worst a leaked handle dies with its ephemeral
+  transfer lane). Small files keep the serial reader — the pipeline's ~3
+  setup round trips would cost more than they save.
+- **Writes:** russh_sftp already pipelines write acks; its default depth of 8
+  (≈54 MB/s on a 37 ms route) is raised to **32** on our sessions.
+- The 16 MiB lane windows (Phase T profiles) are what give both pipelines
+  room to stand.
+
+## Phase T4 — user speed control (implemented)
+
+The confirm sheet picks **Full / Background** per transfer (remembered for
+the session; Preferences → Transfers holds the limit + the default mode,
+which ships as Background; downloads use the default). Background = read
+pipeline depth 4 (vs 32) plus pacing in the relay pump — the pump sleeps off
+any lead over the cap, racing the interrupt so cancel stays instant.
+
+The limit is the machine's **total real-network budget** (golden rule: set
+10, never exceed 10 on the wire). A relay carries the same payload byte on
+every leg, so payload is paced at budget ÷ the number of legs crossing the
+real interface — remote⇄remote counts 2, local⇄remote and wsl⇄remote count 1
+(loopback legs are free) — shaved ~3% for SSH framing. This is exact, not
+adaptive: the legs are one coupled pipeline, so the arithmetic *is* the
+measurement.
+
 ## Phase 2.5 — soft-restore for general terminals (planned)
 
 When a terminal's connection *really* dies: the xterm component and its
@@ -201,7 +263,7 @@ fresh shell opens in the same component, best-effort `cd` to the last known
 cwd; CHAT terminals offer one-click `claude --continue`. Honest restart, zero
 context lost in the UI.
 
-## Phase 3 — explicit persistent sessions (last; allowed to fail)
+## Phase 3 — explicit persistent sessions (parked → docs/future-work.md)
 
 A separate **"＋ persistent session"** button (Sessions panel / FocusView) for
 terminals that must survive disconnects for real. That terminal — and only

@@ -14,6 +14,7 @@ import {
   resetSettingsFile,
   sessionConnConfig,
   settingsZoom,
+  transfersConfig,
   terminalFontConfig,
   terminalHostColorConfig,
   uiConfig,
@@ -144,6 +145,47 @@ export function SettingsView() {
               void updateSettings({ terminalFont: { ...font, size } });
           }}
         />
+      </div>
+
+      <h3 className="app-tab__section">Transfers</h3>
+      <div className="app-tab__hint">
+        Full uses everything your network gives; Background stays under the
+        limit and is the safer choice while you work.
+      </div>
+      <div className="settings-row">
+        <span className="settings-row__label">Limit (MB/s)</span>
+        <input
+          type="number"
+          className="input settings-row__num"
+          min={0}
+          max={10000}
+          value={transfersConfig.backgroundLimitMBps}
+          onChange={(e) => {
+            const v = Math.round(Number(e.target.value));
+            if (v >= 0 && v <= 10000)
+              void updateSettings({
+                transfers: { ...transfersConfig, backgroundLimitMBps: v },
+              });
+          }}
+        />
+      </div>
+      <div className="settings-row">
+        <span className="settings-row__label">Transfer mode</span>
+        <select
+          className="select"
+          value={transfersConfig.default}
+          onChange={(e) =>
+            void updateSettings({
+              transfers: {
+                ...transfersConfig,
+                default: e.target.value === "full" ? "full" : "background",
+              },
+            })
+          }
+        >
+          <option value="background">Background</option>
+          <option value="full">Full</option>
+        </select>
       </div>
 
       <h3 className="app-tab__section">Interface</h3>

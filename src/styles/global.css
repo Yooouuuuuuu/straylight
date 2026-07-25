@@ -5735,6 +5735,18 @@ select option {
   color: var(--fg-secondary);
 }
 
+/* Merged header line: [select = "host (user@ip)", colored] · spacer · buttons. */
+.transfer-pane__head .transfers-side__host {
+  flex: 0 1 auto;
+  align-self: center;
+  min-width: 96px;
+  max-width: 100%;
+}
+
+.transfer-pane__spacer {
+  flex: 1 1 auto;
+}
+
 .transfer-pane__body {
   flex: 1 1 auto;
   min-height: 0;
@@ -5963,7 +5975,20 @@ select option {
 .transfer-confirm__actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: var(--space-2);
+}
+
+/* Full / Background segmented pick, left of Cancel/Copy. */
+.transfer-confirm__speed {
+  display: flex;
+  gap: 1px;
+  margin-right: auto;
+}
+
+.transfer-confirm__speed--on {
+  background: var(--bg-selected);
+  color: var(--fg-primary);
 }
 
 /* ------------------------------------------------------------------ Spinner */

@@ -53,7 +53,7 @@ pub async fn run_command(
         Target::Ssh(conn) => {
             // Exec rides the data lane (second SSH connection) so
             // chunky command output (git diffs, finders) can't congest the
-            // terminals on the interactive lane (docs/connections-v2.md
+            // terminals on the interactive lane (docs/connections.md
             // Phase 1). Falls back to the interactive lane if the dial fails.
             let conn = match state.app.get() {
                 Some(app) => conn.data_lane(app).await,

@@ -201,7 +201,7 @@ export interface TerminalSession {
    *  and labels all key off this. */
   connId: string;
   /** The dedicated connection actually carrying the PTY, when this agent got
-   *  its own session lane (docs/connections-v2.md Phase D). Absent = the PTY
+   *  its own session lane (docs/connections.md Phase D). Absent = the PTY
    *  rides the host's shared main lane. */
   laneConnId?: string;
   /** The clean default label ("pwsh", "myserver 2"), set at open and never
@@ -1051,6 +1051,9 @@ interface AppState {
     /** Where the download landed, for its completion toast ("Downloads" or the
      *  configured folder). */
     destLabel?: string;
+    /** Speed picked on the confirm sheet; absent (downloads) = the
+     *  Preferences default. Background = shallow pipeline + the MB/s cap. */
+    mode?: "full" | "background";
   }) => Promise<void>;
   updateTransferProgress: (progress: TransferProgress) => void;
   cancelActiveTransfer: () => void;
@@ -2384,6 +2387,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     total,
     kind,
     destLabel,
+    mode,
   }) => {
     set({
       activeTransfer: {
@@ -2401,6 +2405,14 @@ export const useAppStore = create<AppState>()((set, get) => ({
       },
     });
     try {
+      // Speed: the sheet's pick, or the Preferences default (downloads).
+      // Lazy import — settings.ts imports this store (module cycle).
+      const { transfersConfig } = await import("../lib/settings");
+      const speed = mode ?? transfersConfig.default;
+      const limitBps =
+        speed === "background"
+          ? transfersConfig.backgroundLimitMBps * 1_000_000
+          : 0;
       const outcome = await fsTransferBatch(
         transferId,
         srcConnId,
@@ -2409,6 +2421,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
         destDir,
         rename,
         total,
+        speed,
+        limitBps,
       );
       // Refresh whichever section owns the destination (explorer + any panel).
       get().refreshConn(destConnId);

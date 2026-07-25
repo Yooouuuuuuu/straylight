@@ -55,6 +55,7 @@ export function TransferPane({
   roots,
   label,
   color,
+  picker,
   onDropInto,
 }: {
   connId: string;
@@ -62,6 +63,9 @@ export function TransferPane({
   roots: string[];
   label: string;
   color?: string;
+  /** The host <select> — the pane's single header line leads with it (its
+   *  selected option carries the full identity, colored). */
+  picker?: React.ReactNode;
   onDropInto: (items: DragItem[], destDir: string) => void;
 }) {
   const localConnId = useAppStore((s) => s.localConnId);
@@ -502,12 +506,17 @@ export function TransferPane({
   return (
     <div className="transfer-pane" tabIndex={0} onKeyDown={onKeyDown}>
       <div className="transfer-pane__head">
-        <span
-          className="transfer-pane__title"
-          style={color ? { color } : undefined}
-        >
-          {label}
-        </span>
+        {/* The picker IS the identity — its selected option reads
+            "Ubuntu (user@ip)" in the host color — then the pane's buttons. */}
+        {picker ?? (
+          <span
+            className="transfer-pane__title"
+            style={color ? { color } : undefined}
+          >
+            {label}
+          </span>
+        )}
+        <span className="transfer-pane__spacer" />
         <Tip label={showHidden ? "Hide hidden files" : "Show hidden files"}>
           <button
             className={`icon-btn ${showHidden ? "icon-btn--active" : ""}`}

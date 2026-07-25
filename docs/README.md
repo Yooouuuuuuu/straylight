@@ -31,6 +31,7 @@ published — maintainer material, not user docs.)
 | [data-safety.md](data-safety.md) | How saving works and why edits are never lost: local direct write, remote **staged saves**, **hot-exit drafts**, and the conflict bar. |
 | [version-control.md](version-control.md) | git + jj on the host that owns the repo: status, diffs, history, and the **jj view-first** stance. |
 | [wsl-connection.md](wsl-connection.md) | Treating a WSL distro as a localhost SSH host (provision `sshd`, skip 9P), and the 1 + 3 WSL model. |
+| [connections.md](connections.md) | The four SSH lane kinds per host (main / data / session / transfer), the doubt-is-not-death supervision doctrine, and the pipelined transfer engine. |
 | [transfers.md](transfers.md) | Cross-connection file copies: the docked two-pane tool and the streaming, cancel-safe engine. |
 
 ### Working material
@@ -44,6 +45,28 @@ published — maintainer material, not user docs.)
 
 Brief, dated notes on the load-bearing decisions and the places the approach
 **changed** — the archaeology the design docs deliberately omit. Newest first.
+
+- **2026-07 · The connection redesign** ([connections.md](connections.md),
+  0.9.15+) — the original model was ONE SSH connection per host, multiplexing
+  every channel, with an aggressive health supervisor (45 s keepalive kill,
+  probe-timeout ×2 → tear down and restart every terminal). Field data broke
+  it: a flaky machine lost terminals hourly while plain `ssh` survived for
+  days — nearly every death was a self-inflicted false positive. Replaced,
+  in phases: **doubt is not death** (probe failures only mark `degraded`;
+  teardown needs hard evidence or the user; activity counts as liveness),
+  then **lanes** — separate connections for terminals (main), file traffic
+  (data), each SESSIONS agent (session, capped with graceful fallback), and
+  each running transfer (ephemeral, redialed per retry round). The transfer
+  engine grew abortive cancel, epoch-abort, pause/auto-resume, a 32-deep
+  pipelined SFTP reader, and Full/Background speed control (Background is
+  the shipped default). Rejected along the way: shelling out to scp/rsync
+  (credentials would have to leave the process via askpass hacks; Windows
+  OpenSSH has no ControlMaster) and invisible tmux-wrapping of normal
+  terminals (explicit per-terminal persistence stays a future opt-in). The
+  climactic 40× "slow transfers" hunt ended at the **dev profile**:
+  unoptimized crypto capped dev builds at ~8 MB/s (release did 330+), fixed
+  with `[profile.dev.package."*"] opt-level = 3` and benched by
+  `src-tauri/examples/sftp_bench.rs`.
 
 - **2026-07 · The color era** ([stability.md](stability.md), 0.9.12) — every
   hardcoded color was extracted to theme slots (translucent tints via

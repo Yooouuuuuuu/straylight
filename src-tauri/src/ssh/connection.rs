@@ -51,7 +51,7 @@ pub enum ConnectionState {
     /// Probes are failing or slow but there is NO hard evidence of death —
     /// every channel stays open and usable (possibly slow). Doubt is not
     /// death: only a transport error escalates to `Reconnecting`
-    /// (docs/connections-v2.md).
+    /// (docs/connections.md).
     Degraded,
     Reconnecting,
     Disconnected,
@@ -117,7 +117,7 @@ pub struct Connection {
     /// The lazily-dialed **data lane** — a SECOND SSH connection to the same
     /// host carrying SFTP + exec (everything that moves data rather than
     /// keystrokes), so heavy file traffic can never congest or kill the
-    /// terminals riding this main lane (docs/connections-v2.md Phase 1). Only
+    /// terminals riding this main lane (docs/connections.md Phase 1). Only
     /// used on main-lane objects; a data lane's own slot stays None. Held in a
     /// tokio Mutex so one dial at a time.
     data: Mutex<Option<Arc<Connection>>>,
@@ -127,15 +127,15 @@ pub struct Connection {
     /// Serializes **session lane** dials for this host (one handshake at a
     /// time — politeness toward sshd's MaxStartups; also makes the cap check
     /// race-free). Session lanes are per-agent connections created by the
-    /// SESSIONS ＋ (docs/connections-v2.md Phase D).
+    /// SESSIONS ＋ (docs/connections.md Phase D).
     session_dial: Mutex<()>,
-    /// Whether this lane prefers zlib (terminal lanes: text, slow-link win)
-    /// or none (data lane: bulk, where zlib is a CPU ceiling). Reconnects
-    /// re-negotiate the same choice.
-    compress: bool,
+    /// This lane's dial profile — compression, keepalive tolerance, and
+    /// channel window differ by lane kind (docs/connections.md).
+    /// Reconnects re-negotiate the same profile.
+    profile: LaneProfile,
     /// Bumped on every `reestablish` (the live handle was swapped). In-flight
     /// transfers subscribe and yank themselves off the dead session the moment
-    /// the lane reconnects, then auto-resume (docs/connections-v2.md Phase 2).
+    /// the lane reconnects, then auto-resume (docs/connections.md Phase 2).
     epoch: watch::Sender<u64>,
 }
 
@@ -161,7 +161,15 @@ impl Connection {
                 .request_subsystem(true, "sftp")
                 .await
                 .map_err(|e| format!("failed to start SFTP subsystem: {e}"))?;
-            let session = SftpSession::new(channel.into_stream())
+            // 32 pipelined write acks (default 8): uploads are throughput ÷
+            // round-trip too — 8 × 255 KB capped a 37 ms route at ~54 MB/s.
+            let session = SftpSession::new_with_config(
+                channel.into_stream(),
+                russh_sftp::client::Config {
+                    max_concurrent_writes: 32,
+                    ..Default::default()
+                },
+            )
                 .await
                 .map_err(|e| format!("failed to initialize SFTP: {e}"))?;
             *guard = Some(session);
@@ -202,6 +210,43 @@ impl Connection {
         self.epoch.subscribe()
     }
 
+    /// Dial an ephemeral **transfer lane** — one transfer's private connection
+    /// (docs/connections.md Phase T), tuned purely for throughput
+    /// (LANE_TRANSFER: no compression, 16 MiB window, ~1 min keepalive). No
+    /// supervisor: the transfer's retry rounds redial a fresh lane instead of
+    /// nursing a dead one. Serialized with session dials (one handshake at a
+    /// time per host — MaxStartups politeness).
+    pub async fn open_transfer_lane(
+        self: &Arc<Self>,
+        app: &AppHandle,
+    ) -> Result<Arc<Connection>, String> {
+        let _dial = self.session_dial.lock().await;
+        let id = format!("{}::transfer-{}", self.id, &Uuid::new_v4().to_string()[..8]);
+        emit_status(app, &id, ConnectionState::Connecting, None);
+        match open_sibling(self, id.clone(), LANE_TRANSFER).await {
+            Ok(lane) => {
+                emit_status(app, &id, ConnectionState::Connected, None);
+                log::info!("transfer lane {id} opened");
+                Ok(lane)
+            }
+            Err(e) => {
+                emit_status(app, &id, ConnectionState::Disconnected, Some(e.clone()));
+                log::warn!(
+                    "transfer lane {id} failed to open ({e}) — falling back to the data lane"
+                );
+                Err(e)
+            }
+        }
+    }
+
+    /// One bounded liveness probe (channel open + close). Transfers use it to
+    /// classify a round error: a lane that answers is healthy — the error was
+    /// a genuine filesystem error and stays fatal; one that doesn't answer
+    /// gets redialed and the round retried.
+    pub async fn is_transport_alive(&self) -> bool {
+        matches!(probe(self).await, Probe::Alive)
+    }
+
     /// The data lane for this host — dialed on first use, supervised and
     /// reestablished IN PLACE forever after (the Arc stays valid across
     /// reconnects, which in-flight transfers rely on). On dial failure the
@@ -220,7 +265,7 @@ impl Connection {
         emit_status(app, &id, ConnectionState::Connecting, None);
         // No compression on the data lane: bulk transfers are the one place
         // zlib turns from a slow-link win into a hard CPU ceiling.
-        match open_sibling(self, id.clone(), false).await {
+        match open_sibling(self, id.clone(), LANE_DATA).await {
             Ok(sibling) => {
                 emit_status(app, &id, ConnectionState::Connected, None);
                 log::info!("data lane {id} opened");
@@ -406,30 +451,53 @@ impl client::Handler for ClientHandler {
     }
 }
 
-fn client_config(compress: bool) -> Arc<client::Config> {
+/// A lane kind's dial parameters (docs/connections.md — "The lanes").
+///
+/// - `compress`: terminal lanes (main + session) prefer zlib — their traffic
+///   is text and shrinks 3–5× on slow links at trivial volume. Bulk lanes
+///   (data + transfer) negotiate none: payloads are often incompressible and
+///   single-threaded zlib caps a same-machine link at a few dozen MB/s
+///   (scp/rsync ship uncompressed by default for the same reason).
+/// - `keepalive_max`: with 15 s pings, how much TOTAL silence before russh
+///   declares the transport dead. 20 ≈ 5 min for lanes carrying precious
+///   state (doubt is not death); 4 ≈ 1 min for expendable transfer lanes —
+///   they have no supervisor, a dead one should redial fast, and a misjudged
+///   stall costs nothing (the retry round just redials).
+/// - `window`: the receive window WE grant — the ceiling on in-flight data
+///   flowing to us. Bulk lanes get 16 MiB so a deep read pipeline can stand;
+///   terminal lanes keep russh's 2 MiB default.
+#[derive(Clone, Copy)]
+pub struct LaneProfile {
+    compress: bool,
+    keepalive_max: usize,
+    window: u32,
+}
+
+const MIB: u32 = 1024 * 1024;
+/// Main lane: terminals + forwards. Text, precious, patient.
+pub const LANE_MAIN: LaneProfile = LaneProfile { compress: true, keepalive_max: 20, window: 2 * MIB };
+/// Session lanes: one agent's PTY. Text, precious, patient.
+pub const LANE_SESSION: LaneProfile = LaneProfile { compress: true, keepalive_max: 20, window: 2 * MIB };
+/// Data lane: SFTP + exec. Bulk-ish, standing, patient.
+pub const LANE_DATA: LaneProfile = LaneProfile { compress: false, keepalive_max: 20, window: 16 * MIB };
+/// Transfer lanes: one transfer's bytes. Bulk, ephemeral, impatient.
+pub const LANE_TRANSFER: LaneProfile = LaneProfile { compress: false, keepalive_max: 4, window: 16 * MIB };
+
+fn client_config(profile: LaneProfile) -> Arc<client::Config> {
     Arc::new(client::Config {
         // Keep interactive sessions alive; we never want the library to drop an
         // idle terminal out from under the user.
         inactivity_timeout: None,
         // Keepalive pings double as a NAT refresher and the hard-silence
-        // backstop. `keepalive_max: 20` = ~5 minutes with NO reply getting
-        // through before russh declares the transport dead (a hard error the
-        // supervisor acts on). The old value (3 ≈ 45 s) executed healthy
-        // connections during ordinary stalls — bufferbloat under a transfer, a
-        // standby nap — which is what restarted every terminal hourly on a
-        // flaky link while plain ssh (no keepalive kill at all) survived for
-        // days. Doubt is not death; see docs/connections-v2.md.
+        // backstop (see LaneProfile). The old blanket value (3 ≈ 45 s)
+        // executed healthy connections during ordinary stalls — which is what
+        // restarted every terminal hourly on a flaky link while plain ssh (no
+        // keepalive kill at all) survived for days.
         keepalive_interval: Some(Duration::from_secs(15)),
-        keepalive_max: 20,
-        // Compression is PER LANE. Terminal lanes (main + session) prefer zlib:
-        // their traffic is text — scrollback, agent output — and shrinks 3–5×
-        // on slow links at trivial volume. The DATA lane negotiates none: bulk
-        // transfers are often incompressible (archives, images, models), and
-        // single-threaded zlib caps a same-machine link at a few dozen MB/s —
-        // the compression that saved a slow WAN was the ceiling on a fast one.
-        // (scp/rsync ship uncompressed by default for the same reason.)
+        keepalive_max: profile.keepalive_max,
+        window_size: profile.window,
         preferred: russh::Preferred {
-            compression: std::borrow::Cow::Borrowed(if compress {
+            compression: std::borrow::Cow::Borrowed(if profile.compress {
                 &[
                     russh::compression::ZLIB_LEGACY,
                     russh::compression::ZLIB,
@@ -517,6 +585,23 @@ mod tests {
     }
 }
 
+/// TCP-connect with `TCP_NODELAY` set, then hand russh the stream. russh's own
+/// `client::connect` never disables Nagle — with SFTP's request/response
+/// rhythm, every request then eats a Nagle + delayed-ACK stall (~40 ms), which
+/// capped even LOOPBACK transfers at ~7 MB/s while scp did 160 (the request
+/// sits in two TCP segments; the second waits for an ACK the peer is
+/// deliberately delaying). Interactive typing echo benefits too.
+async fn connect_nodelay(
+    config: Arc<client::Config>,
+    host: &str,
+    port: u16,
+    handler: ClientHandler,
+) -> Result<client::Handle<ClientHandler>, russh::Error> {
+    let socket = tokio::net::TcpStream::connect((host, port)).await?;
+    let _ = socket.set_nodelay(true);
+    client::connect_stream(config, socket, handler).await
+}
+
 /// Open a (possibly jumped) SSH transport and return the unauthenticated handle
 /// for the target, plus the jump handle to keep alive.
 async fn open_handle(
@@ -529,7 +614,7 @@ async fn open_handle(
 ) -> Result<(client::Handle<ClientHandler>, Option<client::Handle<ClientHandler>>), String> {
     match proxy_jump {
         None | Some("") => {
-            let handle = client::connect(config, (host, port), target_handler(host, port, outcome))
+            let handle = connect_nodelay(config, host, port, target_handler(host, port, outcome))
                 .await
                 .map_err(|e| format!("could not reach {host}:{port}: {e}"))?;
             Ok((handle, None))
@@ -537,7 +622,7 @@ async fn open_handle(
         Some(spec) => {
             let (juser, jhost, jport) = parse_jump(spec, user);
             let mut jump =
-                client::connect(config.clone(), (jhost.as_str(), jport), jump_handler(&jhost, jport))
+                connect_nodelay(config.clone(), jhost.as_str(), jport, jump_handler(&jhost, jport))
                     .await
                     .map_err(|e| format!("could not reach jump host {jhost}:{jport}: {e}"))?;
             // Authenticate the bastion with the same on-disk-key chain.
@@ -670,7 +755,7 @@ pub async fn ssh_connect(
     // hanging on the OS default (~20s on Windows).
     let outcome = Arc::new(std::sync::Mutex::new(HostKeyOutcome::Pending));
     let connect = open_handle(
-        client_config(true), // main lane: terminal text — compression wins
+        client_config(LANE_MAIN),
         &host,
         port,
         &user,
@@ -731,7 +816,7 @@ pub async fn ssh_connect(
         data: Mutex::new(None),
         data_fail: std::sync::Mutex::new(None),
         session_dial: Mutex::new(()),
-        compress: true, // main lane: terminal text
+        profile: LANE_MAIN,
         epoch: watch::Sender::new(0),
     });
 
@@ -774,10 +859,11 @@ pub async fn ssh_disconnect(
             .await;
             emit_status(&app, &format!("{conn_id}::data"), ConnectionState::Disconnected, None);
         }
-        // Session lanes (per-agent connections) go down with their host too.
+        // Session AND transfer lanes (any `<id>::…` child) go down with their
+        // host too.
         let lanes: Vec<(String, Arc<Connection>)> = {
             let mut sessions = state.sessions.lock().await;
-            let prefix = format!("{conn_id}::session-");
+            let prefix = format!("{conn_id}::");
             let ids: Vec<String> = sessions
                 .keys()
                 .filter(|k| k.starts_with(&prefix))
@@ -930,12 +1016,33 @@ pub async fn backend_reset(state: State<'_, crate::AppState>) -> Result<(), Stri
     Ok(())
 }
 
+/// Hang up an ephemeral transfer lane and forget it (bounded — the socket may
+/// be a corpse). Quiet by design: the clean-close Disconnected event carries
+/// no message and the UI ignores it.
+pub async fn drop_transfer_lane(state: &crate::AppState, app: &AppHandle, lane_id: &str) {
+    let session = state.sessions.lock().await.remove(lane_id);
+    if let Some(crate::Session::Ssh(lane)) = session {
+        lane.mark_stopped();
+        let _ = tokio::time::timeout(Duration::from_secs(3), async {
+            let _ = lane
+                .live
+                .read()
+                .await
+                .handle
+                .disconnect(russh::Disconnect::ByApplication, "", "en")
+                .await;
+        })
+        .await;
+        emit_status(app, lane_id, ConnectionState::Disconnected, None);
+    }
+}
+
 /// Error prefix the frontend matches to fall back to the main lane when the
 /// per-host session-lane cap is reached (Preferences → Session connections).
 pub const SESSION_LANE_LIMIT: &str = "SESSION_LANE_LIMIT:";
 
 /// Open a **session lane**: a dedicated SSH connection for ONE agent created
-/// from the SESSIONS panel / F11 (docs/connections-v2.md Phase D) — its PTY
+/// from the SESSIONS panel / F11 (docs/connections.md Phase D) — its PTY
 /// rides alone, so a busy agent can't slow or break any other terminal. Dials
 /// are serialized per host (MaxStartups politeness) and capped by `limit`
 /// (the user's Preferences value): at the cap this returns
@@ -971,7 +1078,7 @@ pub async fn session_lane_connect(
     );
     emit_status(&app, &id, ConnectionState::Connecting, None);
     // Session lanes carry a terminal (agent text) — compression stays on.
-    match open_sibling(&parent, id.clone(), true).await {
+    match open_sibling(&parent, id.clone(), LANE_SESSION).await {
         Ok(lane) => {
             state
                 .sessions
@@ -1010,7 +1117,7 @@ fn ensure_supervisor(app: AppHandle, conn: Arc<Connection>) {
 }
 
 /// What one health probe learned. The three-way split is the heart of the v2
-/// doctrine (docs/connections-v2.md): silence is DOUBT (the link may just be
+/// doctrine (docs/connections.md): silence is DOUBT (the link may just be
 /// stalled — mark Degraded, touch nothing), only a hard transport error is
 /// CERTAINTY (russh says the handle is gone — reconnect).
 enum Probe {
@@ -1251,18 +1358,18 @@ async fn sleep_or_stopped(conn: &Connection, secs: u64) -> bool {
 /// Re-open and re-authenticate the transport, swapping the live handle in place
 /// so the connection id and all channels opened afterwards target the new link.
 /// Dial a second, independent SSH connection to the same host — a data or
-/// session lane (docs/connections-v2.md). Silent like `reestablish`: no
+/// session lane (docs/connections.md). Silent like `reestablish`: no
 /// prompting — the host key was verified at first connect, and the retained
 /// auth (key path / in-memory password) replays. `compress` picks the lane's
 /// compression (terminal lanes yes, the data lane no — see `client_config`).
 async fn open_sibling(
     conn: &Connection,
     id: String,
-    compress: bool,
+    profile: LaneProfile,
 ) -> Result<Arc<Connection>, String> {
     let outcome = Arc::new(std::sync::Mutex::new(HostKeyOutcome::Pending));
     let connect = open_handle(
-        client_config(compress),
+        client_config(profile),
         &conn.info.host,
         conn.info.port,
         &conn.info.user,
@@ -1298,7 +1405,7 @@ async fn open_sibling(
         data: Mutex::new(None),
         data_fail: std::sync::Mutex::new(None),
         session_dial: Mutex::new(()),
-        compress,
+        profile,
         epoch: watch::Sender::new(0),
     }))
 }
@@ -1308,7 +1415,7 @@ async fn reestablish(conn: &Connection) -> Result<(), String> {
     // changed key correctly refuses — the supervisor keeps retrying).
     let outcome = Arc::new(std::sync::Mutex::new(HostKeyOutcome::Pending));
     let connect = open_handle(
-        client_config(conn.compress), // reconnects keep the lane's choice
+        client_config(conn.profile), // reconnects keep the lane's profile
         &conn.info.host,
         conn.info.port,
         &conn.info.user,

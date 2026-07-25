@@ -39,9 +39,10 @@ Track multiple repos across different hosts seamlessly in the left panel, keepin
 
 ### ⚡ Deep WSL & Resilient SSH
 * **Never Gives Up:** A dropped SSH connection reconnects on its own with exponential backoff (capped at 30s) and keeps retrying until it recovers or you manually disconnect. Tabs, splits, and terminals stay alive across drops — and a stalled link is held open (amber "degraded"), never executed on suspicion.
-* **Lanes, Not One Fragile Pipe:** Each host runs up to three kinds of SSH connection ([docs/connections-v2.md](docs/connections-v2.md)): the **main lane** for quick terminals and forwards, a **data lane** carrying all file traffic and remote commands (a heavy transfer can't lag your typing or kill a shell), and **session lanes** — every session opened from the SESSIONS panel or F11 gets a *dedicated* connection of its own. **Put high-throughput or long-running work (a Claude Code agent, a big build, a log tail) in a session** — it can't slow the others, and if its link drops, only that one session restarts.
+* **Lanes, Not One Fragile Pipe:** Each host runs up to three kinds of SSH connection ([docs/connections.md](docs/connections.md)): the **main lane** for quick terminals and forwards, a **data lane** carrying all file traffic and remote commands (a heavy transfer can't lag your typing or kill a shell), and **session lanes** — every session opened from the SESSIONS panel or F11 gets a *dedicated* connection of its own. **Put high-throughput or long-running work (a Claude Code agent, a big build, a log tail) in a session** — it can't slow the others, and if its link drops, only that one session restarts.
 * **Native-Speed WSL:** Bypassing the slow `\\wsl$` bridge, Straylight auto-provisions an internal SSH server inside your WSL distro (with consent) and connects over a native `localhost` SSH link for native ext4 speed.
-* **Zero-Cap Streaming Transfers:** A dedicated multi-pane transfer tool streams files directly between any two hosts (Local ⇄ WSL ⇄ Remote) with no file size limits — transfers pause on a dropped connection and resume by themselves, never re-copying finished files.
+* **Transfers at SFTP's practical maximum:** Large files stream through a 32-deep pipelined SFTP engine — the same mechanism modern `scp` uses, benched **~2× faster than scp** on the same route — with no size caps, pause + auto-resume across drops, and a per-transfer **Full / Background** speed choice (Background stays under your MB/s limit so a copy never crowds out your work).
+* **Host ⇄ host copies exist — with one honest caveat:** WSL ⇄ Remote and Remote ⇄ Remote transfers (which VS Code doesn't offer at all) relay through your machine, so they run at roughly the slower leg's speed. That's deliberate: making two hosts talk directly would mean handing your credentials to `scp`/`rsync` between machines, and we won't — your keys and passwords never leave the app's process. Safety first, and the relayed stream still runs full-pipeline on both legs.
 
 ### ⌨️ Professional Editor & Terminal Experience
 * **Splittable Monaco Editor:** The core text editing experience is identical to VS Code (Monaco). Features up to three split groups, explicit tab pinning, sticky scroll, real-time Markdown preview (`Ctrl+Shift+V`), line-ending conversion (`LF`/`CRLF`), and a lightweight mode for massive log files.
@@ -56,7 +57,7 @@ Track multiple repos across different hosts seamlessly in the left panel, keepin
 
 ## Architecture
 
-Straylight achieves its efficiency by removing heavy remote agents and local clones. A single SSH connection per host is multiplexed into distinct channels. All version control commands, file-finding, and shell operations execute native binaries on the host via a custom asynchronous `exec` runner. 
+Straylight achieves its efficiency by removing heavy remote agents and local clones. Each host runs a few purpose-tuned SSH connections — the lanes ([docs/connections.md](docs/connections.md)) — so terminals, file traffic, agents, and transfers can't hurt each other. All version control commands, file-finding, and shell operations execute native binaries on the host via a custom asynchronous `exec` runner. 
 
 Design docs live in [`docs/`](docs/README.md).
 

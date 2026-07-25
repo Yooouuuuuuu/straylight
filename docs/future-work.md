@@ -15,6 +15,16 @@ rationale for what exists is in the [design docs](README.md).
   is menu wiring and ordering in `TextContextMenu`).
 
 ## Parked
+- **Persistent sessions button (tmux-backed)** — a dedicated "＋ persistent
+  session" in SESSIONS/F11: that one terminal runs inside a Straylight-managed
+  tmux (`-L straylight`, `-f /dev/null`, prefix None, status off,
+  `capture-pane` replay on reattach) and survives disconnects and app
+  restarts — the only thing SSH physics can't give a plain shell. Explicit
+  and per-terminal by design: normal terminals stay a pure mirror of ssh
+  (want tmux? run tmux), and this exists only for sessions that must outlive
+  the link. Full design in [connections.md](connections.md) Phase 3. Might
+  never be needed now that drops are rare and `claude --continue` recovers
+  agent conversations (Phase 2.5) — written down so the thinking isn't lost.
 - **Linux version** — a full port pass, before macOS. First job when it starts:
   runtime-test the terminals (real Unix PTYs there, not ConPTY — a codepath
   that has never been executed); then packaging/bundle checks.

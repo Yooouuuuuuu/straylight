@@ -248,7 +248,7 @@ export default function App() {
   // stay valid — but the old SFTP/PTY channels are dead, so on recovery we
   // refresh the tree and restart the terminal.
   useEffect(() => {
-    // Generous state-transition toasts (build-phase rule, docs/connections-v2.md):
+    // Generous state-transition toasts (build-phase rule, docs/connections.md):
     // every distinct transition says what happened and what it means for the
     // user's terminals. Same-state updates (reconnect attempts, still-stalled
     // pings) never re-toast. We trim after field testing.
@@ -293,7 +293,7 @@ export default function App() {
 
     const unlistenPromise = onSshStatus((status) => {
       const store = useAppStore.getState();
-      // Secondary lanes (docs/connections-v2.md): the data lane (SFTP + exec)
+      // Secondary lanes (docs/connections.md): the data lane (SFTP + exec)
       // and per-agent session lanes. Toast their transitions with a clear
       // tag; the host's dot stays owned by the main lane.
       const sep = status.connId.indexOf("::");
@@ -305,13 +305,16 @@ export default function App() {
           store.wsls.find((w) => w.conn.connId === parent)?.conn.name;
         if (!host) return;
         const isData = kind === "data";
+        const isTransfer = kind.startsWith("transfer-");
         // A session lane is named after its agent when we can find it.
-        const agent = store.terminals.find(
-          (t) => t.laneConnId === status.connId,
-        );
+        const agent = isTransfer
+          ? undefined
+          : store.terminals.find((t) => t.laneConnId === status.connId);
         const label = isData
           ? `${host} (data)`
-          : `${host} · ${agent?.customName ?? agent?.title ?? "session"}`;
+          : isTransfer
+            ? `${host} (transfer)`
+            : `${host} · ${agent?.customName ?? agent?.title ?? "session"}`;
         const prev = lanePrev.get(status.connId) ?? "connected";
         lanePrev.set(status.connId, status.state);
         // A session lane's clean close (agent tab closed → no message) is the

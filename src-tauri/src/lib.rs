@@ -97,7 +97,7 @@ impl AppState {
     /// Resolve a session id to a file transport (SFTP or local). SFTP rides
     /// the data lane — a second SSH connection dialed on first use —
     /// so file traffic can't congest or kill the terminals on the interactive
-    /// lane (docs/connections-v2.md Phase 1; falls back to sharing when the
+    /// lane (docs/connections.md Phase 1; falls back to sharing when the
     /// second dial fails).
     pub async fn transport(&self, conn_id: &str) -> Result<Box<dyn FileTransport>, String> {
         Ok(self.transfer_endpoint(conn_id).await?.0)
@@ -129,6 +129,51 @@ impl AppState {
             }
             None => Ok((Box::new(LocalTransport), None)),
         }
+    }
+
+    /// A transfer endpoint on a DEDICATED transfer lane (docs/connections.md
+    /// Phase T): the transfer's bytes get their own connection so they can't
+    /// congest the data lane's everyday work, tuned purely for throughput.
+    /// Falls back to the shared data lane when the dial fails. The third
+    /// element is the dialed lane's id — the caller hands it to
+    /// [`ssh::connection::drop_transfer_lane`] when the round is over.
+    pub async fn transfer_endpoint_dedicated(
+        &self,
+        conn_id: &str,
+    ) -> Result<(Box<dyn FileTransport>, Option<Arc<Connection>>, Option<String>), String> {
+        let conn = {
+            let sessions = self.sessions.lock().await;
+            match sessions.get(conn_id) {
+                Some(Session::Ssh(conn)) => Some(conn.clone()),
+                Some(Session::Local) => None,
+                None => return Err(format!("session '{conn_id}' is not open")),
+            }
+        };
+        let Some(conn) = conn else {
+            return Ok((Box::new(LocalTransport), None, None));
+        };
+        if let Some(app) = self.app.get() {
+            if let Ok(lane) = conn.open_transfer_lane(app).await {
+                let id = lane.id.clone();
+                // Registered so the host-disconnect sweep and backend_reset
+                // kill it with everything else; removed by drop_transfer_lane.
+                self.sessions
+                    .lock()
+                    .await
+                    .insert(id.clone(), Session::Ssh(lane.clone()));
+                return Ok((
+                    Box::new(ssh::sftp::SftpTransport(lane.clone())),
+                    Some(lane),
+                    Some(id),
+                ));
+            }
+        }
+        // Dial failed (or startup edge) — share the data lane as before.
+        let lane = match self.app.get() {
+            Some(app) => conn.data_lane(app).await,
+            None => conn,
+        };
+        Ok((Box::new(ssh::sftp::SftpTransport(lane.clone())), Some(lane), None))
     }
 
     /// Resolve a session id to its SSH connection, erroring for non-SSH sessions.

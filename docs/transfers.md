@@ -71,10 +71,12 @@ files in RAM behind a 512 MB limit; streaming replaced it.)
 WSL is its own transport, so a WSL ⇄ remote copy is relayed through the app
 (read one SSH endpoint, write the other). The relay is **double-buffered**:
 the chunk in hand is written while the next one is read, so neither leg idles
-waiting on the other. Transfers ride the **data lane**, which negotiates **no
-SSH compression** — bulk payloads are often incompressible, and
-single-threaded zlib capped same-machine links at a few dozen MB/s (terminal
-lanes keep zlib: their traffic is text, where it's a slow-link win).
+waiting on the other. Transfers ride a **dedicated transfer lane** per SSH
+endpoint (docs/connections.md Phase T) — an ephemeral connection with **no
+SSH compression** (bulk payloads are often incompressible; single-threaded
+zlib capped same-machine links at a few dozen MB/s) and a **16 MiB receive
+window**, dialed at transfer start and hung up at the end, falling back to
+the shared data lane if the dial fails. Retry rounds redial fresh lanes.
 
 ## Why not rsync
 

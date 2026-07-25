@@ -72,6 +72,10 @@ export interface Settings {
    *  own SSH connection; `max` caps how many per host (past it new sessions
    *  share the host's main connection; 0 = always share). */
   sessionConnections?: { max?: number };
+  /** Transfer speed: the confirm sheet's default mode, and the Background
+   *  mode's bandwidth cap in MB/s (0 = no cap, just a shallow pipeline).
+   *  Downloads (no sheet) always use the default mode. */
+  transfers?: { default?: "full" | "background"; backgroundLimitMBps?: number };
   // ---- theme.json sections ----
   colors?: Record<string, string>;
   editor?: Record<string, string>;
@@ -136,6 +140,7 @@ function settingsTemplate(): Settings {
     ui: { localOnly: false, disableChat: false },
     download: { dir: "" },
     sessionConnections: { max: 10 },
+    transfers: { default: "background", backgroundLimitMBps: 10 },
     terminalHostColor: true,
   };
 }
@@ -224,6 +229,12 @@ export let downloadConfig: { dir: string } = { dir: "" };
 /** Per-host cap on session lanes (dedicated SSH connections for SESSIONS/F11
  *  agents); 0 = always share the main connection. */
 export let sessionConnConfig: { max: number } = { max: 10 };
+
+/** Transfer speed defaults (Preferences → Transfers). */
+export let transfersConfig: {
+  default: "full" | "background";
+  backgroundLimitMBps: number;
+} = { default: "background", backgroundLimitMBps: 10 };
 let confirms: Record<string, boolean> = {};
 
 /** Snapshot of the confirm flags (for the settings UI). */
@@ -430,6 +441,14 @@ async function loadAndApply(): Promise<void> {
     max:
       typeof s.sessionConnections?.max === "number"
         ? Math.min(30, Math.max(0, Math.round(s.sessionConnections.max)))
+        : 10,
+  };
+
+  transfersConfig = {
+    default: s.transfers?.default === "full" ? "full" : "background",
+    backgroundLimitMBps:
+      typeof s.transfers?.backgroundLimitMBps === "number"
+        ? Math.min(10000, Math.max(0, Math.round(s.transfers.backgroundLimitMBps)))
         : 10,
   };
 

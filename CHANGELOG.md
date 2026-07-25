@@ -25,6 +25,80 @@ history of design changes — lives in the docs: the decision ledger in
   model is under field test; this lands with the trim.
 - **Auto-update** — ships with 0.10 (updater keypair + GitHub Releases).
 
+## [0.9.16] - 2026-07-26
+
+The speed round: every transfer gets its own tuned connection and a 32-deep
+pipelined reader, the 40× dev-build slowdown turned out to be unoptimized
+crypto (one profile line), and a Full/Background speed control with a
+never-exceed network budget ships on the confirm sheet.
+
+### Added
+
+- **Transfer lanes** (Phase T of
+  [docs/connections.md](docs/connections.md)). Every running transfer
+  now dials an ephemeral SSH connection of its own on each endpoint — tuned
+  purely for throughput (no compression, a 16 MiB receive window, an
+  impatient ~1 min keepalive) — so bulk bytes can't slow the explorer, saves,
+  or VCS riding the data lane, and a mid-transfer connection death touches
+  nothing else. Retry rounds redial fresh lanes with backoff instead of
+  waiting on a reconnect, and a round's error is classified by probing: a
+  lane that still answers means a real filesystem error (fails properly);
+  silence means redial and resume. Lanes hang up when the transfer ends and
+  fall back to the shared data lane if the dial fails.
+- **Live transfer speed.** The status-bar readout and the Transfers panel now
+  show the current rate — `… · 45 MB/2.1 GB · 34% · 87 MB/s ✕` — computed
+  from progress frames, steady over ~1 s windows, including while the total
+  is still being calculated (the download case).
+
+### Fixed
+
+- **The 40× transfer slowdown — solved, and the culprit was the dev profile.**
+  A standalone bench (`examples/sftp_bench.rs`, kept for future perf work)
+  finally isolated it: the identical russh stack moves **330+ MB/s in a
+  release build and ~8 MB/s in a debug build** — every `tauri dev` transfer
+  was CPU-bound on unoptimized cipher code, which masqueraded as a
+  network/protocol problem across two machines and three red herrings.
+  Dependencies now compile with `opt-level = 3` even in dev
+  (`[profile.dev.package."*"]`); our own crate stays unoptimized for fast
+  rebuilds. Dev-build transfers went from 7 → **500+ MB/s** on the same
+  route; packaged builds were always release and unaffected.
+- **The hunt's side quests were real improvements and stay.** Large files
+  read through a **32-deep pipelined SFTP reader** (~8 MiB standing on a
+  dedicated channel, short-read rescheduling, in-order reassembly) and
+  uploads pipeline 32 write acks (was 8) — on high-latency routes these are
+  the difference between chunk-per-round-trip and bandwidth-bound, exactly
+  how modern scp works. `TCP_NODELAY` is set on every connection (russh never
+  sets it), and bulk lanes negotiate no compression with 16 MiB windows.
+
+### Added
+
+- **Transfer speed control: Full / Background.** The confirm sheet grew a
+  speed pick next to Cancel/Copy — **Full** uses everything your network
+  gives; **Background** (the shipped default) stays under the limit and is
+  the safer choice while you work. The sheet remembers your last pick for the
+  session; Preferences → **Transfers** holds the limit (MB/s; 0 = no cap,
+  still a shallow pipeline) and the default mode. Downloads — which have no
+  sheet — always use the default. A relay's two legs share the transfer's one
+  choice, and the cap is enforced in the relay pump, racing the interrupt so
+  cancel stays instant even mid-sleep. The limit is your machine's **total
+  network budget — set 10, never exceed 10 on the wire**: a remote⇄remote
+  relay (which crosses your interface twice) paces payload at half the
+  budget, loopback legs (WSL, local) count as free, and a ~3% shave covers
+  SSH framing so the wire stays under the typed number.
+
+### Changed
+
+- **The Transfers panel header is one line, and the picker is the identity.**
+  The host `<select>` itself reads `Ubuntu (user@ip)` in the host's color,
+  followed by the pane's two buttons (hidden files, open-a-folder); the
+  separate uppercase label line is gone. The `.straypart` temp is also now
+  deleted on a manual cancel (time-bounded; a lane-reset still leaves it for
+  the auto-resume to finish).
+- **The connections doc dropped its "v2".** `docs/connections-v2.md` →
+  `docs/connections.md` (present-tense, like every design doc); the story of
+  what it replaced and why lives in the design-decision ledger in
+  `docs/README.md`.
+
 ## [0.9.15] - 2026-07-25
 
 The stability-under-fire round: a reloaded page sweeps its orphans instead of
@@ -111,7 +185,7 @@ folders answer right-click, every folder can open a terminal in place.
   shell on the folder's host and cds into it; the cd is typed into the
   prompt, visible and cancelable.
 - **Sessions get their own connections** (Phase D of
-  [docs/connections-v2.md](docs/connections-v2.md) — **session lanes**). Every
+  [docs/connections.md](docs/connections.md) — **session lanes**). Every
   agent opened from the SESSIONS panel or F11 dials a dedicated SSH connection
   for its shell alone, so one busy agent can never slow down or take out
   another terminal — and when a session lane drops, only that one agent
@@ -249,7 +323,7 @@ of explorer/transfer power features.
 ### Changed
 
 - **Every host got a second pipe for file work** (Phase 1 of
-  [docs/connections-v2.md](docs/connections-v2.md)). SFTP and remote commands
+  [docs/connections.md](docs/connections.md)). SFTP and remote commands
   now ride their own SSH connection (the "files lane" — renamed to **data
   lane** in the next release), dialed silently on the first file operation,
   while terminals and port forwards keep the original connection to
@@ -270,7 +344,7 @@ of explorer/transfer power features.
   act between chunks, so a hung transfer was uncancellable). No give-up
   timer: the transfer waits as long as it takes; you are the only timeout.
 - **Connections stopped executing themselves on suspicion** (Phase 0 of
-  [docs/connections-v2.md](docs/connections-v2.md)). A stalled link used to be
+  [docs/connections.md](docs/connections.md)). A stalled link used to be
   treated as a dead one — ~45 s of unanswered keepalives or two slow probes
   tore down the whole connection and **restarted every terminal**, which on a
   flaky network meant hourly terminal deaths while plain `ssh` on the same

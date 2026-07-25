@@ -19,6 +19,8 @@ export interface TransferConn {
   roots: string[];
   label: string;
   color?: string;
+  /** Exact identity shown beside the picker (`user@host`); absent for Local. */
+  sub?: string;
 }
 
 type Choice = "overwrite" | "keepBoth" | "cancel";
