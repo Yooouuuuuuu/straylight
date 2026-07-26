@@ -45,9 +45,11 @@ anything below are breaking changes.
   - `terminal` — ONE full xterm ITheme section shared by every shell (hosts
     are told apart by the identity cursor/selection, not per-scope schemes).
 - **The theme library** lives in a non-user-facing `theme.json` next to it
-  (`themes`: name → full sections), seeded once with every built-in theme and
-  managed via ⚙ → Manage themes (save current / apply / delete — deletions
-  are permanent, built-ins included).
+  (`themes`: name → full sections, plus a `seeded` ledger of the built-ins
+  already added, so new built-ins reach existing installs on upgrade). Managed
+  from the **Theme** tab (⚙ → Theme): save the current colors under a name,
+  apply or delete a saved theme, and **Restore built-in themes**. Deleting your
+  own themes is permanent; the six built-ins can always be restored.
 - Problems never fail silently: parse errors and invalid entries surface as a
   toast and a warning row in the command palette.
 - **VCS semantics.** Straylight runs **your real `git` / `jj` on the host that

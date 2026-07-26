@@ -294,6 +294,35 @@ pub async fn fs_read_file(
     state.transport(&conn_id).await?.read_file(&path).await
 }
 
+/// Read a file's raw bytes as base64 — for images the Markdown preview embeds
+/// as `data:` URLs (relative `<img>` paths can't resolve to the bundled webview
+/// root). Capped so a stray huge file can't blow up memory.
+#[tauri::command]
+pub async fn fs_read_base64(
+    state: State<'_, AppState>,
+    conn_id: String,
+    path: String,
+) -> Result<String, String> {
+    use base64::Engine;
+    use tokio::io::AsyncReadExt;
+    const MAX: usize = 16 * 1024 * 1024;
+    let transport = state.transport(&conn_id).await?;
+    let mut reader = transport.open_read(&path).await?;
+    let mut buf = Vec::new();
+    let mut chunk = vec![0u8; 64 * 1024];
+    loop {
+        let n = reader.read(&mut chunk).await.map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        if buf.len() + n > MAX {
+            return Err("file too large for inline preview (16 MB max)".into());
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    Ok(base64::engine::general_purpose::STANDARD.encode(&buf))
+}
+
 #[tauri::command]
 pub async fn fs_stat(
     state: State<'_, AppState>,

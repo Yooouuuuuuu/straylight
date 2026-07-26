@@ -1,13 +1,12 @@
-# Version control — git + jj (design + as-shipped)
+# Version control — git + jj
 
 Source control for **git** and **Jujutsu (jj)** on local, WSL, and remote
 hosts: status, tree decorations, diffs, stage/commit, history with a
 multi-lane graph, branches/bookmarks, stash, conflicts + a 3-way merge editor,
 and fetch / update / push with incoming review.
 
-Kept as-built. The command spikes below are the authoritative reference for the
-parsers in `src-tauri/src/vcs.rs`. Deferred items are in
-[future-work.md](future-work.md).
+The command lists below are the authoritative reference for the parsers in
+`src-tauri/src/vcs.rs`. Deferred items are in [future-work.md](future-work.md).
 
 ## Core insight
 
@@ -31,13 +30,13 @@ This is a stability promise ([stability.md](stability.md)).
 Cost: depends on the binary being installed on the host, and we parse output —
 but only **stable machine formats**, never human text.
 
-## The runner (exec.rs) — as built
+## The runner (exec.rs)
 
 `run_command(state, connId, cwd, argv)` → `{ stdout, stderr, code }`. Remote /
 WSL: an SSH exec channel (argv shell-quoted, cwd included). Local:
 `tokio::process::Command`, no shell.
 
-- **jj PATH probing (built).** SSH exec shells are non-login, so jj in
+- **jj PATH probing.** SSH exec shells are non-login, so jj in
   `~/.cargo/bin` is off PATH. `exec.rs` probes once per connection
   (`command -v` → common dirs → login shell), caches the absolute path, and
   substitutes it. git is invoked bare (it lives in `/usr/bin` in practice).
@@ -99,7 +98,7 @@ there is no staging and no "untracked".
   computes multi-lane graph edges in `lib/commitGraph.ts`
 - Remote: `git fetch` / `git merge --no-edit @{u}` (Update) / `git push`
 
-## jj backend — validated against jj 0.42 (spike)
+## jj backend — validated against jj 0.42
 
 - Detect / root: `jj root` (exit 0 inside; exit 1 + `Error: There is no jj
   repo` outside).
@@ -119,7 +118,7 @@ there is no staging and no "untracked".
   jj-driven colocated repo gets **only jj commands**, never git mutations
   (avoids `jj git import` desync).
 
-## Repo tracking & refresh (as shipped)
+## Repo tracking & refresh
 
 - **Repos are opened explicitly** into the VC panel (folder browser validates
   the pick is a repo; a subdir resolves to the root). Tracked repos persist
@@ -142,7 +141,7 @@ there is no staging and no "untracked".
 - History re-fetches whenever its repo's status refreshes — one refresh
   policy for everything.
 
-## jj is view-first (decision 2026-07-13)
+## jj is view-first
 
 Wrapping jj's verbs in buttons just re-invents git's UI on top of a tool
 whose whole point is a different model — and anyone choosing jj knows its
@@ -155,7 +154,7 @@ menu for jj — for buttons, flip a colocated repo to **git** with the badge
 toggle. (`vcs_describe` / `vcs_squash` were removed with this decision; the
 jj arm of `vcs_update` refuses with a hint.)
 
-## UI (as shipped)
+## UI
 
 - **Tree decorations**: colored letter badges (M/A/D/R/U), folder roll-up,
   ignored files/dirs dimmed (git; jj repos don't dim — no cheap ignored-list

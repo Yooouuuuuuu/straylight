@@ -41,6 +41,7 @@ import { initSettings, uiConfig } from "./lib/settings";
 import { reconcilePendingSaves, startSaveSweep } from "./lib/stagedSave";
 import { initThemes } from "./lib/themes";
 import { initSessionPersistence, restoreSession } from "./lib/session";
+import { checkForUpdateOnLaunch } from "./lib/updater";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { useSSH } from "./hooks/useSSH";
 import { TitleBar } from "./components/layout/TitleBar";
@@ -222,6 +223,9 @@ export default function App() {
   // settings (they read draftsConfig) and must init even if settings failed —
   // session restore awaits the draft index.
   useEffect(() => initThemes(), []);
+  // Quiet auto-update check once on launch (no-op in dev; silent unless a
+  // newer release is found, then it prompts). ⚙ → Check for updates is manual.
+  useEffect(() => checkForUpdateOnLaunch(), []);
   useEffect(() => {
     if (localConnId)
       void initSettings(localConnId).finally(() => void initDrafts(localConnId));

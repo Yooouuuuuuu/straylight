@@ -157,12 +157,18 @@ async fn exec_ssh(conn: &Connection, command: &str) -> Result<CmdOutput, String>
 
 async fn run_local(cwd: &str, argv: &[&str]) -> Result<CmdOutput, String> {
     let (bin, rest) = argv.split_first().ok_or("empty command")?;
-    let output = tokio::process::Command::new(bin)
-        .args(rest)
+    let mut cmd = tokio::process::Command::new(bin);
+    cmd.args(rest)
         .current_dir(cwd)
         // If the awaiting future is dropped (op cancelled), kill the child
         // instead of leaving it running detached.
-        .kill_on_drop(true)
+        .kill_on_drop(true);
+    // Windows: a GUI process spawning a console program (PowerShell for the
+    // local port scan, git/jj for local repos) flashes a console window per
+    // call — suppress it.
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000);
+    let output = cmd
         .output()
         .await
         .map_err(|e| format!("could not run {bin}: {e}"))?;

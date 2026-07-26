@@ -11,9 +11,40 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
-### Planned
+## [0.10.0] - 2026-07-27
 
-- **Auto-update** — ships with 0.10 (updater keypair + GitHub Releases).
+The first packaged release: Straylight now ships as a Windows installer, and the
+app updates itself. On launch it checks GitHub Releases and installs new versions
+in the background — plus a round of desktop-app polish so the packaged build
+behaves like a native app (no console flashes, no clipboard prompt, no false
+editor errors).
+
+### Added
+
+- **Auto-update.** The installed app checks the latest GitHub Release on launch
+  (and on demand via ⚙ → Check for updates, or the command palette); on a newer
+  version it downloads the installer, verifies its signature against the public
+  key baked into the binary, installs, and relaunches — no manual re-download.
+- **Windows installer.** A per-user NSIS `setup.exe` (~7 MB, no admin prompt),
+  with the WebView2 bootstrapper embedded so it installs even where the runtime
+  is missing.
+
+### Fixed
+
+- **No console windows flash on launch or in use.** In the packaged (windowless)
+  build, spawning a console program — `wsl.exe`, the local port scan's
+  PowerShell, local `git`/`jj` — popped a console window per call; every such
+  spawn now runs with `CREATE_NO_WINDOW`.
+- **No more "allow clipboard access" prompt on first paste.** Pasting used to go
+  through the WebView's `navigator.clipboard.readText()`, which pops the browser
+  engine's one-time permission prompt — out of place in a desktop app. Paste
+  (text fields, editor, terminal) now reads the native OS clipboard directly, so
+  it just works, no prompt.
+- **The editor no longer flags false import errors.** Straylight ships no
+  language server, so Monaco's type-checker had no way to resolve a project's
+  imports and marked every `import './App'` as "cannot find module." Semantic
+  (type) diagnostics for TS/JS are now off — genuine syntax errors still
+  surface, the misleading type/module ones don't.
 
 ## [0.9.18] - 2026-07-26
 

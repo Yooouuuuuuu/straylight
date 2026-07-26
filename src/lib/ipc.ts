@@ -214,6 +214,12 @@ export function fsReadFile(connId: string, path: string): Promise<FileContent> {
   return invoke("fs_read_file", { connId, path });
 }
 
+/** A file's raw bytes as base64 — used to embed Markdown-preview images as
+ *  `data:` URLs (relative `<img>` paths can't resolve in the packaged webview). */
+export function fsReadBase64(connId: string, path: string): Promise<string> {
+  return invoke("fs_read_base64", { connId, path });
+}
+
 export function fsStat(connId: string, path: string): Promise<FileStat> {
   return invoke("fs_stat", { connId, path });
 }

@@ -1,11 +1,11 @@
 [package]
 name = "straylight"
-version = "0.9.18"
+version = "0.10.0"
 description = "Lightweight SSH file manager, terminal, and code viewer"
 authors = ["Straylight contributors"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/straylight-app/straylight"
+repository = "https://github.com/Yooouuuuuuu/straylight"
 default-run = "straylight"
 
 [lib]
@@ -21,6 +21,13 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon"] }
 # Persist window size/position/maximized across launches.
 tauri-plugin-window-state = "2"
+# Auto-update from GitHub Releases (verifies each update's signature against the
+# pubkey baked into tauri.conf.json); process = relaunch after an update installs.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+# Native OS clipboard read/write — avoids the WebView2 "allow clipboard" prompt
+# that navigator.clipboard.readText() triggers on first paste.
+tauri-plugin-clipboard-manager = "2"
 
 # SSH / SFTP. russh 0.46.x uses the `KeyPair` / `russh_keys::key` API.
 # (~/.ssh/config is parsed manually in ssh/config.rs — the russh-config crate can

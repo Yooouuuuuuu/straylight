@@ -23,6 +23,7 @@ import { cycleTerminalPanelTab } from "./terminalTabs";
 import { pickTerminalTarget } from "./terminalTarget";
 import { focusExplorer } from "./treeNav";
 import { currentZoom, zoomBy, applyZoom } from "./zoom";
+import { checkForUpdate } from "./updater";
 import { useAppStore } from "../store/appStore";
 import { useVcsStore } from "../store/vcsStore";
 
@@ -90,6 +91,7 @@ export function allCommands(): Command[] {
   return [
     { id: "app.commandPalette", title: "App: Show All Commands", run: () => app().setPaletteOpen(true) },
     { id: "app.refreshAll", title: "App: Refresh Everything", run: () => refreshApp() },
+    { id: "app.checkForUpdates", title: "App: Check for Updates", run: () => checkForUpdate() },
     { id: "connection.connect", title: "Connection: Connect to Server", run: () => app().openDialog() },
     {
       id: "connection.reconnect",

@@ -308,6 +308,10 @@ pub fn run() {
     tauri::Builder::default()
         // Remember window size / position / maximized across launches.
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Auto-update (GitHub Releases) + relaunch after an update installs.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(AppState::new())
         .setup(|app| {
             // Stash the handle so deep code (lazy data-lane dial) can emit
@@ -335,6 +339,7 @@ pub fn run() {
             transport::fs_search,
             transport::fs_list_dir,
             transport::fs_read_file,
+            transport::fs_read_base64,
             transport::fs_stat,
             transport::fs_write_file,
             transport::fs_rename,

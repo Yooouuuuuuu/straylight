@@ -6,6 +6,13 @@
 use std::path::PathBuf;
 
 use serde::Serialize;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// Suppress the console window Windows flashes for each `wsl.exe` spawn from a
+/// GUI (windowed) process — without it the packaged app pops a console per call.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// One installed WSL distribution.
 #[derive(Debug, Clone, Serialize)]
@@ -50,6 +57,7 @@ fn running_distros() -> std::collections::HashSet<String> {
     let mut set = std::collections::HashSet::new();
     let out = std::process::Command::new("wsl.exe")
         .args(["--list", "--running", "--quiet"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     if let Ok(out) = out {
         if out.status.success() {
@@ -69,6 +77,7 @@ fn running_distros() -> std::collections::HashSet<String> {
 fn list_distros() -> Vec<WslDistro> {
     let out = std::process::Command::new("wsl.exe")
         .args(["--list", "--verbose"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     let Ok(out) = out else {
         return Vec::new();
@@ -146,6 +155,7 @@ fn wsl_exec(distro: &str, as_root: bool, script: &str) -> Result<String, String>
         cmd.arg("-u").arg("root");
     }
     cmd.arg("--").arg("bash").arg("-c").arg(wrapped);
+    cmd.creation_flags(CREATE_NO_WINDOW);
     let out = cmd.output().map_err(|e| format!("wsl.exe failed: {e}"))?;
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     if out.status.success() {

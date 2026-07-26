@@ -17,7 +17,7 @@ code-focused.
 
 | Doc | What it is |
 |---|---|
-| [architecture.md](architecture.md) | The as-built system: process shape, backend modules, frontend state, how a save/transfer/VCS call actually flows. Start here. |
+| [architecture.md](architecture.md) | The system as it exists: process shape, backend modules, frontend state, how a save/transfer/VCS call actually flows. Start here. |
 | [stability.md](stability.md) | What 1.0 promises not to break — command ids, `settings.json` keys, VCS semantics — and what it deliberately does not promise. |
 | [future-work.md](future-work.md) | The prioritized pool of "might do later", by rough order. |
 
@@ -36,8 +36,8 @@ published — maintainer material, not user docs.)
 
 ### Working material
 
-`docs/dev/` is **gitignored** — session handoffs and manual test plans (e.g.
-`data-safety-test-plan.md`). Not design docs; not shipped.
+`docs/dev/` is **gitignored** — the release plan and cycle, plus any working
+notes. Not design docs; not shipped.
 
 ---
 

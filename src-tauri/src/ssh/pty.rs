@@ -438,8 +438,11 @@ fn find_git_bash() -> Option<String> {
 
 #[cfg(windows)]
 fn wsl_distros() -> Vec<String> {
+    use std::os::windows::process::CommandExt;
     let output = std::process::Command::new("wsl.exe")
         .args(["--list", "--quiet"])
+        // Suppress the console window a GUI process would flash for this spawn.
+        .creation_flags(0x0800_0000)
         .output();
     let Ok(output) = output else {
         return Vec::new();

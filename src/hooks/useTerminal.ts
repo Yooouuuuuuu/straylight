@@ -9,6 +9,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { readText } from "@tauri-apps/plugin-clipboard-manager";
 
 import {
   onPtyOutput,
@@ -327,8 +328,7 @@ export function useTerminal(
         void navigator.clipboard.writeText(term.getSelection()).catch(() => {});
         term.clearSelection();
       } else {
-        void navigator.clipboard
-          .readText()
+        void readText()
           .then((text) => {
             if (text) term.paste(text);
           })

@@ -41,8 +41,7 @@ file tree for that host, and hidden-files toggle. Left pane defaults to Local.
 Transfers are **streamed, transport-to-transport**. `fs_transfer_batch` relays
 each file through a 256 KB buffer from the source transport's `open_read` to
 the destination's `open_write` — so peak memory is one buffer regardless of
-file size, and there is **no size cap**. (The earlier engine buffered whole
-files in RAM behind a 512 MB limit; streaming replaced it.)
+file size, and there is **no size cap**.
 
 - **Pre-pass.** `measure` recursively totals bytes + file count for an accurate
   overall progress bar before the copy starts.
@@ -92,8 +91,8 @@ WSL is its own transport, so a WSL ⇄ remote copy is relayed through the app
 (read one SSH endpoint, write the other). The relay is **double-buffered**:
 the chunk in hand is written while the next one is read, so neither leg idles
 waiting on the other. Transfers ride a **dedicated transfer lane** per SSH
-endpoint (docs/connections.md Phase T) — an ephemeral connection with **no
-SSH compression** (bulk payloads are often incompressible; single-threaded
+endpoint ([docs/connections.md](connections.md)) — an ephemeral connection with
+**no SSH compression** (bulk payloads are often incompressible; single-threaded
 zlib capped same-machine links at a few dozen MB/s) and a **16 MiB receive
 window**, dialed at transfer start and hung up at the end, falling back to
 the shared data lane if the dial fails. Retry rounds redial fresh lanes.

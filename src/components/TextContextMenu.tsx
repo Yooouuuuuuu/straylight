@@ -9,6 +9,8 @@
  *  read-only surfaces keep only Copy · Select All enabled. */
 import { useEffect, useState } from "react";
 
+import { readText } from "@tauri-apps/plugin-clipboard-manager";
+
 import { editorAtNode } from "../lib/editorModels";
 import { monaco } from "../lib/monaco";
 import { useMenuClamp } from "../hooks/useMenuClamp";
@@ -99,11 +101,13 @@ export function TextContextMenu() {
         case "paste":
           // insertText goes through the browser's edit path: the input event
           // fires (React onChange) and the field's undo stack stays intact.
-          void navigator.clipboard.readText().then((text) => {
-            if (!text) return;
-            f.focus();
-            document.execCommand("insertText", false, text);
-          });
+          void readText()
+            .then((text) => {
+              if (!text) return;
+              f.focus();
+              document.execCommand("insertText", false, text);
+            })
+            .catch(() => {});
           break;
         case "selectAll":
           f.select();
@@ -135,16 +139,18 @@ export function TextContextMenu() {
         }
         break;
       case "paste":
-        void navigator.clipboard.readText().then((text) => {
-          if (!text) return;
-          ed.focus();
-          const s = ed.getSelection();
-          if (s) {
-            ed.executeEdits("contextmenu", [
-              { range: s, text, forceMoveMarkers: true },
-            ]);
-          }
-        });
+        void readText()
+          .then((text) => {
+            if (!text) return;
+            ed.focus();
+            const s = ed.getSelection();
+            if (s) {
+              ed.executeEdits("contextmenu", [
+                { range: s, text, forceMoveMarkers: true },
+              ]);
+            }
+          })
+          .catch(() => {});
         break;
       case "selectAll":
         ed.setSelection(model.getFullModelRange());

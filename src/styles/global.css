@@ -1615,6 +1615,16 @@
   max-width: 100%;
 }
 
+/* mermaid diagrams rendered from ```mermaid fences (centered, responsive). */
+.md-preview__mermaid {
+  text-align: center;
+  margin: 1em 0;
+}
+.md-preview__mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
 .md-preview__body hr {
   border: none;
   border-top: 1px solid var(--border);

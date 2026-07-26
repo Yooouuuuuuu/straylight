@@ -67,6 +67,15 @@ export function setupMonaco(): typeof monaco {
     },
   });
 
+  // Straylight ships no language server — Monaco's TS worker has no tsconfig
+  // or node_modules, so its SEMANTIC pass flags every relative import as
+  // "cannot find module" (a false positive on any real project). Keep syntax
+  // checking (genuine typos are file-local and real) but drop the misleading
+  // type/module diagnostics, matching the deliberate no-LSP stance.
+  const tsDiag = { noSemanticValidation: true, noSyntaxValidation: false };
+  monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions(tsDiag);
+  monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions(tsDiag);
+
   // Built from EDITOR_DEFAULTS via the same function the live theme uses (at
   // bootstrap the settings sections are empty, so it yields the Straylight
   // defaults) — one source of truth, no drift with the real theme.

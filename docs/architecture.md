@@ -1,11 +1,10 @@
-# Architecture (as built)
+# Architecture
 
 A lightweight, open-source SSH **file manager + terminal + code editor + source
-control** built with Tauri v2 (Rust backend) and React (frontend). The VS Code
-Remote-SSH experience without the weight: target ~30–50 MB memory, ~10 MB
-installer.
+control** built with Tauri v2 (Rust backend) and React (frontend) — the VS Code
+Remote-SSH experience in a small native window.
 
-This describes the system **as it exists** (current through 0.9.5). Feature
+This describes the system **as it exists**. Feature
 behavior lives in the README; per-release history in CHANGELOG.md; promises in
 [stability.md](stability.md); deferred work in [future-work.md](future-work.md);
 the docs map + design ledger in [README.md](README.md).
@@ -45,7 +44,9 @@ sizes persist. Every UI color comes from CSS custom properties fed by
 - **Backend:** Rust — `tauri` 2 (tray-icon feature), `russh`/`russh-sftp`/
   `russh-keys` (SSH; `zlib@openssh.com` compression preferred), `portable-pty`
   (local ConPTY), `notify` (file watching), `tokio`, `serde`, `keyring`,
-  `directories`, `uuid`, `base64` (WSL key transport). No tauri plugins.
+  `directories`, `uuid`, `base64` (WSL key transport). Tauri plugins:
+  `window-state` (persist window size/position); `updater` + `process` power
+  the GitHub-Releases auto-update that ships with 0.10.
 - **Frontend:** React 18 + Vite + TypeScript, Zustand (two stores),
   `monaco-editor`, `@xterm/xterm` (+fit, +webgl), `fuse.js` (fuzzy finder +
   palette), `marked` + `dompurify` (Markdown preview), react-resizable-panels.
@@ -191,9 +192,10 @@ restarting the shell.
 
 ### Host identity
 
-Every connection gets a stable color (hash-based ramp, per-host right-click
-override, persisted): section bars, host bars, tab stripes, VC card frames,
-terminal chips, and the title-bar tint all follow it.
+Every connection wears a color from fixed per-theme slots — Local, WSL, and
+three remote slots — carried by its section bars, host bars, tab marks, VC card
+frames, terminal chips, and the title-bar tint. The slots are positional for
+remotes: right-clicking a remote host bar swaps its position (hence its color).
 
 ## Resolved decisions (see the [ledger](README.md#design-decision-ledger))
 

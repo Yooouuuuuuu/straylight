@@ -13,6 +13,7 @@ import {
   settingsFilePath,
 } from "../../lib/settings";
 import { toggleFocusView } from "../../lib/focusMode";
+import { checkForUpdate } from "../../lib/updater";
 import {
   applyTheme,
   DEFAULT_THEME_NAME,
@@ -190,6 +191,17 @@ export function TitleBar() {
                 onClick={() => openPrefFile(settingsFilePath(), "settings.json")}
               >
                 Open settings.json
+              </button>
+              <button
+                className="terminal-menu__item"
+                disabled={focusView}
+                title={lockedTitle}
+                onClick={() => {
+                  setMenuOpen(false);
+                  checkForUpdate();
+                }}
+              >
+                Check for updates
               </button>
               <div className="terminal-menu__sep" />
               {/* Inventories the app keeps for you — audit and prune, not knobs. */}

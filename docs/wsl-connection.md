@@ -1,23 +1,10 @@
-# WSL connection design
+# WSL connection
 
-How Straylight will browse files and run terminals inside a **WSL distro** — by
-treating it as an SSH host, reusing the transport we already have.
-
-**Status:** Implemented and connecting (2026-06-18). See "Implementation notes".
-**Depends on:** the existing SSH/SFTP transport, the PTY layer, and the
-`FileTransport` trait. Blocks: drag-and-drop transfers (a WSL↔remote drag is a
-transport-to-transport relay, so the WSL model must exist first).
-
----
-
-## Goal
-
-Give a WSL distro the same first-class treatment as a remote server — browse its
-files, open a terminal in it, and (later) transfer files to/from it — at **native
-ext4 speed**, without writing a second transport.
-
-The WSL **terminal** already ships (the shell picker runs `wsl.exe -d <distro>`).
-This design covers WSL **files** (and folds the terminal into the same model).
+Straylight browses files and runs terminals inside a **WSL distro** by treating
+it as an SSH host on localhost, reusing the SSH/SFTP/PTY transport it already
+has. A distro gets the same first-class treatment as a remote server — files, a
+terminal, transfers — at **native ext4 speed**, with no second transport to
+maintain.
 
 ---
 
@@ -52,7 +39,7 @@ running in the distro is enough, and we already know how to talk to it.
 
 ---
 
-## Decision: SSH into the distro
+## SSH into the distro, not 9P
 
 Treat a WSL distro as an **SSH host on `localhost`**: ensure an `sshd` is running
 inside the distro, then connect to `localhost:<port>` with the existing SSH/SFTP
@@ -149,7 +136,7 @@ attached distros restore on relaunch.
 
 ---
 
-## Transfers (shipped — see [transfers.md](transfers.md))
+## Transfers (see [transfers.md](transfers.md))
 
 Because WSL is its own transport, transfers involving it are **transport-to-
 transport**, which the transfer engine supports:
@@ -195,7 +182,7 @@ drive it directly through `wsl.exe`.
 
 ---
 
-## Implementation notes (built 2026-06-18)
+## Implementation
 
 Backend lives in `src-tauri/src/wsl.rs`; the sidebar section is
 `src/components/connection/WslSection.tsx`.
@@ -246,17 +233,3 @@ Backend lives in `src-tauri/src/wsl.rs`; the sidebar section is
 - `sshd` is restarted on every explicit connect (idempotent; cheap).
 - All attached distros — and their editor tabs — restore on relaunch, gated by
   the startup ask (`autoConnect.wsl`: ask / always / never; "always" is silent).
-
-### Future work
-
-- **Auto-recover a dropped WSL session** (re-provision `sshd` in the supervisor
-  on a connection drop) — see the limitation above.
-
-(Local hot-exit backup of unsaved edits — once listed here — shipped in 0.9.5;
-see [data-safety.md](data-safety.md). Multiple distros at once shipped in 0.9.4.)
-
-## Open questions
-
-- Whether to remember a *declined* install to avoid re-prompting on later clicks.
-- A WSL ⇄ Windows transfer fast path via `wsl.exe` (defer to
-  [transfers.md](transfers.md)).

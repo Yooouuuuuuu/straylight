@@ -241,7 +241,7 @@ close.
 
 ---
 
-## As built
+## Implementation
 
 - **Backend:** `save.rs` (`save_commit`) composes and dispatches the guarded
   commit script through the exec runner; unit-tested for hostile-path quoting,
@@ -252,6 +252,3 @@ close.
   `lib/hash.ts` (WebCrypto SHA-256), and `lib/saveFile.ts` (the save choke point
   + conflict-bar actions + Ctrl+S block). Pending saves and stubs live in
   localStorage; per-tab `conflict` / draft flags live on the tab.
-
-The manual verification checklist is the working doc
-`docs/dev/data-safety-test-plan.md` (gitignored).
