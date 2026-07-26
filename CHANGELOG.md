@@ -13,17 +13,30 @@ history of design changes — lives in the docs: the decision ledger in
 
 ### Planned
 
-- **Coalesced lane toasts.** With up to a dozen lanes per host (main + data +
-  sessions), per-lane toasts get loud when a whole host bounces. Planned
-  wording, one toast per host per event: an explicit disconnect reads
-  "Disconnected ubuntu — 7 lanes closed (main + data + 5 sessions)";
-  unexpected losses buffer ~10 s (network blips rarely hit lanes at exactly
-  the same instant) and sum to "ubuntu: 2 lanes lost (data + 1 session) —
-  reconnecting", or, when every lane went down, "Lost ubuntu — all lanes
-  down, reconnecting". Recoveries buffer a few seconds the same way:
-  "ubuntu: back — 7 lanes restored". Per-lane toasts stay while the lane
-  model is under field test; this lands with the trim.
 - **Auto-update** — ships with 0.10 (updater keypair + GitHub Releases).
+
+## [0.9.18] - 2026-07-26
+
+Quieter connections: a host bounce used to throw a toast per lane — main, data,
+and every agent's session and transfer lane. Lanes went silent (each state now
+shows where it lives) and only the host itself still toasts; hover a host's dot
+for its live lane count.
+
+### Changed
+
+- **Connection toasts no longer come as a wall.** A host bounce used to fire a
+  toast per lane — main, data, and every agent's session and transfer lane —
+  so one blip could throw a dozen-plus toasts. Lanes are internal plumbing, so
+  they no longer toast at all; each lane's state shows where it belongs (an
+  agent's CHAT dot, the transfer's progress bar, the file tree), and only the
+  host itself still toasts. Because a whole-host bounce takes the main lane
+  too, that host toast is already the one-per-host summary — "ubuntu:
+  connection lost — reconnecting…" then "back" — with no per-lane noise and no
+  artificial delay. Also gone: the "dedicated connection opened" toast on every
+  agent, and the transfer paused/resumed toasts (the progress bar already says
+  "waiting for connection… resumes by itself"). The lane fan-out that used to
+  live in toasts is now on demand — hover a host's dot to see "main + N agent
+  connections".
 
 ## [0.9.17] - 2026-07-26
 

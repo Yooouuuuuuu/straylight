@@ -248,10 +248,13 @@ export default function App() {
   // stay valid — but the old SFTP/PTY channels are dead, so on recovery we
   // refresh the tree and restart the terminal.
   useEffect(() => {
-    // Generous state-transition toasts (build-phase rule, docs/connections.md):
-    // every distinct transition says what happened and what it means for the
-    // user's terminals. Same-state updates (reconnect attempts, still-stalled
-    // pings) never re-toast. We trim after field testing.
+    // Host state-transition toasts (docs/connections.md). Only the MAIN lane —
+    // i.e. the host itself — toasts; a distinct transition says what happened
+    // and what it means for the user's terminals. Secondary lanes (data,
+    // session, transfer) are plumbing and stay silent (see the `::` branch),
+    // so a whole-host bounce reads as one host toast, not a per-lane wall.
+    // Same-state updates (reconnect attempts, still-stalled pings) never
+    // re-toast.
     const toastTransition = (
       name: string,
       prev: string,
@@ -298,42 +301,28 @@ export default function App() {
       // tag; the host's dot stays owned by the main lane.
       const sep = status.connId.indexOf("::");
       if (sep !== -1) {
+        // Secondary lanes (data, per-agent session, transfer) are internal
+        // plumbing (docs/connections.md) — they NEVER toast. Their state shows
+        // where it truly belongs: an agent's CHAT dot, the transfer's progress
+        // bar, the file tree. A whole-host bounce takes the main lane too, and
+        // THAT toasts once (below) — so the host's own toast is already the
+        // coalesced summary, with no per-lane wall. We only ACT on recovery.
         const parent = status.connId.slice(0, sep);
-        const kind = status.connId.slice(sep + 2); // "data" | "session-<k>"
-        const host =
-          store.remotes.find((r) => r.conn.connId === parent)?.conn.name ??
-          store.wsls.find((w) => w.conn.connId === parent)?.conn.name;
-        if (!host) return;
-        const isData = kind === "data";
-        const isTransfer = kind.startsWith("transfer-");
-        // A session lane is named after its agent when we can find it.
-        const agent = isTransfer
-          ? undefined
-          : store.terminals.find((t) => t.laneConnId === status.connId);
-        const label = isData
-          ? `${host} (data)`
-          : isTransfer
-            ? `${host} (transfer)`
-            : `${host} · ${agent?.customName ?? agent?.title ?? "session"}`;
+        const kind = status.connId.slice(sep + 2); // data | session-<k> | transfer-<k>
         const prev = lanePrev.get(status.connId) ?? "connected";
         lanePrev.set(status.connId, status.state);
-        // A session lane's clean close (agent tab closed → no message) is the
-        // user's own action — don't toast it.
-        if (!(status.state === "disconnected" && !status.message && !isData)) {
-          toastTransition(label, prev, status.state, status.message);
-        }
         if (status.state === "connected" && prev === "reconnecting") {
-          store.pushNotice("info", `${label}: reconnected.`);
-          if (isData) {
-            // File ops rode this lane — refresh the tree and settle any saves
+          if (kind === "data") {
+            // File ops rode this lane — refresh the tree and settle saves
             // stranded by the drop (terminals were never involved).
             store.refreshConn(parent);
             const connKey = connKeyForConnId(parent);
             if (connKey) void reconcilePendingSaves(parent, connKey, Date.now());
-          } else {
+          } else if (kind.startsWith("session-")) {
             // The agent's shell died with its lane — restart just that one.
             store.restartConnTerminals(status.connId);
           }
+          // transfer-*: the transfer's own retry loop redials; nothing here.
         }
         return;
       }

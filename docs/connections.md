@@ -92,11 +92,15 @@ On the existing single transport:
 - **Cause-tagged transitions.** Every state change logs *why* (probe timeout
   vs transport error, idle time, degraded duration) so the flaky machine can
   tell us which killer was actually firing.
-- **Generous toasts (build-phase rule).** Every state *transition* toasts:
-  entered degraded, recovered from degraded, connection lost (with cause),
-  reconnected, disconnected. Deliberately chatty while we validate the new
-  behavior in the field; we trim after testing. Repeated same-state updates do
-  not re-toast.
+- **Host toasts, one per host.** Only the **main lane** — the host itself —
+  toasts its state transitions: entered degraded, recovered, connection lost
+  (with cause), reconnected, disconnected. Secondary lanes (data, session,
+  transfer) are internal plumbing and never toast; each shows its state where
+  it belongs (an agent's CHAT dot, the transfer's progress bar, the file
+  tree). So a whole-host bounce — which takes the main lane too — reads as one
+  host toast, not a per-lane wall, with no buffering needed. Repeated
+  same-state updates do not re-toast. The lane fan-out is on demand: hover a
+  host's dot for "main + N agent connections".
 
 Expected effect: the hourly machine drops to plain-ssh rates (~days), and when
 drops do happen they're real. Terminals survive stalls they used to die in.
@@ -138,8 +142,8 @@ supervised in place forever (its `Arc` stays valid across reconnects, which
 in-flight transfers rely on), shared-fallback with a 60 s redial cooldown when
 the dial fails, torn down with its host on disconnect. SFTP **and exec** ride
 it; PTYs and forwards stay on the main lane. Its status events carry the
-`::data` id — the UI toasts them with a "(data)" tag and refreshes the tree +
-reconciles stranded saves when it reconnects; the host's dot stays owned by
+`::data` id — the UI never toasts it (invisible plumbing), but on reconnect it
+refreshes the tree + reconciles stranded saves; the host's dot stays owned by
 the main lane. Server cost: one extra sshd session process (a few MB) per
 host.
 
@@ -258,27 +262,10 @@ real interface — remote⇄remote counts 2, local⇄remote and wsl⇄remote cou
 adaptive: the legs are one coupled pipeline, so the arithmetic *is* the
 measurement.
 
-## Phase 2.5 — soft-restore for general terminals (planned)
-
-When a terminal's connection *really* dies: the xterm component and its
-scrollback survive in-app; a divider line marks the break; on reconnect a
-fresh shell opens in the same component, best-effort `cd` to the last known
-cwd; CHAT terminals offer one-click `claude --continue`. Honest restart, zero
-context lost in the UI.
-
-## Phase 3 — explicit persistent sessions (parked → docs/future-work.md)
-
-A separate **"＋ persistent session"** button (Sessions panel / FocusView) for
-terminals that must survive disconnects for real. That terminal — and only
-that one — runs inside a Straylight-managed tmux (`-L straylight`,
-`-f /dev/null`, `prefix None`, status off, no-alt-screen, `capture-pane`
-replay on reattach), wears a badge, reattaches across drops and app restarts,
-and is killed on explicit tab close (leftovers surfaced on connect:
-reattach/kill). If tmux isn't on the host, the button says so — no
-auto-install, no wrapping of normal terminals, ever. Regular terminals stay a
-pure mirror of ssh: users who want their own tmux just run it, untouched.
-
-If this phase fights us, we drop it; phases 0–2.5 stand on their own.
+Two ideas that grew out of this redesign but sit **outside** it — soft-restore
+for session-lane terminals, and an explicit tmux-backed persistent-session
+button — are parked with their full designs in
+[future-work.md](future-work.md), not tracked here.
 
 ## Not doing
 
@@ -286,8 +273,8 @@ If this phase fights us, we drop it; phases 0–2.5 stand on their own.
   users; violates "mirror the tool, never invent semantics").
 - mosh (parallel protocol stack, UDP, no SFTP integration).
 - Uploading our own persistence agent binary to hosts.
-- PTY resurrection over plain sshd — protocol-impossible; only Phase 3 covers
-  it, opt-in.
+- PTY resurrection over plain sshd — protocol-impossible; only the parked
+  tmux-backed persistent-session design (future-work.md) covers it, opt-in.
 
 ## Test plan
 

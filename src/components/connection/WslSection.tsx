@@ -6,7 +6,7 @@
  *  docs/wsl-connection.md). */
 import { useCallback, useEffect, useState } from "react";
 
-import { connStateTip } from "../../lib/hostColors";
+import { connStateTip, laneSummary } from "../../lib/hostColors";
 import { basename, dirname } from "../../lib/format";
 import {
   sshDisconnect,
@@ -124,7 +124,7 @@ function WslHost({ ws, order }: { ws: RemoteWorkspace; order: number }) {
         <span className="host-tools__spacer" />
         {/* Issue light: near-invisible while fine, colored on trouble (same
             rule as the status bar). */}
-        <Tip label={connStateTip(ws.state)}>
+        <Tip label={`${connStateTip(ws.state)} · ${laneSummary(conn.connId)}`}>
           <span
             className={`dot ${ws.state === "connected" ? "dot--fine" : `dot--${ws.state}`}`}
           />

@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { clipboardShortcut } from "../../lib/fileOps";
 import { basename, dirname } from "../../lib/format";
-import { connStateTip, remoteColor } from "../../lib/hostColors";
+import { connStateTip, laneSummary, remoteColor } from "../../lib/hostColors";
 import { sshConfigPath } from "../../lib/ipc";
 import { openFileByPath } from "../../lib/openFile";
 import { uiConfig } from "../../lib/settings";
@@ -438,7 +438,7 @@ export function Sidebar() {
               <span className="host-tools__spacer" />
               {/* Issue light: near-invisible while fine, colored on trouble
                   (same rule as the status bar). */}
-              <Tip label={connStateTip(r.state)}>
+              <Tip label={`${connStateTip(r.state)} · ${laneSummary(conn.connId)}`}>
                 <span
                   className={`dot ${r.state === "connected" ? "dot--fine" : `dot--${r.state}`}`}
                 />

@@ -23,9 +23,25 @@ export function connStateTip(state: string): string {
       return "Connecting…";
     case "reconnecting":
       return "Reconnecting — retries until you disconnect";
+    case "degraded":
+      return "Stalled — terminals stay open, no restart";
     default:
       return "Disconnected — reconnect from the host bar";
   }
+}
+
+/** The "which pipe" summary for a host, shown on hover (docs/connections.md).
+ *  Lanes are internal plumbing that no longer toast — this is where their
+ *  fan-out surfaces on demand: the main connection, plus however many agents
+ *  got their own dedicated session connection (the rest share the main one). */
+export function laneSummary(connId: string): string {
+  const prefix = `${connId}::session-`;
+  const agents = useAppStore
+    .getState()
+    .terminals.filter((t) => t.laneConnId?.startsWith(prefix)).length;
+  return agents === 0
+    ? "one connection"
+    : `main + ${agents} agent connection${agents === 1 ? "" : "s"}`;
 }
 
 /** A remote's slot in the ramp (its position in the remotes list). */

@@ -1547,7 +1547,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }
     try {
       const laneId = await sessionLaneConnect(connId, label, sessionConnConfig.max);
-      get().pushNotice("info", `"${label}": dedicated connection opened.`);
+      // No toast: a dedicated lane is internal plumbing. Whether this agent got
+      // its own connection or shares the main one shows on demand in the
+      // status-bar host tooltip, not as an interruption.
       return get().openTerminalInChat(connId, label, { laneConnId: laneId });
     } catch (e) {
       const msg = String(e);
@@ -2468,16 +2470,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
   updateTransferProgress: (p) => {
     const cur = get().activeTransfer;
     if (!cur || cur.id !== p.id) return;
-    // Generous toasts on the pause/resume transitions (build-phase rule):
-    // the bar shows it too, but the toast says what will happen next.
-    if (p.waiting && !cur.waiting) {
-      get().pushNotice(
-        "warn",
-        "Transfer paused — connection lost; it will resume by itself.",
-      );
-    } else if (!p.waiting && cur.waiting) {
-      get().pushNotice("info", "Transfer resumed.");
-    }
+    // No pause/resume toast: the progress bar already owns this state
+    // prominently ("waiting for connection… resumes by itself"), so a toast on
+    // top is the redundancy this trim removes.
     set({
       activeTransfer: {
         ...cur,
