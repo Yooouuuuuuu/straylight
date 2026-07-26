@@ -244,8 +244,11 @@ phase removes.
 The confirm sheet picks **Full / Background** per transfer (remembered for
 the session; Preferences → Transfers holds the limit + the default mode,
 which ships as Background; downloads use the default). Background = read
-pipeline depth 4 (vs 32) plus pacing in the relay pump — the pump sleeps off
-any lead over the cap, racing the interrupt so cancel stays instant.
+pipeline depth 4 (vs 32) plus pacing in the relay pump — a token bucket
+shared by every concurrent stream, accruing at the cap and carrying over at
+most one chunk (a slow latency-bound stretch banks no credit to burst past
+the limit later); each pump repays the chunk it just wrote, racing the
+interrupt so cancel stays instant.
 
 The limit is the machine's **total real-network budget** (golden rule: set
 10, never exceed 10 on the wire). A relay carries the same payload byte on

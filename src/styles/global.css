@@ -569,49 +569,16 @@
   min-width: 0;
 }
 
-/* Narrow window: the panel buttons drop their text and keep the icons (the
-   bell badges sit outside the label, so they survive icon-only mode) — and
-   the block compacts to icon size with the label gone. */
-@media (max-width: 720px) {
-  .statusbar__panel-label {
-    display: none;
-  }
-  .statusbar__panel-btn {
-    width: auto;
-    padding: 0 var(--space-3);
-  }
+/* Collision-driven icon-only mode (StatusBar `level` ≥ 1, the FIRST thing to
+   give): the panel buttons drop their text and keep the icons (the bell badges
+   sit outside the label, so they survive), and each block compacts to icon
+   size. File-info + transfer shedding is done in JS by conditional render. */
+.statusbar--slim .statusbar__panel-label {
+  display: none;
 }
-
-/* Status/file info drops ONE BY ONE, left to right, as the window narrows.
-   The wrappers are display:contents (invisible to layout) until their
-   breakpoint hides the whole group. The bell and an active transfer survive
-   to the end. */
-.sb-group {
-  display: contents;
-}
-@media (max-width: 1100px) {
-  .sb-d1 { display: none; }
-}
-@media (max-width: 1040px) {
-  .sb-d2 { display: none; }
-}
-@media (max-width: 980px) {
-  .sb-d3 { display: none; }
-}
-@media (max-width: 920px) {
-  .sb-d4 { display: none; }
-}
-@media (max-width: 860px) {
-  .sb-d5 { display: none; }
-}
-@media (max-width: 800px) {
-  .sb-d6 { display: none; }
-}
-@media (max-width: 760px) {
-  .sb-d7 { display: none; }
-}
-@media (max-width: 720px) {
-  .sb-d8 { display: none; }
+.statusbar--slim .statusbar__panel-btn {
+  width: auto;
+  padding: 0 var(--space-3);
 }
 
 /* Incoming block at the top of the history panel (git). */
@@ -1021,6 +988,10 @@
 }
 
 .statusbar__path {
+  /* Rigid + capped: bounded at min(content, 40vw) and ellipsized beyond, so it
+     can't flex-shrink away and confuse overflow detection (the level ladder
+     drops it whole at its step instead). */
+  flex: 0 0 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 40vw;
@@ -1032,15 +1003,15 @@
   font-weight: 600;
 }
 
-/* In-flight transfer indicator in the status bar (global progress). */
+/* In-flight transfer indicator in the status bar (global progress). Rigid, so
+   its full width drives overflow detection — the bar sheds it piece by piece
+   via the `shrink` prop (never below rate · ETA · ✕), not by ellipsis. */
 .statusbar__transfer {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
   padding: 0 var(--space-3);
-  /* Roomy enough for "… · file 3/12 · 740 MB / 2.1 GB" without truncating,
-     but capped on narrow windows. */
-  max-width: min(60vw, 560px);
+  flex: 0 0 auto;
 }
 
 /* Parked on a dead connection, auto-resuming: amber. The status-bar readout
@@ -1051,8 +1022,6 @@
 }
 
 .statusbar__transfer-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-code);
   font-size: var(--font-size-xs);

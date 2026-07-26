@@ -67,6 +67,26 @@ files in RAM behind a 512 MB limit; streaming replaced it.)
   path — is skipped and counted (reported next to skipped links) instead of
   aborting the batch. Both the measure and copy walks tolerate it, so one bad
   entry no longer takes the rest of the selection down with it.
+- **Files copy concurrently — 32 fungible slots, at most one big.** A file's
+  cost is bytes plus per-file round trips (open, write, commit-rename,
+  close); under ~4 MiB the round trips dominate, which is why a folder of
+  thousands of tiny files used to crawl at KB/s on a link that moves
+  hundreds of MB/s. A walker streams the tree into bounded queues as it
+  discovers it — trusting the directory listing's metadata instead of
+  re-stat'ing each child, one round trip saved per file — while a dispatcher
+  copies alongside: 32 slots, any slot takes any file, but at most ONE holds
+  a big (> 4 MiB) file at a time, because one 32-deep pipelined stream fills
+  the wire and a second would split it, not add to it. A waiting big file
+  takes a free slot ahead of queued smalls (start the long pole early;
+  smalls fill in around it). The first file starts as soon as the first
+  listing returns — never a blocking pre-pass — and backpressure keeps a
+  million-file tree from ever sitting in memory. Making the width worth
+  anything required letting SFTP requests overlap at all: the session used
+  to sit behind a lock held across each whole operation, serializing every
+  request. Background's cap is a token bucket shared by every stream —
+  budget accrues at the cap and carries over at most one chunk, so all 32
+  slots draw on the one budget and a slow stretch never banks credit to
+  burst past the limit later.
 
 WSL is its own transport, so a WSL ⇄ remote copy is relayed through the app
 (read one SSH endpoint, write the other). The relay is **double-buffered**:

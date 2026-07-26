@@ -174,10 +174,12 @@ export function TerminalPanel() {
   const pickGroup = (connId: string) => {
     setSelGroup(connId);
     setTerminalView("terminals");
-    const first = terminals.find((t) => !t.inChat && t.connId === connId);
-    // No terminal here → clear the active slot, so another group's terminal
-    // can't keep showing (and Ctrl+` falls through to plain hide).
-    setActiveTerminal(first?.id ?? null);
+    // Land on the host's LAST (newest) shell — swapping back to a host returns
+    // you to its most recent terminal, not the oldest. No terminal here →
+    // clear the active slot, so another group's terminal can't keep showing
+    // (and Ctrl+` falls through to plain hide).
+    const hostTerms = terminals.filter((t) => !t.inChat && t.connId === connId);
+    setActiveTerminal(hostTerms[hostTerms.length - 1]?.id ?? null);
   };
 
   const newTerminal = (command?: string[] | null, label?: string) => {

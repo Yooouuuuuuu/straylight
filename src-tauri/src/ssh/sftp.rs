@@ -22,8 +22,7 @@ pub struct SftpTransport(pub Arc<Connection>);
 #[async_trait::async_trait]
 impl FileTransport for SftpTransport {
     async fn list_dir(&self, path: &str) -> Result<DirListing, String> {
-        let guard = self.0.sftp().await?;
-        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let sftp = self.0.sftp().await?;
 
         let base = if path.is_empty() || path == "." {
             sftp.canonicalize(".")
@@ -91,8 +90,7 @@ impl FileTransport for SftpTransport {
     }
 
     async fn read_file(&self, path: &str) -> Result<FileContent, String> {
-        let guard = self.0.sftp().await?;
-        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let sftp = self.0.sftp().await?;
 
         let meta = sftp
             .metadata(path.to_string())
@@ -156,8 +154,7 @@ impl FileTransport for SftpTransport {
     }
 
     async fn stat(&self, path: &str) -> Result<FileStat, String> {
-        let guard = self.0.sftp().await?;
-        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let sftp = self.0.sftp().await?;
 
         let meta = sftp
             .metadata(path.to_string())
@@ -179,8 +176,7 @@ impl FileTransport for SftpTransport {
         content: &str,
         expected_modified: Option<i64>,
     ) -> Result<WriteResult, String> {
-        let guard = self.0.sftp().await?;
-        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let sftp = self.0.sftp().await?;
 
         if let Some(expected) = expected_modified {
             if expected > 0 {
@@ -221,8 +217,7 @@ impl FileTransport for SftpTransport {
     }
 
     async fn rename(&self, path: &str, new_name: &str) -> Result<String, String> {
-        let guard = self.0.sftp().await?;
-        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let sftp = self.0.sftp().await?;
         let new_path = posix_sibling(path, new_name);
         sftp.rename(path.to_string(), new_path.clone())
             .await
@@ -237,8 +232,7 @@ impl FileTransport for SftpTransport {
         name: &str,
         is_dir: bool,
     ) -> Result<String, String> {
-        let guard = self.0.sftp().await?;
-        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let sftp = self.0.sftp().await?;
         let path = join_path(parent, name);
         if sftp.metadata(path.clone()).await.is_ok() {
             return Err(format!("{path} already exists"));
@@ -256,14 +250,12 @@ impl FileTransport for SftpTransport {
     }
 
     async fn remove(&self, path: &str) -> Result<(), String> {
-        let guard = self.0.sftp().await?;
-        let sftp = guard.as_ref().expect("sftp session initialized above");
-        remove_recursive(sftp, path.to_string()).await
+        let sftp = self.0.sftp().await?;
+        remove_recursive(&sftp, path.to_string()).await
     }
 
     async fn move_to(&self, path: &str, dest_dir: &str) -> Result<String, String> {
-        let guard = self.0.sftp().await?;
-        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let sftp = self.0.sftp().await?;
         let dest = join_path(dest_dir, &posix_basename(path));
         if dest == path {
             return Ok(dest); // already in this directory
@@ -278,8 +270,7 @@ impl FileTransport for SftpTransport {
     }
 
     async fn copy_to(&self, path: &str, dest_dir: &str) -> Result<String, String> {
-        let guard = self.0.sftp().await?;
-        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let sftp = self.0.sftp().await?;
         let name = posix_basename(path);
         let mut dest = join_path(dest_dir, &name);
         let mut n = 1;
@@ -287,13 +278,12 @@ impl FileTransport for SftpTransport {
             dest = join_path(dest_dir, &copy_variant(&name, n));
             n += 1;
         }
-        copy_recursive(sftp, path.to_string(), dest.clone()).await?;
+        copy_recursive(&sftp, path.to_string(), dest.clone()).await?;
         Ok(dest)
     }
 
     async fn open_read(&self, path: &str) -> Result<Pin<Box<dyn TransferSource>>, String> {
-        let guard = self.0.sftp().await?;
-        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let sftp = self.0.sftp().await?;
         let file = sftp
             .open(path.to_string())
             .await
@@ -356,8 +346,7 @@ impl FileTransport for SftpTransport {
     }
 
     async fn open_write(&self, path: &str) -> Result<Pin<Box<dyn AsyncWrite + Send>>, String> {
-        let guard = self.0.sftp().await?;
-        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let sftp = self.0.sftp().await?;
         let file = sftp
             .create(path.to_string())
             .await
@@ -367,8 +356,7 @@ impl FileTransport for SftpTransport {
     }
 
     async fn entry_meta(&self, path: &str) -> Result<FileEntry, String> {
-        let guard = self.0.sftp().await?;
-        let sftp = guard.as_ref().expect("sftp session initialized above");
+        let sftp = self.0.sftp().await?;
         let link = sftp
             .symlink_metadata(path.to_string())
             .await

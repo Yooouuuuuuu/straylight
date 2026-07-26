@@ -19,6 +19,7 @@ import {
   type SearchRoot,
   type SearchScope,
 } from "../lib/searchScope";
+import { useMenuClamp } from "../hooks/useMenuClamp";
 import { useAppStore, type TreeNode } from "../store/appStore";
 import { ScopePicker } from "./ScopePicker";
 import { Tip } from "./Tooltip";
@@ -48,6 +49,7 @@ function FinderModal({ onClose }: { onClose: () => void }) {
   const [menu, setMenu] = useState<{ entry: Entry; x: number; y: number } | null>(
     null,
   );
+  const menuClamp = useMenuClamp(menu?.x ?? 0, menu?.y ?? 0, !!menu);
   const listRef = useRef<HTMLDivElement>(null);
   const localConnId = useAppStore((s) => s.localConnId);
   const setClipboard = useAppStore((s) => s.setClipboard);
@@ -266,8 +268,9 @@ function FinderModal({ onClose }: { onClose: () => void }) {
             }}
           />
           <div
+            ref={menuClamp.ref}
             className="context-menu"
-            style={{ left: menu.x, top: menu.y }}
+            style={{ left: menuClamp.left, top: menuClamp.top }}
             onContextMenu={(ev) => ev.preventDefault()}
           >
             <button

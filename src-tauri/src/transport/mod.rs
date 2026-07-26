@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 
 use crate::ssh::connection::{Connection, ConnectionState};
 use crate::AppState;
@@ -504,8 +504,8 @@ struct Progress {
     /// Background bandwidth cap in bytes/sec (0 = no cap). Enforced by pacing
     /// in the relay pump — one place, governs both legs of any relay.
     limit_bps: u64,
-    /// When the transfer started (pacing baseline; spans retry rounds).
-    started: Instant,
+    /// Background pacing bucket, shared by every concurrent stream.
+    pace: std::sync::Mutex<PaceBucket>,
     // Atomic so a measure running *alongside* the copy can fill the total in
     // mid-flight — when the copy starts before its size is known, the bar shows
     // "N copied · calculating…" until this lands.
@@ -527,6 +527,14 @@ struct Progress {
     /// minting "name copy 2" against its own first attempt.
     resolved: std::sync::Mutex<HashMap<String, String>>,
     last_emit: std::sync::Mutex<Instant>,
+}
+
+/// Token-bucket state for Background pacing (see [`Progress::pace_delay`]).
+/// `tokens` is the spendable byte budget (may go negative — debt someone is
+/// currently sleeping off); `last` is when it was last accrued.
+struct PaceBucket {
+    tokens: f64,
+    last: Instant,
 }
 
 impl Progress {
@@ -591,17 +599,27 @@ impl Progress {
         self.emit(current, false);
     }
 
-    /// Background pacing: how long the pump should sleep so overall
-    /// throughput stays at `limit_bps`. None when uncapped or on schedule.
-    fn pace_delay(&self) -> Option<Duration> {
+    /// Background pacing, a token bucket: budget accrues at `limit_bps` and
+    /// carries over at most ONE chunk — so a stretch spent below the cap
+    /// (latency-bound small files, a wait between rounds) banks no credit,
+    /// and the wire rate can never burst past the cap on the strength of an
+    /// earlier slow phase. (The first cut paced against the since-start
+    /// AVERAGE, which is exactly that bug: set 2, crawl a while, watch 3.)
+    /// Every stream drains the one bucket, so nine concurrent copies still
+    /// share the single budget; whoever overdraws sleeps the debt off.
+    fn pace_delay(&self, bytes: u64) -> Option<Duration> {
         if self.limit_bps == 0 {
             return None;
         }
-        let done = self.done_bytes.load(Ordering::Relaxed) as f64;
-        let min_elapsed = done / self.limit_bps as f64;
-        let actual = self.started.elapsed().as_secs_f64();
-        if min_elapsed > actual + 0.02 {
-            Some(Duration::from_secs_f64(min_elapsed - actual))
+        let rate = self.limit_bps as f64;
+        let mut b = self.pace.lock().unwrap();
+        let now = Instant::now();
+        b.tokens = (b.tokens + now.duration_since(b.last).as_secs_f64() * rate)
+            .min(TRANSFER_CHUNK as f64);
+        b.last = now;
+        b.tokens -= bytes as f64;
+        if b.tokens < -1.0 {
+            Some(Duration::from_secs_f64(-b.tokens / rate))
         } else {
             None
         }
@@ -651,9 +669,9 @@ impl Progress {
 }
 
 /// Recursively total the bytes and file count under `path`, for the progress bar.
-/// Mirrors `transfer_entry`'s walk exactly — symlinked directories are never
-/// descended (a link cycle like `ln -s . self` would recurse forever), so the
-/// totals match what actually gets copied.
+/// Mirrors the copy walk (`walk_top`/`collect_dir`) exactly — symlinked
+/// directories are never descended (a link cycle like `ln -s . self` would
+/// recurse forever), so the totals match what actually gets copied.
 fn measure<'a>(
     src: &'a dyn FileTransport,
     path: &'a str,
@@ -806,13 +824,17 @@ async fn run_transfer(
     read_depth: usize,
     limit_bps: u64,
 ) -> Result<TransferOutcome, String> {
-    let prog = Progress {
+    // Arc'd so the small-file pool can hand owned clones to its worker tasks.
+    let prog = Arc::new(Progress {
         app: app.clone(),
         id: id.to_string(),
         intr: intr.clone(),
         read_depth,
         limit_bps,
-        started: Instant::now(),
+        pace: std::sync::Mutex::new(PaceBucket {
+            tokens: TRANSFER_CHUNK as f64,
+            last: Instant::now(),
+        }),
         total_bytes: AtomicU64::new(0),
         total_files: AtomicUsize::new(0),
         done_bytes: AtomicU64::new(0),
@@ -823,7 +845,7 @@ async fn run_transfer(
         done_paths: std::sync::Mutex::new(HashSet::new()),
         resolved: std::sync::Mutex::new(HashMap::new()),
         last_emit: std::sync::Mutex::new(Instant::now()),
-    };
+    });
 
     // If the UI already measured (waited on the confirm sheet's scan), seed the
     // total so the bar shows a denominator from the first frame. Otherwise the
@@ -900,9 +922,9 @@ async fn run_transfer(
         let result = run_round(
             &prog,
             &intr,
-            src.as_ref(),
+            &src,
             src_paths,
-            dest.as_ref(),
+            &dest,
             dest_dir,
             rename_on_conflict,
         )
@@ -981,21 +1003,134 @@ async fn run_transfer(
 /// One copy round over fixed endpoints: the copy walk, plus a parallel measure
 /// when the total is still unknown.
 async fn run_round(
-    prog: &Progress,
+    prog: &Arc<Progress>,
     intr: &Arc<TransferInterrupt>,
-    src: &dyn FileTransport,
+    src: &Arc<dyn FileTransport>,
     src_paths: &[String],
-    dest: &dyn FileTransport,
+    dest: &Arc<dyn FileTransport>,
     dest_dir: &str,
     rename_on_conflict: bool,
 ) -> Result<(), String> {
     let copy = async {
-        for p in src_paths {
-            if prog.interrupted() {
-                break;
+        // Producer-consumer, never a blocking pre-pass: the WALKER streams
+        // the tree — listing dirs, creating destination dirs, sorting files
+        // into two bounded queues — while the dispatcher copies alongside.
+        // The first file starts as soon as the first listing returns, and a
+        // huge tree never sits in memory (backpressure parks the walk when
+        // the queues fill).
+        //
+        // The dispatcher owns POOL_SLOTS fungible slots: any slot takes any
+        // file, except at most ONE slot holds a BIG file at a time — one
+        // pipelined stream fills the wire; a second would split it, not add
+        // to it. Small files are latency-bound (per-file round-trip tolls),
+        // so width is what makes a thousand tiny files move; the lone big
+        // stream spends bandwidth, and the two barely compete.
+        //
+        // Any copy error sets `abort`: nothing NEW starts anywhere (walker
+        // stops walking, dispatcher stops admitting), in-flight files drain,
+        // and the round ends with that error for the usual retry-vs-fatal
+        // classification.
+        let abort_flag = AtomicBool::new(false);
+        let abort = &abort_flag; // Copy — the `async move` walker captures the ref
+        let (small_tx, mut small_rx) = mpsc::channel::<FileJob>(256);
+        let (big_tx, mut big_rx) = mpsc::channel::<FileJob>(64);
+
+        let walker = async move {
+            // Owns the senders: when the walk ends (done, interrupted, or
+            // aborted) they drop and the consumers see end-of-queue.
+            for p in src_paths {
+                if prog.interrupted() || abort.load(Ordering::Relaxed) {
+                    break;
+                }
+                walk_top(
+                    src.as_ref(),
+                    p,
+                    dest.as_ref(),
+                    dest_dir,
+                    rename_on_conflict,
+                    prog,
+                    abort,
+                    &small_tx,
+                    &big_tx,
+                )
+                .await?;
             }
-            transfer_entry(src, p, dest, dest_dir, rename_on_conflict, true, prog).await?;
-        }
+            Ok::<(), String>(())
+        };
+
+        let dispatcher = async {
+            let mut join: tokio::task::JoinSet<(bool, Result<(), String>)> =
+                tokio::task::JoinSet::new();
+            let mut first_err: Option<String> = None;
+            let (mut small_open, mut big_open) = (true, true);
+            let mut big_running = false;
+            loop {
+                let admit = first_err.is_none()
+                    && !abort.load(Ordering::Relaxed)
+                    && !prog.interrupted()
+                    && join.len() < POOL_SLOTS;
+                tokio::select! {
+                    // `biased` polls in declaration order: a waiting big file
+                    // takes a free slot ahead of queued smalls — start the
+                    // long pole early, smalls fill in around it.
+                    biased;
+                    job = big_rx.recv(), if big_open && admit && !big_running => {
+                        match job {
+                            Some(job) => {
+                                big_running = true;
+                                spawn_stream(&mut join, src, dest, prog, job, true);
+                            }
+                            None => big_open = false,
+                        }
+                    }
+                    job = small_rx.recv(), if small_open && admit => {
+                        match job {
+                            Some(job) => spawn_stream(&mut join, src, dest, prog, job, false),
+                            None => small_open = false,
+                        }
+                    }
+                    done = join.join_next(), if !join.is_empty() => {
+                        match done {
+                            Some(Ok((was_big, r))) => {
+                                if was_big {
+                                    big_running = false;
+                                }
+                                if let Err(e) = r {
+                                    if first_err.is_none() {
+                                        abort.store(true, Ordering::Relaxed);
+                                        first_err = Some(e);
+                                    }
+                                }
+                            }
+                            Some(Err(e)) => {
+                                // Panicked task: can't tell if it held the
+                                // big slot, but abort stops all admission, so
+                                // the stale flag never matters.
+                                if first_err.is_none() {
+                                    abort.store(true, Ordering::Relaxed);
+                                    first_err = Some(format!("transfer worker panicked: {e}"));
+                                }
+                            }
+                            None => {}
+                        }
+                    }
+                    // Nothing to admit and nothing in flight — done (or
+                    // stopped). Dropping the receivers unblocks a walker
+                    // parked on a full queue; its send fails and it stops.
+                    else => break,
+                }
+            }
+            match first_err {
+                Some(e) => Err(e),
+                None => Ok(()),
+            }
+        };
+
+        let (walked, copied) = tokio::join!(walker, dispatcher);
+        // Copy errors outrank walker errors — after an abort the walker's
+        // exit is a side effect, not the story.
+        copied?;
+        walked?;
         Ok::<(), String>(())
     };
 
@@ -1005,7 +1140,7 @@ async fn run_round(
                 let mut total_bytes = 0u64;
                 let mut total_files = 0usize;
                 for p in src_paths {
-                    let (b, f) = measure(src, p).await?;
+                    let (b, f) = measure(src.as_ref(), p).await?;
                     total_bytes += b;
                     total_files += f;
                 }
@@ -1184,97 +1319,245 @@ pub async fn fs_transfer_check(
     Ok(dest.stat(&dest_path).await.is_ok())
 }
 
-fn transfer_entry<'a>(
-    src: &'a dyn FileTransport,
-    src_path: &'a str,
-    dest: &'a dyn FileTransport,
-    dest_dir: &'a str,
+/// One file the walk queued for the copy pools.
+struct FileJob {
+    src: String,
+    dest: String,
+    name: String,
+    size: u64,
+}
+
+/// Files at/below this size are "small": their cost is per-file round-trip
+/// tolls, so they copy through a concurrent pool. Bigger files stream one at
+/// a time — the pipelined reader is their concurrency. Matches the reader's
+/// own pipeline threshold in `SftpTransport::open_read_fast`.
+const SMALL_FILE_MAX: u64 = 4 * 1024 * 1024;
+/// Total concurrent file streams — fungible slots; at most ONE holds a big
+/// file at a time (one pipelined stream fills the wire; a second would split
+/// it, not add to it). Width is what hides small files' per-file round-trip
+/// tolls: files/s ≈ slots ÷ (~4 RTTs × RTT). 32 covers high-RTT routes too;
+/// on fast links sftp-server's single-threaded request loop becomes the
+/// ceiling first, and the extra width just queues there harmlessly. The cost
+/// of width is blast radius, not speed: more open handles and `.straypart`
+/// partials in flight when a lane dies mid-round.
+const POOL_SLOTS: usize = 32;
+
+/// Queue a file job onto its size-class channel, racing the interrupt.
+/// Returns false when the walk should stop: the user interrupted, or a
+/// consumer hung up (a copy error is aborting the round). Sets `abort` so
+/// the recursion above unwinds without issuing further round trips.
+async fn push_job(
+    small_tx: &mpsc::Sender<FileJob>,
+    big_tx: &mpsc::Sender<FileJob>,
+    prog: &Progress,
+    abort: &AtomicBool,
+    job: FileJob,
+) -> bool {
+    let tx = if job.size <= SMALL_FILE_MAX {
+        small_tx
+    } else {
+        big_tx
+    };
+    match race(&prog.intr, tx.send(job)).await {
+        Raced::Done(Ok(())) => true,
+        Raced::Interrupted | Raced::Done(Err(_)) => {
+            abort.store(true, Ordering::Relaxed);
+            false
+        }
+    }
+}
+
+/// Launch one file copy into a dispatcher slot. The task's flag says whether
+/// it held the big slot, so completion can free it.
+fn spawn_stream(
+    join: &mut tokio::task::JoinSet<(bool, Result<(), String>)>,
+    src: &Arc<dyn FileTransport>,
+    dest: &Arc<dyn FileTransport>,
+    prog: &Arc<Progress>,
+    job: FileJob,
+    is_big: bool,
+) {
+    let src = src.clone();
+    let dest = dest.clone();
+    let prog = prog.clone();
+    join.spawn(async move {
+        let r = stream_file(
+            src.as_ref(),
+            &job.src,
+            dest.as_ref(),
+            &job.dest,
+            &job.name,
+            job.size,
+            &prog,
+        )
+        .await;
+        (is_big, r)
+    });
+}
+
+/// Walk one TOP-LEVEL entry: tolerant stat, collision resolution (remembered
+/// across retry rounds), destination dirs created in walk order — files are
+/// STREAMED into the size-class queues, not copied here; the consumers in
+/// `run_round` copy alongside the walk. Never a blocking pre-pass: the first
+/// file starts as soon as the first listing returns.
+async fn walk_top(
+    src: &dyn FileTransport,
+    src_path: &str,
+    dest: &dyn FileTransport,
+    dest_dir: &str,
     rename_on_conflict: bool,
-    top: bool,
-    prog: &'a Progress,
-) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
-    Box::pin(async move {
-        if prog.interrupted() {
+    prog: &Progress,
+    abort: &AtomicBool,
+    small_tx: &mpsc::Sender<FileJob>,
+    big_tx: &mpsc::Sender<FileJob>,
+) -> Result<(), String> {
+    if prog.interrupted() || abort.load(Ordering::Relaxed) {
+        return Ok(());
+    }
+    // Tolerant: a source entry we can't stat (dangling link, broken gitlink)
+    // is skipped and reported, not fatal — matches `measure`, so one bad
+    // entry never aborts the batch. The stat races the interrupt so a hang on
+    // a dead lane can't park the walk.
+    let meta = match race(&prog.intr, src.stat(src_path)).await {
+        Raced::Interrupted => return Ok(()),
+        Raced::Done(Ok(m)) => m,
+        Raced::Done(Err(e)) => {
+            // The toast only reports a count (a folder of broken links could
+            // be a wall of names); the paths land in the log for when you
+            // need to know exactly what was skipped.
+            log::warn!("transfer: skipping unreadable {src_path}: {e}");
+            prog.skip_error();
             return Ok(());
         }
-        // Tolerant: a source entry we can't stat (dangling link, broken
-        // gitlink) is skipped and reported, not fatal — matches `measure`, so
-        // one bad entry never aborts the batch. The stat races the interrupt
-        // so a hang on a dead lane can't park the walk.
-        let meta = match race(&prog.intr, src.stat(src_path)).await {
+    };
+    let base = any_basename(src_path);
+    let mut name = base.to_string();
+    let mut dest_path = dest.join(dest_dir, &name);
+    // Resolve a top-level collision; nested entries just overwrite/merge. The
+    // resolution is remembered across retry rounds, so a resumed transfer
+    // continues into the SAME "name copy" instead of minting a fresh one
+    // against its own first attempt.
+    if let Some(cached) = prog.resolved_name(src_path) {
+        name = cached;
+        dest_path = dest.join(dest_dir, &name);
+    } else {
+        let mut n = 1;
+        loop {
+            match race(&prog.intr, dest.stat(&dest_path)).await {
+                Raced::Interrupted => return Ok(()),
+                Raced::Done(Ok(_)) => {
+                    if !rename_on_conflict {
+                        break;
+                    }
+                    name = copy_variant(base, n);
+                    dest_path = dest.join(dest_dir, &name);
+                    n += 1;
+                }
+                Raced::Done(Err(_)) => break, // free slot
+            }
+        }
+        prog.remember_resolved(src_path, &name);
+    }
+    if meta.is_dir {
+        match race(&prog.intr, dest.create_entry(dest_dir, &name, true)).await {
             Raced::Interrupted => return Ok(()),
-            Raced::Done(Ok(m)) => m,
+            Raced::Done(_) => {} // exists-already errors are fine (merge)
+        }
+        collect_dir(src, src_path, dest, &dest_path, prog, abort, small_tx, big_tx).await
+    } else {
+        push_job(
+            small_tx,
+            big_tx,
+            prog,
+            abort,
+            FileJob {
+                src: src_path.to_string(),
+                dest: dest_path,
+                name,
+                size: meta.size,
+            },
+        )
+        .await;
+        Ok(())
+    }
+}
+
+/// Recursively stream a directory's files into the queues, creating
+/// destination dirs on the way (a file is only queued after its parent dir
+/// exists). Children trust the LISTING's metadata — the old walk re-stat'd
+/// every child, one extra round trip per file for data the listing already
+/// carried.
+fn collect_dir<'a>(
+    src: &'a dyn FileTransport,
+    src_dir: &'a str,
+    dest: &'a dyn FileTransport,
+    dest_dir: &'a str,
+    prog: &'a Progress,
+    abort: &'a AtomicBool,
+    small_tx: &'a mpsc::Sender<FileJob>,
+    big_tx: &'a mpsc::Sender<FileJob>,
+) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+    Box::pin(async move {
+        if prog.interrupted() || abort.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let entries = match race(&prog.intr, src.list_dir(src_dir)).await {
+            Raced::Interrupted => return Ok(()),
+            Raced::Done(Ok(listing)) => listing.entries,
             Raced::Done(Err(e)) => {
-                // The toast only reports a count (a folder of broken links could
-                // be a wall of names); the paths land in the log for when you
-                // need to know exactly what was skipped.
-                log::warn!("transfer: skipping unreadable {src_path}: {e}");
+                log::warn!("transfer: skipping unlistable {src_dir}: {e}");
                 prog.skip_error();
                 return Ok(());
             }
         };
-        let base = any_basename(src_path);
-        let mut name = base.to_string();
-        let mut dest_path = dest.join(dest_dir, &name);
-        // Resolve a top-level collision; nested entries just overwrite/merge.
-        // The resolution is remembered across retry rounds, so a resumed
-        // transfer continues into the SAME "name copy" instead of minting a
-        // fresh one against its own first attempt.
-        if top {
-            if let Some(cached) = prog.resolved_name(src_path) {
-                name = cached;
-                dest_path = dest.join(dest_dir, &name);
-            } else {
-                let mut n = 1;
-                loop {
-                    match race(&prog.intr, dest.stat(&dest_path)).await {
-                        Raced::Interrupted => return Ok(()),
-                        Raced::Done(Ok(_)) => {
-                            if !rename_on_conflict {
-                                break;
-                            }
-                            name = copy_variant(base, n);
-                            dest_path = dest.join(dest_dir, &name);
-                            n += 1;
-                        }
-                        Raced::Done(Err(_)) => break, // free slot
-                    }
+        for entry in entries {
+            if prog.interrupted() || abort.load(Ordering::Relaxed) {
+                break;
+            }
+            // Never descend a symlinked directory — a link cycle
+            // (`ln -s . self`) would recurse forever. Symlinks to files still
+            // copy as regular files, like same-connection copies.
+            if entry.is_symlink && entry.is_dir {
+                log::info!("transfer: skipping symlinked dir {}", entry.path);
+                prog.skip_link();
+                continue;
+            }
+            if entry.is_dir {
+                let child_dest = dest.join(dest_dir, &entry.name);
+                match race(&prog.intr, dest.create_entry(dest_dir, &entry.name, true)).await {
+                    Raced::Interrupted => return Ok(()),
+                    Raced::Done(_) => {}
                 }
-                prog.remember_resolved(src_path, &name);
-            }
-        }
-        if meta.is_dir {
-            // Create (or reuse) the destination folder, then recurse. If the
-            // source dir can't be listed, skip it (reported) rather than abort.
-            match race(&prog.intr, dest.create_entry(dest_dir, &name, true)).await {
-                Raced::Interrupted => return Ok(()),
-                Raced::Done(_) => {} // exists-already errors are fine (merge)
-            }
-            let entries = match race(&prog.intr, src.list_dir(src_path)).await {
-                Raced::Interrupted => return Ok(()),
-                Raced::Done(Ok(listing)) => listing.entries,
-                Raced::Done(Err(e)) => {
-                    log::warn!("transfer: skipping unlistable {src_path}: {e}");
-                    prog.skip_error();
+                collect_dir(src, &entry.path, dest, &child_dest, prog, abort, small_tx, big_tx)
+                    .await?;
+            } else {
+                // Symlinked files copy as their TARGET, but the listing only
+                // carries the link's own metadata — stat through the link for
+                // the real size, and skip-and-report dangling ones instead of
+                // failing the round at open time.
+                let size = if entry.is_symlink {
+                    match race(&prog.intr, src.stat(&entry.path)).await {
+                        Raced::Interrupted => return Ok(()),
+                        Raced::Done(Ok(m)) => m.size,
+                        Raced::Done(Err(e)) => {
+                            log::warn!("transfer: skipping unreadable {}: {e}", entry.path);
+                            prog.skip_error();
+                            continue;
+                        }
+                    }
+                } else {
+                    entry.size
+                };
+                let job = FileJob {
+                    src: entry.path.clone(),
+                    dest: dest.join(dest_dir, &entry.name),
+                    name: entry.name.clone(),
+                    size,
+                };
+                if !push_job(small_tx, big_tx, prog, abort, job).await {
                     return Ok(());
                 }
-            };
-            for entry in entries {
-                if prog.interrupted() {
-                    break;
-                }
-                // Never descend a symlinked directory — a link cycle
-                // (`ln -s . self`) would recurse forever. Symlinks to files
-                // still copy as regular files, like same-connection copies.
-                if entry.is_symlink && entry.is_dir {
-                    log::info!("transfer: skipping symlinked dir {}", entry.path);
-                    prog.skip_link();
-                    continue;
-                }
-                transfer_entry(src, &entry.path, dest, &dest_path, false, false, prog).await?;
             }
-        } else {
-            stream_file(src, src_path, dest, &dest_path, &name, meta.size, prog).await?;
         }
         Ok(())
     })
@@ -1344,6 +1627,7 @@ async fn stream_file(
             completed = false;
             break;
         }
+        let just_wrote = pending as u64; // the chunk going out this iteration
         let write_front = writer.write_all(&front[..pending]);
         let read_back = reader.read(&mut back);
         match race(intr, async { tokio::join!(write_front, read_back) }).await {
@@ -1369,9 +1653,9 @@ async fn stream_file(
                 }
             }
         }
-        // Background mode: sleep off any lead over the bandwidth cap (racing
-        // the interrupt so cancel stays instant).
-        if let Some(delay) = prog.pace_delay() {
+        // Background mode: repay the chunk just written at the bucket's rate
+        // (racing the interrupt so cancel stays instant).
+        if let Some(delay) = prog.pace_delay(just_wrote) {
             if let Raced::Interrupted = race(intr, tokio::time::sleep(delay)).await {
                 completed = false;
                 break;

@@ -140,7 +140,7 @@ impl AppState {
     pub async fn transfer_endpoint_dedicated(
         &self,
         conn_id: &str,
-    ) -> Result<(Box<dyn FileTransport>, Option<Arc<Connection>>, Option<String>), String> {
+    ) -> Result<(Arc<dyn FileTransport>, Option<Arc<Connection>>, Option<String>), String> {
         let conn = {
             let sessions = self.sessions.lock().await;
             match sessions.get(conn_id) {
@@ -150,7 +150,7 @@ impl AppState {
             }
         };
         let Some(conn) = conn else {
-            return Ok((Box::new(LocalTransport), None, None));
+            return Ok((Arc::new(LocalTransport), None, None));
         };
         if let Some(app) = self.app.get() {
             if let Ok(lane) = conn.open_transfer_lane(app).await {
@@ -162,7 +162,7 @@ impl AppState {
                     .await
                     .insert(id.clone(), Session::Ssh(lane.clone()));
                 return Ok((
-                    Box::new(ssh::sftp::SftpTransport(lane.clone())),
+                    Arc::new(ssh::sftp::SftpTransport(lane.clone())),
                     Some(lane),
                     Some(id),
                 ));
@@ -173,7 +173,7 @@ impl AppState {
             Some(app) => conn.data_lane(app).await,
             None => conn,
         };
-        Ok((Box::new(ssh::sftp::SftpTransport(lane.clone())), Some(lane), None))
+        Ok((Arc::new(ssh::sftp::SftpTransport(lane.clone())), Some(lane), None))
     }
 
     /// Resolve a session id to its SSH connection, erroring for non-SSH sessions.

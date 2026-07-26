@@ -1,8 +1,9 @@
 /** Right-click menu for a CHAT agent (in the focus view AND the normal CHAT
  *  panel): move it into a purpose group, into a new one, or back out to its
  *  host. Purpose membership is the "move" model — one home at a time. */
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
+import { useMenuClamp } from "../../hooks/useMenuClamp";
 import { useAppStore } from "../../store/appStore";
 
 export function ChatAgentMenu({
@@ -21,10 +22,11 @@ export function ChatAgentMenu({
   const removeFromPurpose = useAppStore((s) => s.removeFromPurpose);
   const addPurpose = useAppStore((s) => s.addPurpose);
   const setChatActive = useAppStore((s) => s.setChatActive);
-  const ref = useRef<HTMLDivElement>(null);
+  const { ref, left, top } = useMenuClamp(x, y);
 
   useEffect(() => {
     ref.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const current = purposes.find((p) => p.termIds.includes(termId));
@@ -42,7 +44,7 @@ export function ChatAgentMenu({
       />
       <div
         className="ctx-menu"
-        style={{ left: x, top: y }}
+        style={{ left, top }}
         ref={ref}
         tabIndex={-1}
         onKeyDown={(e) => e.key === "Escape" && onClose()}

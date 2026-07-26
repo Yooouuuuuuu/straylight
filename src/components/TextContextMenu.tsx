@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 
 import { editorAtNode } from "../lib/editorModels";
 import { monaco } from "../lib/monaco";
+import { useMenuClamp } from "../hooks/useMenuClamp";
 import { useAppStore } from "../store/appStore";
 
 type Field = HTMLInputElement | HTMLTextAreaElement;
@@ -19,12 +20,10 @@ type MenuState =
   | { kind: "field"; x: number; y: number; field: Field }
   | { kind: "editor"; x: number; y: number; editor: monaco.editor.IStandaloneCodeEditor };
 
-const MENU_W = 190;
-const ITEM_H = 28;
-
 export function TextContextMenu() {
   const [menu, setMenu] = useState<MenuState | null>(null);
   useAppStore((s) => s.settingsRev); // theme/settings re-render like other menus
+  const { ref, left, top } = useMenuClamp(menu?.x ?? 0, menu?.y ?? 0, !!menu);
 
   useEffect(() => {
     const onContextMenu = (e: MouseEvent) => {
@@ -173,10 +172,6 @@ export function TextContextMenu() {
         { act: "selectAll", label: "Select All", hint: "Ctrl+A", enabled: true, sepBefore: true },
       ];
 
-  const height = items.length * ITEM_H + items.filter((i) => i.sepBefore).length * 9 + 10;
-  const x = Math.min(menu.x, window.innerWidth - MENU_W - 8);
-  const y = Math.min(menu.y, window.innerHeight - height - 8);
-
   return (
     <>
       <div
@@ -188,7 +183,7 @@ export function TextContextMenu() {
           setMenu(null);
         }}
       />
-      <div className="ctx-menu" style={{ left: x, top: y }} role="menu">
+      <div className="ctx-menu" ref={ref} style={{ left, top }} role="menu">
         {items.map((it) => (
           <span key={it.act} style={{ display: "contents" }}>
             {it.sepBefore && <div className="ctx-menu__sep" />}

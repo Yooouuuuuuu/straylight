@@ -70,6 +70,7 @@ import {
 } from "../../lib/treeExpansion";
 import { IconBranch, IconChevron, IconClose, IconTerminal } from "../icons";
 import { openTerminalAt } from "../../lib/terminalTarget";
+import { useMenuClamp } from "../../hooks/useMenuClamp";
 import { Tip } from "../Tooltip";
 
 interface DirState {
@@ -138,6 +139,7 @@ export function RootTree({
     destName: string;
     nodes: DragItem[];
   } | null>(null);
+  const dropClamp = useMenuClamp(dropMenu?.x ?? 0, dropMenu?.y ?? 0, !!dropMenu);
   const [dropOverRoot, setDropOverRoot] = useState(false);
 
   // Record the drag set on drag start: the whole selection if this row is part
@@ -615,7 +617,11 @@ export function RootTree({
               setDropMenu(null);
             }}
           />
-          <div className="context-menu" style={{ left: dropMenu.x, top: dropMenu.y }}>
+          <div
+            ref={dropClamp.ref}
+            className="context-menu"
+            style={{ left: dropClamp.left, top: dropClamp.top }}
+          >
             <div className="context-menu__head">
               Into “{dropMenu.destName}”
             </div>

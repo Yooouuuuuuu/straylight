@@ -1,7 +1,7 @@
 /** Right-click menu for editor tabs: close variants (with the shared one-dialog
  *  unsaved check), pin/unpin, and copy path. Pinned tabs are spared by EVERY
  *  bulk close (Others / Right / Saved / All) — unpin to close one. */
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
 import { copyPath } from "../../lib/fileOps";
 import {
@@ -10,12 +10,13 @@ import {
   closeSavedTabs,
   closeTabsToRight,
 } from "../../lib/tabActions";
+import { useMenuClamp } from "../../hooks/useMenuClamp";
 import { MAX_EDITOR_GROUPS, useAppStore } from "../../store/appStore";
 
 export function TabContextMenu() {
   const menu = useAppStore((s) => s.tabMenu);
   const closeTabMenu = useAppStore((s) => s.closeTabMenu);
-  const ref = useRef<HTMLDivElement>(null);
+  const { ref, left, top } = useMenuClamp(menu?.x ?? 0, menu?.y ?? 0, !!menu);
 
   useEffect(() => {
     if (!menu) return;
@@ -56,8 +57,6 @@ export function TabContextMenu() {
   const rightGroup =
     gIdx >= 0 && gIdx < editorGroups.length - 1 ? editorGroups[gIdx + 1] : null;
 
-  const left = Math.min(menu.x, window.innerWidth - 196);
-  const top = Math.min(menu.y, window.innerHeight - 260);
   const act = (fn: () => void) => () => {
     closeTabMenu();
     fn();

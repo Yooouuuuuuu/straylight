@@ -25,6 +25,67 @@ history of design changes — lives in the docs: the decision ledger in
   model is under field test; this lands with the trim.
 - **Auto-update** — ships with 0.10 (updater keypair + GitHub Releases).
 
+## [0.9.17] - 2026-07-26
+
+The small-file round: a folder of thousands of tiny files no longer crawls at
+KB/s — a streaming walker feeds a dispatcher of 32 fungible slots (at most one
+big file in flight at a time), the Background cap became a leak-proof token
+bucket, and the progress bar learned to show time remaining. Around it, a
+status bar that sheds detail by measured priority and right-click menus that
+always stay on screen.
+
+### Added
+
+- **Time remaining on the progress bar.** Once the total size is known, the
+  readout shows a coarse estimate (`~3m 20s`) computed from the same
+  smoothed rate as the MB/s figure, so the two never disagree. It hides
+  while the total is still calculating, while the transfer is waiting on a
+  reconnect, and until the rate has a second of samples behind it.
+
+### Changed
+
+- **The status bar sheds by priority as it narrows, measured not guessed.** It
+  used to drop file-info at fixed window widths, which couldn't tell when the
+  panel buttons actually met the content. Now the bar measures its own overflow
+  and sheds in order: first the four panel buttons go icon-only the moment they
+  touch anything, then file info drops one item at a time (branch, path,
+  Ln/Col, EOL, encoding, language), then — last — the transfer readout trims
+  from the left (label, file count, bytes, percent). The transfer floor
+  (2.0 MB/s · ~3m 20s · ✕) and the notification bell always survive, so the
+  tightest bar is four button icons + the transfer floor + the bell. Room
+  coming back restores items in reverse with exact hysteresis (no flicker).
+- **Right-click menus always stay on screen.** Menus opened near the right or
+  bottom edge could spill past the window and hide their lower items. Every
+  context menu — file tree, editor tab, CHAT agent, explorer drop, Finder
+  result, transfer pane, and the text-field menu — now measures its real
+  rendered size and nudges back inside the window (8px margin). Three menus
+  had no clamping at all and two clamped against guessed dimensions that broke
+  when the menu grew a row; all seven now share one measured positioner.
+- **Swapping terminal hosts lands on that host's newest shell.** Clicking a
+  host in the terminal bar used to jump to its oldest terminal; it now selects
+  the most recent one, so bouncing away and back returns you where you were
+  working.
+- **Folders full of small files no longer crawl.** A tiny file's cost is its
+  round trips (open, write, rename, close), not its bytes — copied strictly
+  one after another they capped a big tree at KB/s. A walker now streams the
+  tree into bounded queues while a dispatcher copies alongside through
+  **32 fungible slots**: any slot takes any file, but at most ONE holds a
+  big (> 4 MiB) file at a time — one 32-deep pipelined stream fills the
+  wire; a second would split it, not add to it — and a waiting big file
+  starts ahead of queued smalls. The first file starts on the first listing,
+  never a blocking pre-pass. The walk trusts directory-listing metadata
+  instead of re-stat'ing every child (one round trip saved per file), and
+  SFTP requests can finally overlap at all — the session used to sit behind
+  a lock held across each whole operation. Broken-symlink tolerance is
+  unchanged: dangling links still skip-and-report.
+- **The Background cap can no longer be overshot.** Pacing used to hold the
+  since-start average under the limit, so a stretch spent below the cap
+  (small files are latency-bound) banked credit the next big file could ride
+  visibly past the limit — set 2 MB/s, see 3. It is now a token bucket
+  shared by every concurrent stream: budget accrues at the cap and carries
+  over at most one chunk, so the wire rate holds the limit no matter what
+  came before.
+
 ## [0.9.16] - 2026-07-26
 
 The speed round: every transfer gets its own tuned connection and a 32-deep

@@ -1,9 +1,10 @@
 /** Right-click menu for a file-tree node. Closes on outside click / Escape. */
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 
 import { copyPath, downloadToLocal, pasteInto } from "../../lib/fileOps";
 import { dirname } from "../../lib/format";
 import { revealPath } from "../../lib/ipc";
+import { useMenuClamp } from "../../hooks/useMenuClamp";
 import { useAppStore } from "../../store/appStore";
 import { Tip } from "../Tooltip";
 
@@ -17,22 +18,9 @@ export function ContextMenu() {
   const selection = useAppStore((s) => s.selection);
   const setClipboard = useAppStore((s) => s.setClipboard);
   const clipboard = useAppStore((s) => s.clipboard);
-  const ref = useRef<HTMLDivElement>(null);
-
-  // Clamp against the REAL menu size (it varies — remote items add entries),
-  // so a click near the bottom edge never pushes items off screen.
-  const [nudge, setNudge] = useState({ x: 0, y: 0 });
-  useLayoutEffect(() => {
-    setNudge({ x: 0, y: 0 });
-    if (!menu) return;
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    setNudge({
-      x: Math.min(0, window.innerWidth - 8 - (menu.x + r.width)),
-      y: Math.min(0, window.innerHeight - 8 - (menu.y + r.height)),
-    });
-  }, [menu]);
+  // Anchor at the cursor, measured back on-screen (the menu's height varies —
+  // remote items add a Download entry).
+  const { ref, left, top } = useMenuClamp(menu?.x ?? 0, menu?.y ?? 0, !!menu);
 
   useEffect(() => {
     if (!menu) return;
@@ -67,8 +55,6 @@ export function ContextMenu() {
   // A pinned root: no cut/copy/rename/delete (moving or deleting the folder
   // a pin points at strands the pin) — Unpin sits in the danger slot instead.
   const isRoot = !!menu.root;
-  const left = menu.x + nudge.x;
-  const top = menu.y + nudge.y;
 
   return (
     <div

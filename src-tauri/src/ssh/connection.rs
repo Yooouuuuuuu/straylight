@@ -11,7 +11,7 @@ use russh::Channel;
 use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::{watch, Mutex, OwnedMutexGuard, RwLock};
+use tokio::sync::{watch, Mutex, RwLock};
 use uuid::Uuid;
 
 use crate::AppState;
@@ -96,7 +96,7 @@ pub struct Connection {
     /// swappable holder: a reconnect installs a FRESH holder (`reset_sftp`) so a
     /// hung op stranded on the dead handle can't block new file ops. The inner
     /// mutex still serializes requests over the one channel.
-    pub sftp: RwLock<Arc<Mutex<Option<SftpSession>>>>,
+    pub sftp: RwLock<Arc<Mutex<Option<Arc<SftpSession>>>>>,
     /// Current coarse state.
     pub state: Mutex<ConnectionState>,
     /// Retained so the supervisor can re-authenticate silently after a drop:
@@ -150,31 +150,38 @@ impl Connection {
     /// Lock the SFTP session, opening it on first use. Returns an OWNED guard
     /// (it carries the holder Arc) that serializes SFTP operations for this
     /// connection — acceptable for an interactive file browser.
-    pub async fn sftp(&self) -> Result<OwnedMutexGuard<Option<SftpSession>>, String> {
+    pub async fn sftp(&self) -> Result<Arc<SftpSession>, String> {
         // Clone the current holder (the read-lock is released at once) so a
-        // reconnect can swap a fresh holder in without waiting on our op.
+        // reconnect can swap a fresh holder in without waiting on our op. The
+        // inner lock is held only for init/lookup — NOT across operations:
+        // the SFTP protocol multiplexes by request id, so concurrent ops on
+        // one session are exactly what it's built for (holding a guard across
+        // each op serialized the per-file round trips the concurrent
+        // small-file pool exists to overlap).
         let holder = self.sftp.read().await.clone();
         let mut guard = holder.lock_owned().await;
-        if guard.is_none() {
-            let channel = self.open_channel().await?;
-            channel
-                .request_subsystem(true, "sftp")
-                .await
-                .map_err(|e| format!("failed to start SFTP subsystem: {e}"))?;
-            // 32 pipelined write acks (default 8): uploads are throughput ÷
-            // round-trip too — 8 × 255 KB capped a 37 ms route at ~54 MB/s.
-            let session = SftpSession::new_with_config(
-                channel.into_stream(),
-                russh_sftp::client::Config {
-                    max_concurrent_writes: 32,
-                    ..Default::default()
-                },
-            )
-                .await
-                .map_err(|e| format!("failed to initialize SFTP: {e}"))?;
-            *guard = Some(session);
+        if let Some(session) = guard.as_ref() {
+            return Ok(session.clone());
         }
-        Ok(guard)
+        let channel = self.open_channel().await?;
+        channel
+            .request_subsystem(true, "sftp")
+            .await
+            .map_err(|e| format!("failed to start SFTP subsystem: {e}"))?;
+        // 32 pipelined write acks (default 8): uploads are throughput ÷
+        // round-trip too — 8 × 255 KB capped a 37 ms route at ~54 MB/s.
+        let session = SftpSession::new_with_config(
+            channel.into_stream(),
+            russh_sftp::client::Config {
+                max_concurrent_writes: 32,
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|e| format!("failed to initialize SFTP: {e}"))?;
+        let session = Arc::new(session);
+        *guard = Some(session.clone());
+        Ok(session)
     }
 
     /// Open a fresh session channel, surfacing the raw russh error — the

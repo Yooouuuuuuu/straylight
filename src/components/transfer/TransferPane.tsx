@@ -25,6 +25,7 @@ import {
   setTransferClipboard,
   type DragItem,
 } from "../../lib/transferDrag";
+import { useMenuClamp } from "../../hooks/useMenuClamp";
 import { useAppStore } from "../../store/appStore";
 import {
   TRANSFER_EXPANSION,
@@ -98,7 +99,11 @@ export function TransferPane({
   const [selection, setSelection] = useState<FileEntry[]>([]);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const {
+    ref: menuRef,
+    left: menuLeft,
+    top: menuTop,
+  } = useMenuClamp(menu?.x ?? 0, menu?.y ?? 0, !!menu);
   // Spring-loaded folders: hovering a collapsed dir during a drag expands it.
   const springTimer = useRef<number | null>(null);
   const springPath = useRef<string | null>(null);
@@ -575,10 +580,7 @@ export function TransferPane({
         <div
           ref={menuRef}
           className="context-menu"
-          style={{
-            left: Math.min(menu.x, window.innerWidth - 200),
-            top: Math.min(menu.y, window.innerHeight - 260),
-          }}
+          style={{ left: menuLeft, top: menuTop }}
           onContextMenu={(e) => e.preventDefault()}
         >
           <button
