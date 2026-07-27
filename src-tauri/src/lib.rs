@@ -73,7 +73,7 @@ pub struct AppState {
     /// Server public keys awaiting the user's trust decision (keyed by
     /// `host:port`), stashed when an unknown-host connect was refused so
     /// `ssh_trust_host` can write the accepted one into `known_hosts`.
-    pub pending_host_keys: Mutex<HashMap<String, russh_keys::key::PublicKey>>,
+    pub pending_host_keys: Mutex<HashMap<String, russh::keys::PublicKey>>,
 }
 
 impl AppState {

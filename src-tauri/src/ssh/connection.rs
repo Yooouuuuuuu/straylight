@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use russh::client;
+use russh::keys::PrivateKeyWithHashAlg;
 use russh::Channel;
 use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
@@ -362,7 +363,7 @@ enum HostKeyOutcome {
     Trusted,
     Unknown {
         fingerprint: String,
-        key: russh_keys::key::PublicKey,
+        key: russh::keys::PublicKey,
     },
     Changed,
 }
@@ -415,13 +416,12 @@ fn jump_handler(host: &str, port: u16) -> ClientHandler {
     }
 }
 
-#[async_trait::async_trait]
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &russh_keys::key::PublicKey,
+        server_public_key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
         let mut out = self.outcome.lock().unwrap();
         if !self.verify {
@@ -434,10 +434,13 @@ impl client::Handler for ClientHandler {
             return Ok(true);
         };
         let unknown = || HostKeyOutcome::Unknown {
-            fingerprint: format!("SHA256:{}", server_public_key.fingerprint()),
+            // The ssh-key Display already carries the "SHA256:" prefix.
+            fingerprint: server_public_key
+                .fingerprint(russh::keys::HashAlg::Sha256)
+                .to_string(),
             key: server_public_key.clone(),
         };
-        match russh_keys::known_hosts::check_known_hosts_path(
+        match russh::keys::known_hosts::check_known_hosts_path(
             &self.host,
             self.port,
             server_public_key,
@@ -448,7 +451,7 @@ impl client::Handler for ClientHandler {
                 Ok(true)
             }
             // Present but the key differs — the MITM / swapped-server case.
-            Err(russh_keys::Error::KeyChanged { .. }) => {
+            Err(russh::keys::Error::KeyChanged { .. }) => {
                 *out = HostKeyOutcome::Changed;
                 Ok(false)
             }
@@ -463,11 +466,6 @@ impl client::Handler for ClientHandler {
 
 /// A lane kind's dial parameters (docs/connections.md — "The lanes").
 ///
-/// - `compress`: terminal lanes (main + session) prefer zlib — their traffic
-///   is text and shrinks 3–5× on slow links at trivial volume. Bulk lanes
-///   (data + transfer) negotiate none: payloads are often incompressible and
-///   single-threaded zlib caps a same-machine link at a few dozen MB/s
-///   (scp/rsync ship uncompressed by default for the same reason).
 /// - `keepalive_max`: with 15 s pings, how much TOTAL silence before russh
 ///   declares the transport dead. 20 ≈ 5 min for lanes carrying precious
 ///   state (doubt is not death); 4 ≈ 1 min for expendable transfer lanes —
@@ -476,22 +474,33 @@ impl client::Handler for ClientHandler {
 /// - `window`: the receive window WE grant — the ceiling on in-flight data
 ///   flowing to us. Bulk lanes get 16 MiB so a deep read pipeline can stand;
 ///   terminal lanes keep russh's 2 MiB default.
+///
+/// No lane offers compression. zlib@openssh.com is broken in russh against
+/// OpenSSH strict-kex — on 0.46 a compressed lane died at its (hourly) rekey,
+/// on 0.62 the first channel open after auth stalls and the session dies with
+/// a decode error (docs/dev/russh-upgrade.md). OpenSSH itself defaults to
+/// `Compression no`, so plain `ssh`/scp/rsync behave the same way.
 #[derive(Clone, Copy)]
 pub struct LaneProfile {
-    compress: bool,
     keepalive_max: usize,
     window: u32,
 }
 
 const MIB: u32 = 1024 * 1024;
 /// Main lane: terminals + forwards. Text, precious, patient.
-pub const LANE_MAIN: LaneProfile = LaneProfile { compress: true, keepalive_max: 20, window: 2 * MIB };
+pub const LANE_MAIN: LaneProfile = LaneProfile { keepalive_max: 20, window: 2 * MIB };
 /// Session lanes: one agent's PTY. Text, precious, patient.
-pub const LANE_SESSION: LaneProfile = LaneProfile { compress: true, keepalive_max: 20, window: 2 * MIB };
+pub const LANE_SESSION: LaneProfile = LaneProfile { keepalive_max: 20, window: 2 * MIB };
 /// Data lane: SFTP + exec. Bulk-ish, standing, patient.
-pub const LANE_DATA: LaneProfile = LaneProfile { compress: false, keepalive_max: 20, window: 16 * MIB };
+pub const LANE_DATA: LaneProfile = LaneProfile { keepalive_max: 20, window: 16 * MIB };
 /// Transfer lanes: one transfer's bytes. Bulk, ephemeral, impatient.
-pub const LANE_TRANSFER: LaneProfile = LaneProfile { compress: false, keepalive_max: 4, window: 16 * MIB };
+pub const LANE_TRANSFER: LaneProfile = LaneProfile { keepalive_max: 4, window: 16 * MIB };
+
+/// "Never rekey on the clock" — matches OpenSSH's `RekeyLimit default none`,
+/// which rekeys on data volume only. An idle terminal gains nothing from an
+/// hourly KEX; inheriting russh's default 3600 s timer is exactly what turned
+/// the zlib rekey bug into hourly terminal drops.
+const NO_TIME_REKEY: Duration = Duration::from_secs(60 * 60 * 24 * 365);
 
 fn client_config(profile: LaneProfile) -> Arc<client::Config> {
     Arc::new(client::Config {
@@ -506,16 +515,15 @@ fn client_config(profile: LaneProfile) -> Arc<client::Config> {
         keepalive_interval: Some(Duration::from_secs(15)),
         keepalive_max: profile.keepalive_max,
         window_size: profile.window,
+        // Explicit, not inherited: rekey by volume (~1 GiB, the widespread
+        // AEAD-conservative figure), never by time (NO_TIME_REKEY above).
+        limits: russh::Limits {
+            rekey_write_limit: 1 << 30,
+            rekey_read_limit: 1 << 30,
+            rekey_time_limit: NO_TIME_REKEY,
+        },
         preferred: russh::Preferred {
-            compression: std::borrow::Cow::Borrowed(if profile.compress {
-                &[
-                    russh::compression::ZLIB_LEGACY,
-                    russh::compression::ZLIB,
-                    russh::compression::NONE,
-                ]
-            } else {
-                &[russh::compression::NONE]
-            }),
+            compression: std::borrow::Cow::Borrowed(&[russh::compression::NONE]),
             ..Default::default()
         },
         ..Default::default()
@@ -666,7 +674,7 @@ async fn authenticate(
                 .authenticate_password(user, password.as_str())
                 .await
                 .map_err(|e| format!("password authentication error: {e}"))?;
-            if accepted {
+            if accepted.success() {
                 Ok(())
             } else {
                 Err("the server rejected the password".to_string())
@@ -705,19 +713,30 @@ async fn auth_auto(
     let mut encrypted_locked: Option<String> = None;
     let mut load_failed_with_pass = false;
 
+    // The RSA signature hash the server advertises (ext-info server-sig-algs).
+    // Without it russh signs RSA with legacy SHA-1, which OpenSSH 8.8+ rejects.
+    // Ignored for non-RSA keys (PrivateKeyWithHashAlg::new drops it).
+    let rsa_hash = match handle.best_supported_rsa_hash().await {
+        Ok(h) => h.flatten(),
+        Err(_) => None,
+    };
+
     for path in candidates {
         if !path.exists() {
             continue;
         }
-        match russh_keys::load_secret_key(&path, passphrase) {
+        match russh::keys::load_secret_key(&path, passphrase) {
             Ok(key) => {
-                if let Ok(true) = handle.authenticate_publickey(user, Arc::new(key)).await {
-                    log::info!("authenticated with key {}", path.display());
-                    return Ok(());
+                let key = PrivateKeyWithHashAlg::new(Arc::new(key), rsa_hash);
+                if let Ok(auth) = handle.authenticate_publickey(user, key).await {
+                    if auth.success() {
+                        log::info!("authenticated with key {}", path.display());
+                        return Ok(());
+                    }
                 }
             }
             // Encrypted, and no passphrase was given to unlock it.
-            Err(russh_keys::Error::KeyIsEncrypted) => {
+            Err(russh::keys::Error::KeyIsEncrypted) => {
                 if encrypted_locked.is_none() {
                     encrypted_locked = Some(path.to_string_lossy().into_owned());
                 }
@@ -930,7 +949,7 @@ pub async fn ssh_trust_host(
         .remove(&format!("{host}:{port}"))
         .ok_or("no pending host key to trust — reconnect and try again")?;
     let path = known_hosts_path().ok_or("could not resolve ~/.ssh/known_hosts")?;
-    russh_keys::known_hosts::learn_known_hosts_path(&host, port, &key, &path)
+    russh::keys::known_hosts::learn_known_hosts_path(&host, port, &key, &path)
         .map_err(|e| format!("could not record the host key: {e}"))?;
     log::info!("trusted host key for {host}:{port}");
     Ok(())

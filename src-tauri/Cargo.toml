@@ -1,6 +1,6 @@
 [package]
 name = "straylight"
-version = "0.10.1"
+version = "0.11.0"
 description = "Lightweight SSH file manager, terminal, and code viewer"
 authors = ["Straylight contributors"]
 edition = "2021"
@@ -29,13 +29,17 @@ tauri-plugin-process = "2"
 # that navigator.clipboard.readText() triggers on first paste.
 tauri-plugin-clipboard-manager = "2"
 
-# SSH / SFTP. russh 0.46.x uses the `KeyPair` / `russh_keys::key` API.
+# SSH / SFTP. russh 0.6x: keys live in `russh::keys` (ssh-key based; the old
+# russh-keys crate is merged). Non-default `ring` backend — the default
+# aws-lc-rs needs a C toolchain dance MSVC fails at; ring is what 0.46 used.
+# No compression is ever offered: zlib@openssh.com is broken in russh against
+# OpenSSH 9.6 strict-kex (0.46: died at rekey; 0.62: first channel_open hangs
+# — docs/dev/russh-upgrade.md), and OpenSSH itself defaults compression off.
 # (~/.ssh/config is parsed manually in ssh/config.rs — the russh-config crate can
 # only resolve a single named host, not enumerate every Host block, so it isn't
 # used here.)
-russh = "0.46"
+russh = { version = "0.62", default-features = false, features = ["ring", "rsa"] }
 russh-sftp = "2"
-russh-keys = "0.46"
 
 # Local PTY (ConPTY on Windows) for the local terminal.
 portable-pty = "0.8"
@@ -56,6 +60,16 @@ log = "0.4"
 env_logger = "0.11"
 # Carry a WSL-generated private key out of the distro without newline mangling.
 base64 = "0.22"
+
+[features]
+# Lets the rekeytest example OFFER zlib, to reproduce the russh zlib+strict-kex
+# break (docs/dev/russh-upgrade.md). Never enabled in product builds — no lane
+# offers compression, and leaving the flate2 code out makes that structural.
+zlib-diag = ["russh/flate2"]
+
+[[example]]
+name = "rekeytest"
+required-features = ["zlib-diag"]
 
 # Real Windows build number for xterm's ConPTY reflow heuristics (no process
 # spawn — a GUI app shelling out to `cmd /c ver` can flash a console).

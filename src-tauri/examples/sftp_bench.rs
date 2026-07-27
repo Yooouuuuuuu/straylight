@@ -18,13 +18,12 @@ use russh_sftp::client::RawSftpSession;
 
 struct AcceptAll;
 
-#[async_trait::async_trait]
 impl client::Handler for AcceptAll {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _key: &russh_keys::key::PublicKey,
+        _key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }
@@ -67,12 +66,21 @@ async fn main() {
         .await
         .expect("ssh connect");
 
-    let key = russh_keys::load_secret_key(&key_path, None).expect("load key");
+    let key = russh::keys::load_secret_key(&key_path, None).expect("load key");
+    let hash = handle
+        .best_supported_rsa_hash()
+        .await
+        .ok()
+        .flatten()
+        .flatten();
     let ok = handle
-        .authenticate_publickey(user, Arc::new(key))
+        .authenticate_publickey(
+            user,
+            russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key), hash),
+        )
         .await
         .expect("auth call");
-    assert!(ok, "auth rejected");
+    assert!(ok.success(), "auth rejected");
     println!("authenticated");
 
     let channel = handle.channel_open_session().await.expect("channel");

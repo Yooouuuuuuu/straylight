@@ -8,6 +8,8 @@
 
 <p align="center">
   <img src="assets/screenshot.png" width="900" alt="Straylight: Local, WSL, and a remote host open in one window — a split editor with the README and App.tsx, Source Control tracking git and jj repos across hosts, a live agent session, and a cross-host file transfer">
+  <br>
+  <em>Expandable panels — file explorer, repos, and long sessions.</em>
 </p>
 
 Straylight is a small, fast desktop app for remote development. Browse files, run real terminals, edit code, and drive git or jj — across your local machine, WSL, and several remote servers **at once**, all in one window. Nothing to install on the far end, no language servers or hidden daemons eating your server's memory. Just SSH and SFTP, doing what they already do well.

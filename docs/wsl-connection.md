@@ -200,7 +200,7 @@ Backend lives in `src-tauri/src/wsl.rs`; the sidebar section is
 - **Key.** A shared ed25519 key under the app config dir
   (`wsl_id_ed25519`), generated once via the distro's `ssh-keygen` and carried out
   **base64-encoded** (newline-proof), then load-checked with the same
-  `russh_keys::load_secret_key` the connection uses (self-heals if unloadable).
+  `russh::keys::load_secret_key` the connection uses (self-heals if unloadable).
 - **Provisioning** (`wsl_connect`, off-thread): resolve the login user
   (`whoami`); install `openssh-server` only with consent on `apt` distros; then
   derive the public key **from the exact private key** inside the distro

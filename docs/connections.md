@@ -107,11 +107,18 @@ the opposite of the long-lived streamers session lanes exist for.
 - **Transfer lanes** are ephemeral, dialed per running transfer on each SSH
   endpoint and tuned purely for throughput — see the transfer engine below.
 
-Each lane kind carries a tuned `LaneProfile`: main/session use zlib, ~5 min
-keepalive tolerance, a 2 MiB window; data drops zlib and widens to 16 MiB;
-transfer drops zlib, widens to 16 MiB, and uses an impatient ~1 min keepalive
-(a transfer lane has no supervisor, so its keepalive is what declares a silent
-corpse — and misjudging a stall costs nothing, the retry round just redials).
+Each lane kind carries a tuned `LaneProfile`: main/session use ~5 min
+keepalive tolerance and a 2 MiB window; data widens to 16 MiB; transfer widens
+to 16 MiB and uses an impatient ~1 min keepalive (a transfer lane has no
+supervisor, so its keepalive is what declares a silent corpse — and misjudging
+a stall costs nothing, the retry round just redials).
+
+No lane offers compression, and rekey limits are explicit: rekey by data
+volume (~1 GiB) only, never by the clock — matching stock OpenSSH
+(`Compression no`, `RekeyLimit default none`). zlib@openssh.com is broken in
+russh against OpenSSH strict-kex — a compressed lane died at its first rekey
+(the source of the "terminals drop hourly" field bug) — and terminal-text
+savings never justified carrying that risk (docs/dev/russh-upgrade.md).
 
 ## The transfer engine
 

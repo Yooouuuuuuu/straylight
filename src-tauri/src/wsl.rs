@@ -213,7 +213,7 @@ fn key_paths() -> Result<(PathBuf, PathBuf), String> {
 
 /// Ensure a Straylight key exists; returns (private-key path, public-key line).
 /// Generated once via the distro's `ssh-keygen` and carried out to the config
-/// dir (OpenSSH format, which `russh_keys::load_secret_key` reads back).
+/// dir (OpenSSH format, which `russh::keys::load_secret_key` reads back).
 #[cfg(windows)]
 fn ensure_key(distro: &str) -> Result<PathBuf, String> {
     use base64::Engine as _;
@@ -221,7 +221,7 @@ fn ensure_key(distro: &str) -> Result<PathBuf, String> {
     // Reuse the key only if it still loads with the connection's own loader;
     // otherwise discard and regenerate (self-healing). The public key is derived
     // from this exact private key at provision time, so it can never drift.
-    if priv_path.exists() && russh_keys::load_secret_key(&priv_path, None).is_ok() {
+    if priv_path.exists() && russh::keys::load_secret_key(&priv_path, None).is_ok() {
         return Ok(priv_path);
     }
     let _ = std::fs::remove_file(&priv_path);
@@ -243,7 +243,7 @@ fn ensure_key(distro: &str) -> Result<PathBuf, String> {
     std::fs::write(&priv_path, &bytes).map_err(|e| e.to_string())?;
     // Fail loudly here if the key still won't load, rather than later as an
     // opaque "no usable key" auth error.
-    russh_keys::load_secret_key(&priv_path, None)
+    russh::keys::load_secret_key(&priv_path, None)
         .map_err(|e| format!("the generated WSL key could not be loaded: {e}"))?;
     Ok(priv_path)
 }

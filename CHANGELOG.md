@@ -11,6 +11,31 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-27
+
+Remote terminals no longer drop after an hour. The first field test traced the
+drops to an SSH-library bug in key re-exchange under compression; this release
+moves the whole SSH stack to the current library and removes the trigger.
+
+### Fixed
+
+- **Hourly connection drops.** Every terminal-carrying SSH lane died at its
+  first key re-exchange (~1 hour after connect) and restarted. Root cause: a
+  russh bug where zlib compression breaks the re-exchange against OpenSSH
+  strict-kex. Reproduced, verified fixed, and soak-tested for 2 hours across
+  5 hosts (docs/dev/russh-upgrade.md).
+
+### Changed
+
+- **SSH library upgraded**: russh 0.46 → 0.62 (two years of upstream fixes;
+  the old `russh-keys` crate is merged in).
+- **SSH compression is off on every lane**, matching stock OpenSSH
+  (`Compression no`) — it was the trigger of the re-exchange bug on both old
+  and new library versions, and terminal text never justified the risk.
+- **Re-keying is now explicit**: by data volume (~1 GiB) only, never on a
+  timer — matching OpenSSH's `RekeyLimit default none`. Idle terminals no
+  longer perform a pointless hourly key exchange.
+
 ## [0.10.1] - 2026-07-27
 
 A pair of connection fixes.

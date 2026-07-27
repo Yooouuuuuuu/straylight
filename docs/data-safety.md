@@ -82,9 +82,10 @@ expected (the previous content). This is atomic with the copy, so **an edit
 from elsewhere mid-save is never silently overwritten** — the guard writes a
 `changed` marker and the tab surfaces a conflict. It also retires the old
 same-second-mtime blind spot. (A hash can't shrink the upload — the server
-can't rebuild content from a fingerprint — so transfer time is addressed by
-SSH-level `zlib` compression instead.) The conflict bar's **Overwrite** skips
-the guard deliberately.
+can't rebuild content from a fingerprint — but source files are small and the
+save pipeline hides the latency; SSH compression is deliberately off, see
+docs/connections.md.) The conflict bar's **Overwrite** skips the guard
+deliberately.
 
 ### The per-file queue
 
