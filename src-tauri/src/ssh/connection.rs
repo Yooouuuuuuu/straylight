@@ -30,6 +30,9 @@ pub enum AuthMethod {
     /// key is held in memory for the session only (never written to disk); when
     /// an encrypted key is found and no passphrase is set, connect fails with a
     /// `KEY_NEEDS_PASSPHRASE:` error so the UI can prompt. No ssh-agent yet.
+    // Enum-level `rename_all` renames variants, NOT struct-variant fields — so
+    // this variant needs its own to match the frontend's `identityFile`.
+    #[serde(rename_all = "camelCase")]
     Auto {
         #[serde(default)]
         identity_file: Option<String>,

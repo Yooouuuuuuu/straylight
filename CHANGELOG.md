@@ -11,6 +11,22 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-07-27
+
+A pair of connection fixes.
+
+### Fixed
+
+- **Key-file logins use the key you named.** A host with an `IdentityFile` in
+  `~/.ssh/config` silently dropped that path (a serde camelCase/snake_case field
+  mismatch), so Straylight fell back to the default `~/.ssh/id_*` keys and failed
+  to authenticate on any host needing a specific key. The IdentityFile is now
+  honored.
+- **Switching terminal hosts returns you to where you were.** Clicking a host in
+  the terminal bar reopens the terminal you were last using on that host, instead
+  of jumping to its newest shell (falling back to the newest if that one was
+  closed).
+
 ## [0.10.0] - 2026-07-27
 
 The first packaged release: Straylight now ships as a Windows installer, and the

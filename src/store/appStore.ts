@@ -679,6 +679,10 @@ interface AppState {
   // Terminals ------------------------------------------------------------
   terminals: TerminalSession[];
   activeTerminalId: string | null;
+  /** Per-host memory of the terminal you were last in, so swapping back to a
+   *  host returns you to it — not just its newest shell. Released on the host's
+   *  disconnect; a stale entry (its terminal closed) self-heals on read. */
+  lastActiveByHost: Record<string, string>;
 
   // Editor tabs ----------------------------------------------------------
   tabs: EditorTab[];
@@ -788,6 +792,8 @@ interface AppState {
   ) => void;
   closeTerminal: (id: string) => void;
   setActiveTerminal: (id: string | null) => void;
+  /** Switch the panel to a host and restore the terminal last used there. */
+  pickHostTerminal: (connId: string) => void;
   /** What the terminal panel body shows: the terminals, or a tool group. */
   terminalView: "terminals" | "containers" | "ports" | "forwarding" | "transfers";
   setTerminalView: (
@@ -1158,6 +1164,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   terminals: [],
   activeTerminalId: null,
+  lastActiveByHost: {},
 
   tabs: [],
   activeTabId: null,
@@ -1232,6 +1239,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const activeTerminalId = terminals.some((t) => t.id === s.activeTerminalId)
         ? s.activeTerminalId
         : (terminals[terminals.length - 1]?.id ?? null);
+      // Disconnect retires the connId for good — drop its terminal memory.
+      const lastActiveByHost = { ...s.lastActiveByHost };
+      delete lastActiveByHost[target];
       return {
         ...remoteMirror(remotes),
         connState: remotes[0]?.state ?? "disconnected",
@@ -1239,6 +1249,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         ...(tabs.length !== s.tabs.length ? groupsPatch(s, tabs) : {}),
         terminals,
         activeTerminalId,
+        lastActiveByHost,
       };
     }),
 
@@ -1306,11 +1317,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const activeTerminalId = terminals.some((t) => t.id === s.activeTerminalId)
         ? s.activeTerminalId
         : (terminals[terminals.length - 1]?.id ?? null);
+      // Disconnect retires the connId for good — drop its terminal memory.
+      const lastActiveByHost = { ...s.lastActiveByHost };
+      delete lastActiveByHost[connId];
       return {
         ...wslMirror(wsls),
         ...(tabs.length !== s.tabs.length ? groupsPatch(s, tabs) : {}),
         terminals,
         activeTerminalId,
+        lastActiveByHost,
       };
     }),
 
@@ -1646,6 +1661,31 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   setActiveTerminal: (activeTerminalId) =>
     set({ activeTerminalId, terminalView: "terminals" }),
+
+  pickHostTerminal: (connId) =>
+    set((s) => {
+      const mem = { ...s.lastActiveByHost };
+      // The current active terminal already reflects the last one focused on
+      // the host we're leaving — remember it before we switch away.
+      const cur = s.terminals.find(
+        (t) => t.id === s.activeTerminalId && !t.inChat,
+      );
+      if (cur) mem[cur.connId] = cur.id;
+      // Restore this host's last-used terminal; if it was closed while away,
+      // fall back to its newest (list order).
+      const hostTerms = s.terminals.filter(
+        (t) => !t.inChat && t.connId === connId,
+      );
+      const target =
+        hostTerms.find((t) => t.id === mem[connId]) ??
+        hostTerms[hostTerms.length - 1];
+      if (target) mem[connId] = target.id;
+      return {
+        lastActiveByHost: mem,
+        activeTerminalId: target?.id ?? null,
+        terminalView: "terminals" as const,
+      };
+    }),
 
   setTerminalView: (terminalView) => set({ terminalView }),
 

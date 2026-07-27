@@ -44,6 +44,7 @@ export function TerminalPanel() {
   const openTerminal = useAppStore((s) => s.openTerminal);
   const closeTerminal = useAppStore((s) => s.closeTerminal);
   const setActiveTerminal = useAppStore((s) => s.setActiveTerminal);
+  const pickHostTerminal = useAppStore((s) => s.pickHostTerminal);
   const setTerminalVisible = useAppStore((s) => s.setTerminalVisible);
   const terminalView = useAppStore((s) => s.terminalView);
   const setTerminalView = useAppStore((s) => s.setTerminalView);
@@ -172,14 +173,12 @@ export function TerminalPanel() {
   );
 
   const pickGroup = (connId: string) => {
+    // Restore the terminal you were last in on this host (falling back to its
+    // newest shell when that one's gone). pickHostTerminal also records the
+    // terminal we're leaving, and clears the active slot for an empty host so
+    // another group's terminal can't keep showing (Ctrl+` then plain-hides).
     setSelGroup(connId);
-    setTerminalView("terminals");
-    // Land on the host's LAST (newest) shell — swapping back to a host returns
-    // you to its most recent terminal, not the oldest. No terminal here →
-    // clear the active slot, so another group's terminal can't keep showing
-    // (and Ctrl+` falls through to plain hide).
-    const hostTerms = terminals.filter((t) => !t.inChat && t.connId === connId);
-    setActiveTerminal(hostTerms[hostTerms.length - 1]?.id ?? null);
+    pickHostTerminal(connId);
   };
 
   const newTerminal = (command?: string[] | null, label?: string) => {
