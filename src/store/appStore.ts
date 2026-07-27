@@ -794,6 +794,10 @@ interface AppState {
   setActiveTerminal: (id: string | null) => void;
   /** Switch the panel to a host and restore the terminal last used there. */
   pickHostTerminal: (connId: string) => void;
+  /** Version found by the quiet launch update check — lights the green dot on
+   *  ⚙ → Check for updates instead of interrupting with a dialog. */
+  updateAvailable: string | null;
+  setUpdateAvailable: (version: string | null) => void;
   /** What the terminal panel body shows: the terminals, or a tool group. */
   terminalView: "terminals" | "containers" | "ports" | "forwarding" | "transfers";
   setTerminalView: (
@@ -1165,6 +1169,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   terminals: [],
   activeTerminalId: null,
   lastActiveByHost: {},
+  updateAvailable: null,
 
   tabs: [],
   activeTabId: null,
@@ -1661,6 +1666,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   setActiveTerminal: (activeTerminalId) =>
     set({ activeTerminalId, terminalView: "terminals" }),
+
+  setUpdateAvailable: (updateAvailable) => set({ updateAvailable }),
 
   pickHostTerminal: (connId) =>
     set((s) => {

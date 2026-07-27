@@ -11,6 +11,24 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-07-28
+
+### Changed
+
+- **Update checks are quiet now.** The launch check no longer opens a dialog —
+  when a new version is available it lights a green dot on ⚙ → Check for
+  updates instead (hover the row to see the version that's ready). The manual
+  check still offers the install directly.
+- **The app shows its version.** The ⚙ → Check for updates row displays the
+  current version at a glance, and the manual check's up-to-date toast names
+  it: "You're on the latest version (v0.11.1)."
+
+### Fixed
+
+- **No stray hover tooltips on the terminal bar.** The host tabs and the tool
+  tabs (Ports · Containers · Forwarding · Transfers) no longer pop native
+  Windows tooltips on hover.
+
 ## [0.11.0] - 2026-07-27
 
 Remote terminals no longer drop after an hour. The first field test traced the

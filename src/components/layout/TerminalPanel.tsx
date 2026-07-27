@@ -222,7 +222,6 @@ export function TerminalPanel() {
   ) => (
     <button
       key={view}
-      title={label}
       className={`termgroup__chip termgroup__chip--tool${terminalView === view ? " termgroup__chip--active" : ""}${barSlim >= 1 ? " termgroup__chip--slim" : ""}`}
       onClick={() => setTerminalView(view)}
     >
@@ -244,7 +243,6 @@ export function TerminalPanel() {
         {groups.map((g) => (
           <button
             key={g.connId}
-            title={g.label}
             className={`termgroup__chip${terminalView === "terminals" && activeGroup === g.connId ? " termgroup__chip--active" : ""}${barSlim >= 2 ? " termgroup__chip--slim" : ""}`}
             style={{ "--host-color": g.color } as React.CSSProperties}
             draggable
@@ -269,7 +267,8 @@ export function TerminalPanel() {
               <IconBell size={10} className="termgroup__bellicon" />
             )}
             {/* Level 2 (bar collided twice): letter-only chips, counts
-                dropped — the full name lives in the tooltip. */}
+                dropped — the host color + L/W/R letter identify the chip
+                (no hover tooltip by design). */}
             {barSlim < 2 && g.label}
             {barSlim < 2 &&
               (() => {

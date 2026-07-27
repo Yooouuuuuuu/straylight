@@ -3,6 +3,7 @@
  *  live here, not in the command palette), and window controls. The center
  *  region is a Tauri drag handle. */
 import { useEffect, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import appIcon from "../../assets/icon.png";
@@ -51,6 +52,14 @@ export function TitleBar() {
   // the explainer rides the native title.
   const focusView = useAppStore((s) => s.focusView);
   const lockedTitle = focusView ? "Locked in session focus (F11)" : undefined;
+  const updateAvailable = useAppStore((s) => s.updateAvailable);
+  // Shown dim on the Check-for-updates row — the app's at-a-glance version.
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  useEffect(() => {
+    void getVersion()
+      .then(setAppVersion)
+      .catch(() => {});
+  }, []);
   const [menuOpen, setMenuOpen] = useState(false);
   const [exitAsk, setExitAsk] = useState(false);
   const [exitSilence, setExitSilence] = useState(false);
@@ -195,13 +204,24 @@ export function TitleBar() {
               <button
                 className="terminal-menu__item"
                 disabled={focusView}
-                title={lockedTitle}
+                title={
+                  lockedTitle ??
+                  (updateAvailable
+                    ? `v${updateAvailable} is ready to install`
+                    : undefined)
+                }
                 onClick={() => {
                   setMenuOpen(false);
                   checkForUpdate();
                 }}
               >
                 Check for updates
+                <span className="menu-right">
+                  {updateAvailable && <span className="menu-dot" aria-hidden />}
+                  {appVersion && (
+                    <span className="menu-hint">v{appVersion}</span>
+                  )}
+                </span>
               </button>
               <div className="terminal-menu__sep" />
               {/* Inventories the app keeps for you — audit and prune, not knobs. */}

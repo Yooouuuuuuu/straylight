@@ -6,7 +6,17 @@ already shipped is in CHANGELOG.md; the rationale for what exists is in the
 [design docs](README.md).
 
 ---
-
+- **API client / Bruno-adjacent** (research first) — no Postman/Bruno clone. The
+  differentiating candidate: a `.http` runner executed via curl on the host that
+  owns the file, so requests originate inside the server's network. Post-1.0.
+- **Run current file/command** — full debugging (DAP) is out of scope (debug in
+  the terminal). The only candidate is a light "run this on the right host"
+  that opens a terminal and types it. Only if it stays that light.
+- **Non-UTF-8 files** (GBK, Shift-JIS, Big5, …) — today they open read-only
+  with `�` replacements (saving is blocked so the original bytes can't be
+  destroyed). If they turn out to be common in practice, add encoding
+  detection and show the file read-only in its detected charset; editing and
+  saving non-UTF-8 can follow on demand, case by case, as real files surface.
 - **Soft-restore for session-lane terminals** — when a CHAT agent's session
   lane drops, keep its terminal + scrollback alive across the reconnect instead
   of remounting (which discards both), plus a one-click "Resume Claude"
@@ -24,9 +34,4 @@ already shipped is in CHANGELOG.md; the rationale for what exists is in the
 - **Non-US-keyboard backtick chords** — on dead-key layouts (French, German…)
   `` Ctrl+` `` is permanently untypable. Rebindable in Preferences today; the
   real fix is matching the physical key position.
-- **Run current file/command** — full debugging (DAP) is out of scope (debug in
-  the terminal). The only candidate is a light "run this on the right host"
-  that opens a terminal and types it. Only if it stays that light.
-- **API client / Bruno-adjacent** (research first) — no Postman/Bruno clone. The
-  differentiating candidate: a `.http` runner executed via curl on the host that
-  owns the file, so requests originate inside the server's network. Post-1.0.
+

@@ -223,8 +223,8 @@ export default function App() {
   // settings (they read draftsConfig) and must init even if settings failed —
   // session restore awaits the draft index.
   useEffect(() => initThemes(), []);
-  // Quiet auto-update check once on launch (no-op in dev; silent unless a
-  // newer release is found, then it prompts). ⚙ → Check for updates is manual.
+  // Quiet auto-update check once on launch (no-op in dev; never interrupts —
+  // an available update only lights the green dot on ⚙ → Check for updates).
   useEffect(() => checkForUpdateOnLaunch(), []);
   useEffect(() => {
     if (localConnId)

@@ -1615,6 +1615,26 @@
   max-width: 100%;
 }
 
+/* Right side of ⚙ → Check for updates: the app's at-a-glance version, plus
+   the green "update ready" dot lit by the quiet launch check. */
+.menu-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.menu-hint {
+  color: var(--fg-secondary);
+  font-size: var(--font-size-xs);
+}
+.menu-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  flex: 0 0 auto;
+}
+
 /* mermaid diagrams rendered from ```mermaid fences (centered, responsive). */
 .md-preview__mermaid {
   text-align: center;
