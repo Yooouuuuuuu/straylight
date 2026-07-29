@@ -3,7 +3,7 @@
  *  streamed (no size cap). The transfer itself + its progress live in the global
  *  store, so closing this panel mid-transfer keeps it running with the progress
  *  bar shown in the status bar. */
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { fsTransferCheck } from "../../lib/ipc";
 import type { DragItem } from "../../lib/transferDrag";
@@ -36,20 +36,12 @@ export function TransferPanel({
 }) {
   const pushNotice = useAppStore((s) => s.pushNotice);
   const runTransfer = useAppStore((s) => s.runTransfer);
-  const setTransferOpen = useAppStore((s) => s.setTransferOpen);
   const [conflict, setConflict] = useState<{
     count: number;
     name: string;
     resolve: (c: Choice) => void;
   } | null>(null);
   const busyRef = useRef(false); // guards the collision-prompt window
-
-  // While open, the transfer panes own F2/Delete — keep the global explorer
-  // shortcuts from acting on the (possibly different-host) explorer selection.
-  useEffect(() => {
-    setTransferOpen(true);
-    return () => setTransferOpen(false);
-  }, [setTransferOpen]);
 
   async function onDropInto(
     items: DragItem[],

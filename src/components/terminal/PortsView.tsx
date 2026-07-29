@@ -21,6 +21,49 @@ interface Row extends PortInfo {
 const SYSTEM_PORTS = new Set([1900, 2049, 3389, 5353, 5355]);
 const isSystemPort = (p: number) => p < 1024 || SYSTEM_PORTS.has(p);
 
+type SortCol = "port" | "address" | "process" | "pid";
+
+/** Sort within each host group. The group order is a rotation — the Host
+ *  header cycles which host sits first — and inside a group the clicked column
+ *  decides, with a missing Process/PID always sinking to the bottom whichever
+ *  direction is active. */
+function sortRows(
+  rows: Row[],
+  order: string[],
+  hostFirst: number,
+  col: SortCol,
+  dir: "asc" | "desc",
+): Row[] {
+  const n = order.length || 1;
+  const groupRank = (id: string) => {
+    const i = order.indexOf(id);
+    return i < 0 ? Number.MAX_SAFE_INTEGER : (((i - hostFirst) % n) + n) % n;
+  };
+  const d = dir === "asc" ? 1 : -1;
+  const within = (a: Row, b: Row): number => {
+    switch (col) {
+      case "port":
+        return (a.port - b.port) * d;
+      case "address":
+        return a.address.localeCompare(b.address, undefined, { numeric: true }) * d;
+      case "process":
+        if (!a.process && !b.process) return 0;
+        if (!a.process) return 1;
+        if (!b.process) return -1;
+        return a.process.localeCompare(b.process, undefined, { sensitivity: "base" }) * d;
+      case "pid":
+        if (a.pid == null && b.pid == null) return 0;
+        if (a.pid == null) return 1;
+        if (b.pid == null) return -1;
+        return (a.pid - b.pid) * d;
+    }
+    return 0;
+  };
+  return [...rows].sort(
+    (a, b) => groupRank(a.connId) - groupRank(b.connId) || within(a, b),
+  );
+}
+
 export function PortsView() {
   const localConnId = useAppStore((s) => s.localConnId);
   const wsls = useAppStore((s) => s.wsls);
@@ -33,6 +76,11 @@ export function PortsView() {
 
   const [rows, setRows] = useState<Row[]>([]);
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
+  // Ephemeral view sort (resets when the tab unmounts). Host is a group
+  // rotation; Port/Address/Process/PID sort within each host group.
+  const [hostFirst, setHostFirst] = useState(0);
+  const [sortCol, setSortCol] = useState<SortCol>("port");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const hosts: { connId: string; key: string; host: string; color: string }[] = [];
   if (localConnId)
@@ -73,9 +121,8 @@ export function PortsView() {
         }
       }
       if (live) {
-        // Host groups first (connection order), then by port number.
-        const rank = (id: string) => monitored.findIndex((h) => h.connId === id);
-        out.sort((a, b) => rank(a.connId) - rank(b.connId) || a.port - b.port);
+        // Raw set in monitor order; the table sorts at render (host groups +
+        // the clicked column), so a re-poll never disturbs the chosen order.
         setRows(out);
         setPortCounts(counts);
         setCheckedAt(Date.now());
@@ -96,6 +143,25 @@ export function PortsView() {
     interval,
     panelsConfig.portsIgnoreHosts.join(","),
   ]);
+
+  const order = monitored.map((h) => h.connId);
+  const sortedRows = sortRows(rows, order, hostFirst, sortCol, sortDir);
+  const cyclable = monitored.length > 1;
+
+  const sortableTh = (col: SortCol, label: string) => (
+    <th
+      className="ports-table__th ports-table__th--sort"
+      onClick={() => {
+        setSortDir((d) => (sortCol === col && d === "asc" ? "desc" : "asc"));
+        setSortCol(col);
+      }}
+    >
+      {label}
+      {sortCol === col && (
+        <span className="ports-table__arrow">{sortDir === "asc" ? "▲" : "▼"}</span>
+      )}
+    </th>
+  );
 
   const toggleHost = (key: string) => {
     const next = ignored.has(key)
@@ -162,16 +228,27 @@ export function PortsView() {
       <table className="ports-table">
         <thead>
           <tr>
-            <th>Host</th>
-            <th>Port</th>
-            <th>Address</th>
-            <th>Process</th>
-            <th>PID</th>
+            <th
+              className={`ports-table__th ${cyclable ? "ports-table__th--sort" : ""}`}
+              onClick={
+                cyclable
+                  ? () => setHostFirst((i) => (i + 1) % monitored.length)
+                  : undefined
+              }
+              title={cyclable ? "Cycle which host is shown first" : undefined}
+            >
+              Host
+              {cyclable && <span className="ports-table__arrow">⇅</span>}
+            </th>
+            {sortableTh("port", "Port")}
+            {sortableTh("address", "Address")}
+            {sortableTh("process", "Process")}
+            {sortableTh("pid", "PID")}
             <th />
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {sortedRows.map((r) => (
             <tr key={`${r.connId}:${r.address}:${r.port}`}>
               <td>
                 <span className="ports-table__host" style={{ color: r.color }}>
@@ -199,7 +276,7 @@ export function PortsView() {
               </td>
             </tr>
           ))}
-          {rows.length === 0 && (
+          {sortedRows.length === 0 && (
             <tr>
               <td colSpan={6} className="ports-table__empty">
                 No listening ports on the monitored hosts (system ports

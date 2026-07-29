@@ -302,8 +302,8 @@ export function FileNode({
             <Tip
               label={
                 trackedColor
-                  ? "In Source Control — open the panel"
-                  : "Add to Source Control"
+                  ? "Open in SC"
+                  : "Add to SC"
               }
             >
               <button

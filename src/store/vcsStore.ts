@@ -21,6 +21,7 @@ import {
   vcsStash,
   vcsStatus,
   vcsSwitch,
+  vcsTag,
   vcsUnstage,
   vcsUnwatch,
   vcsUpdate,
@@ -127,6 +128,8 @@ interface VcsState {
   createBranch: (connKey: string, root: string, name: string) => Promise<void>;
   amend: (connKey: string, root: string, message: string) => Promise<boolean>;
   stash: (connKey: string, root: string, op: "push" | "pop" | "drop", message: string) => Promise<void>;
+  /** Create an annotated tag at HEAD (git only), optionally pushing it. */
+  tag: (connKey: string, root: string, name: string, push: boolean) => Promise<void>;
   /** Merge onto the fetched upstream (git; the Incoming block's action). */
   updateFromRemote: (connKey: string, root: string) => Promise<void>;
   toggleCommitOpen: (connKey: string, root: string) => void;
@@ -611,6 +614,42 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       set((s) => ({
         repos: mapRepo(s.repos, connKey, root, (r) => ({ ...r, remoteBusy: null })),
       }));
+    }
+    await get().refreshRepo(connKey, root);
+  },
+
+  tag: async (connKey, root, name, push) => {
+    const repo = get().repos.find((r) => r.connKey === connKey && r.root === root);
+    const connId = repo?.connId;
+    if (!repo || !connId) return;
+    // The push half is a remote op — don't stack it on a running fetch/push.
+    if (push && repo.remoteBusy) {
+      useAppStore
+        .getState()
+        .pushNotice("info", `A ${repo.remoteBusy} is already running — cancel it first.`);
+      return;
+    }
+    if (push)
+      set((s) => ({
+        repos: mapRepo(s.repos, connKey, root, (r) => ({ ...r, remoteBusy: "push" })),
+      }));
+    try {
+      // Empty message → the backend annotates with the tag name.
+      const msg = await vcsTag(connId, root, name, "", push);
+      useAppStore.getState().pushNotice("info", msg);
+    } catch (e) {
+      const m = String(e);
+      if (m.includes("cancelled")) {
+        useAppStore.getState().pushNotice("info", "Tag push cancelled.");
+      } else {
+        // The backend crafts clear messages (incl. "tagged locally, push failed").
+        useAppStore.getState().pushNotice("error", m);
+      }
+    } finally {
+      if (push)
+        set((s) => ({
+          repos: mapRepo(s.repos, connKey, root, (r) => ({ ...r, remoteBusy: null })),
+        }));
     }
     await get().refreshRepo(connKey, root);
   },

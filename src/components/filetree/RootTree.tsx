@@ -554,8 +554,8 @@ export function RootTree({
         <Tip
           label={
             repoTracked
-              ? "In Source Control — open the panel"
-              : "Add to Source Control"
+              ? "Open in SC"
+              : "Add to SC"
           }
         >
           <button

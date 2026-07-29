@@ -77,6 +77,10 @@ export function useKeyboard() {
       const inEditable = !!target?.closest(
         "input, textarea, [contenteditable=true], .monaco-host, .terminal-host, .focus-view__pane",
       );
+      // A focused Transfers pane owns F2 / Delete for its own selection (its
+      // pane handler acts); the explorer keeps them everywhere else. Scoping by
+      // focus — not by "the tab is open" — is what lets both coexist.
+      const inTransfer = !!target?.closest(".transfer-pane");
 
       // FOCUS VIEW (F11) has its own tiny keymap — nothing may touch the
       // normal layout hiding underneath. Ctrl+Tab / Ctrl+PageDown/Up cycle
@@ -241,9 +245,7 @@ export function useKeyboard() {
           }
           break;
         case "renameSelected":
-          // The transfer panel owns F2/Delete while open (it has its own
-          // selection on a possibly different host).
-          if (!inEditable && !store.transferOpen && store.selected) {
+          if (!inEditable && !inTransfer && store.selected) {
             store.startRename(store.selected.connId, store.selected.path);
             event.preventDefault();
           }
@@ -254,7 +256,7 @@ export function useKeyboard() {
             : store.selected
               ? [store.selected]
               : [];
-          if (!inEditable && !store.transferOpen && targets.length) {
+          if (!inEditable && !inTransfer && targets.length) {
             store.openConfirmDelete(targets);
             event.preventDefault();
           }

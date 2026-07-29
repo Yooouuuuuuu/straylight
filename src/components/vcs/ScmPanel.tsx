@@ -31,6 +31,7 @@ import {
   IconToBar,
   IconPulseOff,
   IconRefresh,
+  IconTag,
   IconUndo,
 } from "../icons";
 
@@ -218,6 +219,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   const requestDiscard = useVcsStore((s) => s.requestDiscard);
   const amend = useVcsStore((s) => s.amend);
   const stash = useVcsStore((s) => s.stash);
+  const tag = useVcsStore((s) => s.tag);
   const toggleCommitOpen = useVcsStore((s) => s.toggleCommitOpen);
   const askConfirm = useVcsStore((s) => s.askConfirm);
   const [message, setMessage] = useState("");
@@ -225,6 +227,8 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
   const [amendMode, setAmendMode] = useState(false);
   const [branchOpen, setBranchOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [tagOpen, setTagOpen] = useState(false);
+  const [tagName, setTagName] = useState("");
   // Frame color = whose machine this repo lives on (host identity, not
   // per-repo; positional — re-render on remote reorder).
   useAppStore((s) => s.remotes);
@@ -253,6 +257,19 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
 
   const exitModes = () => {
     setAmendMode(false);
+  };
+
+  const tagAndPush = () => {
+    const name = tagName.trim();
+    if (!name) return;
+    askConfirm(
+      "Tag & push?",
+      `Create annotated tag "${name}" at HEAD and push it to the remote?`,
+      () => void tag(repo.connKey, repo.root, name, true),
+      "vcs-tag-push",
+    );
+    setTagOpen(false);
+    setTagName("");
   };
 
   const runCommit = async () => {
@@ -475,6 +492,7 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                     className={`icon-btn ${commitBoxOpen ? "icon-btn--active" : ""}`}
                     onClick={() => {
                       if (commitBoxOpen) exitModes();
+                      setTagOpen(false);
                       toggleCommitOpen(repo.connKey, repo.root);
                     }}
                   >
@@ -512,6 +530,25 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
                         ) : null}
                       </>
                     )}
+                  </button>
+                </Tip>
+              )}
+              {isGit && (
+                <Tip label="Tag & push a release">
+                  <button
+                    className={`icon-btn ${tagOpen ? "icon-btn--active" : ""}`}
+                    onClick={() => {
+                      setBranchOpen(false);
+                      setActionsOpen(false);
+                      const opening = !tagOpen;
+                      if (opening && commitBoxOpen) {
+                        exitModes();
+                        toggleCommitOpen(repo.connKey, repo.root);
+                      }
+                      setTagOpen(opening);
+                    }}
+                  >
+                    <IconTag size={13} />
                   </button>
                 </Tip>
               )}
@@ -644,6 +681,33 @@ function RepoCard({ repo }: { repo: TrackedRepo }) {
             }
           >
             {committing ? "Working…" : amendMode ? "Amend" : "Commit"}
+          </button>
+        </div>
+      )}
+
+      {tagOpen && !inactive && isGit && (
+        <div className="repo-card__commit">
+          <input
+            className="repo-card__msg input--mono"
+            autoFocus
+            placeholder="Tag name"
+            value={tagName}
+            onChange={(e) => setTagName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && tagName.trim()) {
+                e.preventDefault();
+                tagAndPush();
+              } else if (e.key === "Escape") {
+                setTagOpen(false);
+              }
+            }}
+          />
+          <button
+            className="btn btn--primary btn--block"
+            disabled={!tagName.trim()}
+            onClick={tagAndPush}
+          >
+            Tag &amp; push
           </button>
         </div>
       )}

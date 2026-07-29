@@ -717,6 +717,61 @@ pub async fn vcs_remote(
     })
 }
 
+/// Create an annotated tag at HEAD (git only), and optionally push just that tag
+/// to origin. Empty `message` → the tag name is used as the annotation. The push
+/// is cancellable (`vcs_remote_cancel`); if it fails, the local tag still stands
+/// so a retry only needs to push.
+#[tauri::command]
+pub async fn vcs_tag(
+    state: State<'_, AppState>,
+    conn_id: String,
+    root: String,
+    name: String,
+    message: String,
+    push: bool,
+) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("a tag needs a name".into());
+    }
+    let msg = if message.trim().is_empty() {
+        name
+    } else {
+        message.trim()
+    };
+    // Create the annotated tag — local and fast, under the repo write guard.
+    {
+        let lock = repo_guard(&state, &conn_id, &root).await;
+        let _held = lock.lock().await;
+        let out =
+            run_command(&state, &conn_id, &root, &["git", "tag", "-a", name, "-m", msg]).await?;
+        if out.code != 0 {
+            let e = out.stderr.trim();
+            return Err(if e.is_empty() {
+                format!("could not create tag {name}")
+            } else {
+                e.to_string()
+            });
+        }
+    }
+    if !push {
+        return Ok(format!("Tagged {name}"));
+    }
+    // Push only this tag (network, cancellable).
+    let out = run_cancellable(&state, &conn_id, &root, &["git", "push", "origin", name]).await?;
+    if out.code != 0 {
+        let e = format!("{}\n{}", out.stdout.trim(), out.stderr.trim())
+            .trim()
+            .to_string();
+        return Err(if e.is_empty() {
+            format!("Tagged {name} locally, but the push failed (exit {})", out.code)
+        } else {
+            format!("Tagged {name} locally, but the push failed: {e}")
+        });
+    }
+    Ok(format!("Tagged and pushed {name}"))
+}
+
 /// The files changed by one commit (vs its parent), for browsing history.
 #[tauri::command]
 pub async fn vcs_commit_files(

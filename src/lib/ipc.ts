@@ -512,6 +512,18 @@ export function vcsRemote(
   return invoke("vcs_remote", { connId, root, backend, op });
 }
 
+/** Create an annotated tag at HEAD (git only), optionally pushing it to origin.
+ *  Empty message → the tag name is used. Returns a status line for a toast. */
+export function vcsTag(
+  connId: string,
+  root: string,
+  name: string,
+  message: string,
+  push: boolean,
+): Promise<string> {
+  return invoke("vcs_tag", { connId, root, name, message, push });
+}
+
 /** Files changed by one commit (vs its parent), for browsing history. */
 export function vcsCommitFiles(
   connId: string,

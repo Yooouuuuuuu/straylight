@@ -3,7 +3,7 @@
  *  choices stick for the app session and reset on relaunch. Drag between the
  *  panes — or Ctrl+C / Ctrl+V — to copy; transfers run in the global store,
  *  so switching tabs mid-copy keeps them going. */
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { hostColorForConnKey, SECTION_LOCAL, SECTION_WSL } from "../../lib/hostColors";
 import { fsTransferCheck } from "../../lib/ipc";
@@ -33,7 +33,6 @@ export function TransfersView() {
   const remotes = useAppStore((s) => s.remotes);
   const pushNotice = useAppStore((s) => s.pushNotice);
   const runTransfer = useAppStore((s) => s.runTransfer);
-  const setTransferOpen = useAppStore((s) => s.setTransferOpen);
 
   const conns: TransferConn[] = [];
   if (localConnId)
@@ -80,12 +79,6 @@ export function TransfersView() {
     ) => void;
   } | null>(null);
   const busyRef = useRef(false);
-
-  // While shown, the panes own F2/Delete (not the explorer selection).
-  useEffect(() => {
-    setTransferOpen(true);
-    return () => setTransferOpen(false);
-  }, [setTransferOpen]);
 
   async function onDropInto(items: DragItem[], destConnId: string, destDir: string) {
     const xfer = items.filter((it) => it.connId !== destConnId);

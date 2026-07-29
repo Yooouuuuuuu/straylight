@@ -45,7 +45,6 @@ function Logo({ size = 16 }: { size?: number }) {
 }
 
 export function TitleBar() {
-  const remote = useAppStore((s) => s.remote);
   const settingsIssues = useAppStore((s) => s.settingsIssues);
   // F11: the palette button and the ⚙ menu (except Quick theme) LOCK — still
   // visible, not clickable. Disabled buttons don't fire the themed Tip, so
@@ -107,15 +106,12 @@ export function TitleBar() {
   // Keyboard contract from the shared hook: Enter closes (primary), Esc
   // stays, Tab/arrows cycle checkbox + buttons, focus trapped + restored.
   const dlg = useDialogKeys(() => setExitAsk(false), exitAsk);
-  // Native title = the connected host, so the taskbar and Alt+Tab can tell
-  // windows apart (the in-window title bar is custom-drawn).
+  // Native title stays the app name — the taskbar and Alt+Tab read
+  // "Straylight", not the connected host (the in-window bar is custom-drawn).
   useEffect(() => {
-    const title = remote
-      ? `${remote.user}@${remote.host} — Straylight`
-      : "Straylight";
-    appWindow.setTitle(title).catch(() => {});
+    appWindow.setTitle("Straylight").catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remote?.connId]);
+  }, []);
 
   const openPrefFile = (path: string | null, name: string) => {
     setMenuOpen(false);

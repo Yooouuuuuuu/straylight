@@ -105,13 +105,31 @@ function FinderModal({ onClose }: { onClose: () => void }) {
   );
 
   const fuse = useMemo(
-    () => new Fuse(entries, { keys: ["rel"], threshold: 0.4, ignoreLocation: true }),
+    () =>
+      new Fuse(entries, {
+        // Weight the filename well above the path: typing a name should rank
+        // the file itself over folders that merely share the letters. `rel`
+        // stays in at low weight so path fragments still find things.
+        keys: [
+          { name: "base", weight: 0.8, getFn: (e) => basename(e.rel) },
+          { name: "rel", weight: 0.2 },
+        ],
+        threshold: 0.4,
+        ignoreLocation: true,
+        includeScore: true,
+      }),
     [entries],
   );
 
   const results = useMemo<Entry[]>(() => {
     if (!query.trim()) return entries.slice(0, 200);
-    return fuse.search(query).slice(0, 200).map((x) => x.item);
+    // On equal fuzzy score, the shorter path wins — deterministic, instead of
+    // whatever order the filesystem walk happened to return.
+    return fuse
+      .search(query)
+      .sort((a, b) => (a.score! - b.score!) || a.item.rel.length - b.item.rel.length)
+      .slice(0, 200)
+      .map((x) => x.item);
   }, [entries, fuse, query]);
 
   useEffect(() => setActive(0), [query, pinIdx]);

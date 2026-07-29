@@ -84,20 +84,27 @@ interface HWidths {
 }
 const HW_KEY = "straylight.hwidths";
 const HW_DEFAULT: HWidths = { sidebar: 260, scm: 300, chat: 340 };
-/** Per-column drag bounds (px). */
+/** Per-column drag bounds (px). CHAT's max is proportional instead — see
+ *  chatMax; the value here is only its narrow-window nominal. */
 const HW_BOUNDS: Record<keyof HWidths, { min: number; max: number }> = {
   sidebar: { min: 160, max: 520 },
   scm: { min: 200, max: 620 },
   chat: { min: 220, max: 680 },
 };
+/** The Sessions (CHAT) column drags up to 4/5 of the window — far wider than
+ *  the fixed sidebar/SC maxes. The layout budget still shrinks it to protect
+ *  the editor's floor on narrow windows, so this only opens up on a wide one. */
+const chatMax = (winW: number) => Math.round(winW * 0.8);
 
 function loadHWidths(): HWidths {
   try {
     const parsed = JSON.parse(localStorage.getItem(HW_KEY) ?? "");
     if (parsed && typeof parsed === "object") {
+      const maxOf = (k: keyof HWidths) =>
+        k === "chat" ? chatMax(window.innerWidth) : HW_BOUNDS[k].max;
       const pick = (k: keyof HWidths) =>
         typeof parsed[k] === "number"
-          ? Math.min(HW_BOUNDS[k].max, Math.max(HW_BOUNDS[k].min, parsed[k]))
+          ? Math.min(maxOf(k), Math.max(HW_BOUNDS[k].min, parsed[k]))
           : HW_DEFAULT[k];
       return { sidebar: pick("sidebar"), scm: pick("scm"), chat: pick("chat") };
     }
@@ -629,7 +636,7 @@ export default function App() {
           key,
           leftSide ? 1 : -1,
           HW_BOUNDS[key].min,
-          HW_BOUNDS[key].max,
+          key === "chat" ? chatMax(win.w) : HW_BOUNDS[key].max,
         )}
       />
     );

@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { copyPath, downloadToLocal, pasteInto } from "../../lib/fileOps";
 import { dirname } from "../../lib/format";
 import { revealPath } from "../../lib/ipc";
+import { openSessionAt, openTerminalAt } from "../../lib/terminalTarget";
 import { useMenuClamp } from "../../hooks/useMenuClamp";
 import { useAppStore } from "../../store/appStore";
 import { Tip } from "../Tooltip";
@@ -108,6 +109,29 @@ export function ContextMenu() {
       >
         Paste<span className="context-menu__key">Ctrl+V</span>
       </button>
+      {menu.isDir && (
+        <>
+          <div className="context-menu__sep" />
+          <button
+            className="context-menu__item"
+            onClick={() => {
+              closeContextMenu();
+              openTerminalAt(menu.connId, menu.path);
+            }}
+          >
+            Open in Terminal
+          </button>
+          <button
+            className="context-menu__item"
+            onClick={() => {
+              closeContextMenu();
+              openSessionAt(menu.connId, menu.path);
+            }}
+          >
+            Open in Session
+          </button>
+        </>
+      )}
       {!isRoot && (
         <>
           <div className="context-menu__sep" />

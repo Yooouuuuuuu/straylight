@@ -11,6 +11,42 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-07-30
+
+### Added
+
+- **Tag & push, from Source Control.** git repo cards get a Tag button beside
+  Push: name a tag and it creates an annotated tag at the latest commit and
+  pushes it to the remote — the last step for a GitHub release. git-only (jj
+  repos don't show it), with a confirm before the push.
+- **Sort the Ports table.** Click Port, Address, Process, or PID to sort within
+  each host's group (click again to reverse); the Host header cycles which host
+  is shown first. Rows with an unknown process or PID sink to the bottom.
+- **Open a folder in a terminal or a session.** Right-click any folder in the
+  explorer → Open in Terminal or Open in Session, and a shell (or a CHAT agent
+  on its own connection) opens already changed into that folder.
+
+### Changed
+
+- **Quick Open ranks the filename first.** Ctrl+P now weights a match in the
+  file's name above one in its folder path, so typing a name surfaces the file
+  itself over folders that merely share the letters; ties break toward the
+  shorter path.
+- **The Sessions column can go wide.** Its drag limit is now about four-fifths
+  of the window (it was a fixed width), so an agent session can take most of the
+  room on a wide window.
+- **The window title is just "Straylight."** The taskbar and Alt-Tab name no
+  longer changes to the connected host.
+- **Source Control wording** in the explorer: the git button reads "Open in SC"
+  / "Add to SC."
+
+### Fixed
+
+- **Rename and Delete work in the Transfers panes — and the explorer keeps
+  them.** F2 and Delete inside a Transfers pane now act on that pane's selection
+  (they did nothing before), and opening the Transfers tab no longer disables
+  rename/delete over in the explorer: whichever pane has focus owns the keys.
+
 ## [0.11.1] - 2026-07-28
 
 ### Changed

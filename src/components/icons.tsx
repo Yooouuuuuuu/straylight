@@ -214,6 +214,21 @@ export function IconMore({ size = 16, className }: IconProps) {
   );
 }
 
+/** Tag — the SC panel's tag / release action. */
+export function IconTag({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path
+        d="M8.3 2.5H12A1.5 1.5 0 0 1 13.5 4v3.7a1.5 1.5 0 0 1-.44 1.06l-4.3 4.3a1.5 1.5 0 0 1-2.12 0L3.44 9.66a1.5 1.5 0 0 1 0-2.12l4.3-4.3A1.5 1.5 0 0 1 8.3 2.5Z"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinejoin="round"
+      />
+      <circle cx="10.5" cy="5.5" r="0.9" fill="currentColor" />
+    </svg>
+  );
+}
+
 /** Undo-arrow — discard changes, reset a keybinding to its default. */
 export function IconUndo({ size = 16, className }: IconProps) {
   return (

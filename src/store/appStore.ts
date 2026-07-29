@@ -638,9 +638,6 @@ interface AppState {
       }
     | { kind: "changed"; host: string; port: number }
     | null;
-  /** True while the transfer panel is open — so global F2/Delete don't act on
-   *  the explorer selection while the transfer pane owns those keys. */
-  transferOpen: boolean;
   /** The fuzzy file finder (Ctrl+P) overlay. */
   finderOpen: boolean;
   /** The search-in-files (Ctrl+Shift+F) overlay. */
@@ -746,7 +743,6 @@ interface AppState {
   closePassphrasePrompt: () => void;
   openHostKeyPrompt: (p: NonNullable<AppState["hostKeyPrompt"]>) => void;
   closeHostKeyPrompt: () => void;
-  setTransferOpen: (open: boolean) => void;
   setFinderOpen: (open: boolean) => void;
   setSearchOpen: (open: boolean) => void;
   setPortsOpen: (open: boolean) => void;
@@ -924,7 +920,7 @@ interface AppState {
     label: string,
     opts?: Pick<
       TerminalSession,
-      "scriptedInput" | "locked" | "usageProbe" | "laneConnId"
+      "scriptedInput" | "locked" | "usageProbe" | "laneConnId" | "initialInput"
     >,
   ) => string;
   /** Open a SESSIONS/F11 agent. On SSH/WSL hosts the agent gets its own
@@ -933,7 +929,11 @@ interface AppState {
    *  connections) it falls back to the shared main connection with a toast;
    *  on a dial failure nothing opens — the host is struggling, and that is
    *  surfaced rather than masked. Local agents just open (no SSH). */
-  openAgentInChat: (connId: string, label: string) => Promise<string | null>;
+  openAgentInChat: (
+    connId: string,
+    label: string,
+    opts?: { initialInput?: string },
+  ) => Promise<string | null>;
   /** Left→right arrangement of the editor + the two movable columns, after the
    *  pinned explorer. Persisted. */
   dockOrder: DockToken[];
@@ -1142,7 +1142,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   dialogNote: null,
   passphrasePrompt: null,
   hostKeyPrompt: null,
-  transferOpen: false,
   finderOpen: false,
   searchOpen: false,
   portsOpen: false,
@@ -1375,7 +1374,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   closePassphrasePrompt: () => set({ passphrasePrompt: null }),
   openHostKeyPrompt: (hostKeyPrompt) => set({ hostKeyPrompt }),
   closeHostKeyPrompt: () => set({ hostKeyPrompt: null }),
-  setTransferOpen: (transferOpen) => set({ transferOpen }),
   setFinderOpen: (finderOpen) => set({ finderOpen }),
   setSearchOpen: (searchOpen) => set({ searchOpen }),
   setPortsOpen: (portsOpen) => set({ portsOpen }),
@@ -1556,21 +1554,21 @@ export const useAppStore = create<AppState>()((set, get) => ({
     return id;
   },
 
-  openAgentInChat: async (connId, label) => {
+  openAgentInChat: async (connId, label, opts) => {
     const s = get();
     // Lazy import — settings.ts imports this store, so a static import here
     // would be a module cycle.
     const { sessionConnConfig } = await import("../lib/settings");
     // Local agents have no SSH; max 0 = "always share" (documented setting).
     if (connId === s.localConnId || sessionConnConfig.max === 0) {
-      return s.openTerminalInChat(connId, label);
+      return s.openTerminalInChat(connId, label, opts);
     }
     try {
       const laneId = await sessionLaneConnect(connId, label, sessionConnConfig.max);
       // No toast: a dedicated lane is internal plumbing. Whether this agent got
       // its own connection or shares the main one shows on demand in the
       // status-bar host tooltip, not as an interruption.
-      return get().openTerminalInChat(connId, label, { laneConnId: laneId });
+      return get().openTerminalInChat(connId, label, { ...opts, laneConnId: laneId });
     } catch (e) {
       const msg = String(e);
       if (msg.includes("SESSION_LANE_LIMIT:")) {
@@ -1582,7 +1580,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
           "warn",
           `New session "${label}" opened on ${host}'s shared connection — all ${sessionConnConfig.max} dedicated session connections are already taken by other sessions. It works normally; to give more sessions their own connection, raise Preferences → Session connections.`,
         );
-        return get().openTerminalInChat(connId, label);
+        return get().openTerminalInChat(connId, label, opts);
       }
       get().pushNotice(
         "error",

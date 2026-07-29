@@ -743,6 +743,22 @@
   border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
 }
 
+.ports-table__th--sort {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.ports-table__th--sort:hover {
+  color: var(--fg-primary);
+}
+
+.ports-table__arrow {
+  margin-left: var(--space-1);
+  font-size: 0.85em;
+  opacity: 0.75;
+}
+
 .ports-table__host {
   font-weight: 600;
 }

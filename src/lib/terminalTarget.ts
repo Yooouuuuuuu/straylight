@@ -26,10 +26,27 @@ export function openTerminalAt(connId: string, path: string): void {
     : (s.remotes.find((r) => r.conn.connId === connId)?.conn.name ??
       s.wsls.find((w) => w.conn.connId === connId)?.conn.name ??
       "Shell");
-  // Single-quoted literals work in both PowerShell (local) and POSIX shells
-  // (WSL/remote); only the embedded-quote escape differs.
-  const cd = local
+  s.openTerminal(connId, label, null, cdInto(connId, path));
+}
+
+/** Open a CHAT-column agent session on the folder's host, cd'd into it — like
+ *  openTerminalAt, but as a session (its own connection lane on SSH/WSL). */
+export function openSessionAt(connId: string, path: string): void {
+  const s = useAppStore.getState();
+  const local = connId === s.localConnId;
+  const label = local
+    ? "Local"
+    : (s.remotes.find((r) => r.conn.connId === connId)?.conn.name ??
+      s.wsls.find((w) => w.conn.connId === connId)?.conn.name ??
+      "Shell");
+  void s.openAgentInChat(connId, label, { initialInput: cdInto(connId, path) });
+}
+
+/** A `cd '<path>'` line that works in both PowerShell (local) and POSIX shells
+ *  (WSL/remote) — single-quoted literal, only the embedded-quote escape differs. */
+function cdInto(connId: string, path: string): string {
+  const local = connId === useAppStore.getState().localConnId;
+  return local
     ? `cd '${path.replace(/'/g, "''")}'`
     : `cd '${path.replace(/'/g, "'\\''")}'`;
-  s.openTerminal(connId, label, null, cd);
 }

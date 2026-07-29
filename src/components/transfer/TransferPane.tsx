@@ -509,7 +509,20 @@ export function TransferPane({
   const menuOnRoot = menu?.entry ? isRoot(menu.entry.path) : false;
 
   return (
-    <div className="transfer-pane" tabIndex={0} onKeyDown={onKeyDown}>
+    <div
+      className="transfer-pane"
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+      onMouseDown={(event) => {
+        // Focus the pane so its own F2 / Delete / Ctrl+C·V handler fires —
+        // clicking a row selects but doesn't focus, so the keys would
+        // otherwise go nowhere (mirrors the explorer sidebar's focus-on-click).
+        const el = event.target as HTMLElement;
+        if (!el.closest("input, select, textarea, button")) {
+          event.currentTarget.focus();
+        }
+      }}
+    >
       <div className="transfer-pane__head">
         {/* The picker IS the identity — its selected option reads
             "Ubuntu (user@ip)" in the host color — then the pane's buttons. */}
