@@ -11,6 +11,22 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-07-30
+
+### Fixed
+
+- **A conflicting "update from remote" no longer breaks the repo.** When the
+  Incoming block's merge hits conflicts, Straylight now rolls the merge back to
+  a clean working tree and tells you to resolve it in a terminal — instead of
+  leaving half-merged files behind (which could corrupt tracked files like
+  package.json and wedge the app).
+
+### Changed
+
+- **"Add to SC" on a non-repository is quieter.** Clicking it on a folder that
+  isn't a git or jj repo now shows a short, plain note ("… isn't a repository —
+  run git init in a terminal first.") instead of a long red error.
+
 ## [0.11.2] - 2026-07-30
 
 ### Added

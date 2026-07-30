@@ -369,19 +369,19 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
     try {
       info = await vcsOpen(connId, dir);
     } catch (e) {
-      // Not a repo (or unreachable): toast and leave the panel closed. The
-      // not-a-repo case points at the terminal — no Init button by design
-      // (git vs jj vs colocate is the user's call, not ours).
+      // Not a repo (or unreachable): toast and leave the panel closed.
       const msg = String(e);
       const name = basename(dir) || dir;
-      useAppStore
-        .getState()
-        .pushNotice(
-          "error",
-          /not a git or jj repository/i.test(msg)
-            ? `${name} isn't a repository yet — run git init (or jj git init) in a terminal there to create one.`
-            : `${name}: ${msg}`,
-        );
+      if (/not a git or jj repository/i.test(msg)) {
+        // Expected, not an error — there's just no repo to open here. Point at
+        // the terminal; no Init button by design (git vs jj vs colocate is the
+        // user's call, not ours).
+        useAppStore
+          .getState()
+          .pushNotice("info", `${name} isn't a repository — run git init in a terminal first.`);
+      } else {
+        useAppStore.getState().pushNotice("error", `${name}: ${msg}`);
+      }
       return;
     }
     const root = info.root;
@@ -748,6 +748,10 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       const msg = String(e);
       if (msg.includes("cancelled")) {
         useAppStore.getState().pushNotice("info", "Update cancelled.");
+      } else if (/conflict|auto-merge/i.test(msg)) {
+        // The backend already rolled the conflicting merge back; its message
+        // explains what to do. Show it as-is (a warning, not a hard failure).
+        useAppStore.getState().pushNotice("warn", msg);
       } else {
         useAppStore.getState().pushNotice("error", `Update failed: ${msg}`);
       }

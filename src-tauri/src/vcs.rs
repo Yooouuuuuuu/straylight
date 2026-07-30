@@ -675,6 +675,21 @@ pub async fn vcs_update(
         .trim()
         .to_string();
     if out.code != 0 {
+        // A conflicting merge leaves the working tree half-applied — conflict
+        // markers written into files (this is what corrupted package.json and
+        // broke a restart). Never leave the user there: roll the merge back so
+        // the tree is clean again, and point them at the terminal. Resolving
+        // conflicts is git work Straylight signposts rather than wraps.
+        if msg.contains("CONFLICT") || msg.contains("Automatic merge failed") {
+            // Best-effort restore of the pre-merge state (nothing to undo → no-op).
+            let _ = run_command(&state, &conn_id, &root, &["git", "merge", "--abort"]).await;
+            return Err(
+                "Couldn't auto-merge — the local branch and the remote have conflicting \
+                 changes. The merge was rolled back (nothing left half-applied); resolve it \
+                 in a terminal: git pull, fix the conflicts, then commit."
+                    .into(),
+            );
+        }
         return Err(if msg.is_empty() { "update failed".into() } else { msg });
     }
     Ok(if msg.is_empty() { "Up to date.".into() } else { msg })
