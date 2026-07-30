@@ -344,7 +344,7 @@ export function TransferPane({
     // are pinned-dir views, so they're excluded — manage them in the explorer.
     if (event.key === "F2") {
       if (selection.length === 1 && !isRoot(selection[0].path)) {
-        startRename(connId, selection[0].path);
+        startRename(connId, selection[0].path, "transfer");
       }
       event.preventDefault();
       return;
@@ -390,7 +390,10 @@ export function TransferPane({
 
   const renderRow = (e: FileEntry, depth: number, keyBase: string): ReactNode => {
     const isExp = expanded.has(e.path);
-    const isRenaming = renaming?.connId === connId && renaming?.path === e.path;
+    const isRenaming =
+      renaming?.scope === "transfer" &&
+      renaming?.connId === connId &&
+      renaming?.path === e.path;
     // Dropping on a folder drops into it; dropping on a file drops into its
     // parent folder (so there are no "forbidden" dead rows mid-drag).
     const dropDir = e.isDir ? e.path : dirname(e.path);
@@ -661,7 +664,7 @@ export function TransferPane({
                 onClick={() => {
                   const e = menu.entry!;
                   setMenu(null);
-                  startRename(connId, e.path);
+                  startRename(connId, e.path, "transfer");
                 }}
               >
                 Rename<span className="context-menu__key">F2</span>

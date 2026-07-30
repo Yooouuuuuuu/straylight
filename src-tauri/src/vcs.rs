@@ -598,9 +598,12 @@ pub async fn vcs_stash(
 }
 
 /// Run a remote-facing command so it can be cancelled: `vcs_remote_cancel`
-/// drops the in-flight future, which closes the SSH channel (killing the
-/// remote command) or kills the local child — the escape hatch for an
-/// interactive-auth hang on the no-TTY exec channel.
+/// drops the in-flight future. The exec channel rides a `ChannelGuard`, so the
+/// drop sends CHANNEL_CLOSE and frees the server's session slot (killing the
+/// remote command); the local path kills the child. This is the escape hatch
+/// for an interactive-auth hang on the no-TTY exec channel. (Historically the
+/// drop leaked the slot — a plain russh `Channel` closes on nothing; incident
+/// 2026-07-29 Defect A.)
 async fn run_cancellable(
     state: &AppState,
     conn_id: &str,

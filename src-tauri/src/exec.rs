@@ -125,29 +125,47 @@ async fn run_ssh(conn: &Connection, cwd: &str, argv: &[&str]) -> Result<CmdOutpu
 }
 
 /// Run a raw shell command over an SSH exec channel and collect its output.
+/// The channel rides a [`ChannelGuard`]: if this future is dropped mid-command
+/// (e.g. `run_cancellable` cancels a hung `git fetch`), the guard's Drop still
+/// sends CHANNEL_CLOSE — without it, the slot leaked and the remote process was
+/// orphaned (incident 2026-07-29 Defect A, the top-ranked leak).
 async fn exec_ssh(conn: &Connection, command: &str) -> Result<CmdOutput, String> {
     use russh::ChannelMsg;
+    use std::time::Duration;
 
-    let mut channel = conn.open_channel().await?;
+    let mut channel = conn.open_channel("exec").await?;
     channel
         .exec(true, command.as_bytes())
         .await
-        .map_err(|e| format!("could not start command: {e}"))?;
+        .map_err(|e| format!("could not start command: {e}"))?; // guard closes on ?
 
     let mut stdout: Vec<u8> = Vec::new();
     let mut stderr: Vec<u8> = Vec::new();
     let mut code: Option<i32> = None;
     // Read to the end of the channel; ExitStatus can arrive before or after Eof,
-    // so we keep going until the channel actually closes.
+    // so we keep going until the channel actually closes. But once Eof is seen,
+    // a Close should follow promptly — bound the wait so a server that sends Eof
+    // and then goes silent can't park us forever holding the slot.
+    let mut saw_eof = false;
     loop {
-        match channel.wait().await {
+        let msg = if saw_eof {
+            match tokio::time::timeout(Duration::from_secs(5), channel.wait()).await {
+                Ok(m) => m,
+                Err(_) => break, // Eof but no Close in 5s — stop holding the channel
+            }
+        } else {
+            channel.wait().await
+        };
+        match msg {
             Some(ChannelMsg::Data { data }) => stdout.extend_from_slice(&data),
             Some(ChannelMsg::ExtendedData { data, .. }) => stderr.extend_from_slice(&data),
             Some(ChannelMsg::ExitStatus { exit_status }) => code = Some(exit_status as i32),
+            Some(ChannelMsg::Eof) => saw_eof = true,
             Some(ChannelMsg::Close) | None => break,
             _ => {}
         }
     }
+    channel.close().await; // deterministic hang-up on the normal path
     Ok(CmdOutput {
         stdout: String::from_utf8_lossy(&stdout).into_owned(),
         stderr: String::from_utf8_lossy(&stderr).into_owned(),

@@ -22,7 +22,9 @@ export function connStateTip(state: string): string {
     case "connecting":
       return "Connecting…";
     case "reconnecting":
-      return "Reconnecting — retries until you disconnect";
+      return "Reconnecting — backing off, will stop after a few minutes";
+    case "failed":
+      return "Reconnect gave up — click to try again";
     case "degraded":
       return "Stalled — terminals stay open, no restart";
     default:

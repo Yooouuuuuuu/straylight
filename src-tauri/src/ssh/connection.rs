@@ -2,7 +2,7 @@
 //! `ProxyJump` bastions, and the shared [`Connection`] handle that the SFTP and
 //! PTY layers build channels on top of.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,10 +12,20 @@ use russh::Channel;
 use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::{watch, Mutex, RwLock};
+use tokio::sync::{watch, Mutex, OwnedSemaphorePermit, RwLock, Semaphore};
 use uuid::Uuid;
 
 use crate::AppState;
+
+/// Client-side session-channel cap, held BELOW the server's `MaxSessions`
+/// (default 10) so our own accounting — not sshd's silent, permanent refusal —
+/// is the backpressure (incident 2026-07-29 M10). Every terminal, SFTP session,
+/// and exec counts against it. Shrinks in-session if a stricter server refuses
+/// under this (see `note_open_failure`).
+const CHANNEL_BUDGET: usize = 8;
+/// How long `open_channel` waits for a budget permit before giving up with a
+/// friendly "session limit" error rather than blocking a UI action forever.
+const CHANNEL_WAIT: Duration = Duration::from_secs(10);
 
 /// How to authenticate to a server. Serialized from the frontend as an
 /// internally-tagged enum: `{ "type": "password", "password": "..." }` for a
@@ -58,6 +68,11 @@ pub enum ConnectionState {
     /// (docs/connections.md).
     Degraded,
     Reconnecting,
+    /// Gave up after the reconnect cap (incident 2026-07-29 M15): the supervisor
+    /// has parked and will not dial again on its own. The user's Reconnect
+    /// button re-arms it. Stops the ~2/min-forever storm that flooded the
+    /// server's auth log for 8 hours.
+    Failed,
     Disconnected,
 }
 
@@ -75,6 +90,29 @@ pub struct ConnectionInfo {
     pub host: String,
     pub port: u16,
     pub user: String,
+}
+
+/// Shared across every lane of ONE host (main, data, session, transfer) so
+/// reconnection is orderly instead of a same-second storm of N parallel dials
+/// (incident 2026-07-29 M16 — the user's sequential-recovery design):
+///  - `token`: one dial in flight per host. Every reestablish / sibling open /
+///    manual reconnect takes it, so sshd never sees our handshakes race.
+///  - `main_up`: is the MAIN lane currently up? Child lanes (data, session)
+///    wait for `true` before redialing, so main is always the pathfinder — on a
+///    whole-host drop the server sees one polite backoff cycle on main, then the
+///    children recover one at a time through the token, rather than all at once.
+struct DialGate {
+    token: Mutex<()>,
+    main_up: watch::Sender<bool>,
+}
+
+impl DialGate {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            token: Mutex::new(()),
+            main_up: watch::Sender::new(true),
+        })
+    }
 }
 
 /// The live transport for a connection: the authenticated handle plus, when
@@ -128,11 +166,13 @@ pub struct Connection {
     /// When the last data-lane dial failed (cooldown: retry at most once a
     /// minute; between tries data work shares this lane).
     data_fail: std::sync::Mutex<Option<std::time::Instant>>,
-    /// Serializes **session lane** dials for this host (one handshake at a
-    /// time — politeness toward sshd's MaxStartups; also makes the cap check
-    /// race-free). Session lanes are per-agent connections created by the
-    /// SESSIONS ＋ (docs/connections.md Phase D).
-    session_dial: Mutex<()>,
+    /// The host-wide dial gate (see [`DialGate`]) — shared by every lane of
+    /// this host. Replaces the old per-connection `session_dial` mutex: it now
+    /// serializes ALL dials (reconnects included), not just session-lane opens.
+    gate: Arc<DialGate>,
+    /// True only for the host's MAIN lane. The main lane owns `main_up`; child
+    /// lanes read it (wait for main before redialing).
+    is_main: bool,
     /// This lane's dial profile — compression, keepalive tolerance, and
     /// channel window differ by lane kind (docs/connections.md).
     /// Reconnects re-negotiate the same profile.
@@ -141,6 +181,93 @@ pub struct Connection {
     /// transfers subscribe and yank themselves off the dead session the moment
     /// the lane reconnects, then auto-resume (docs/connections.md Phase 2).
     epoch: watch::Sender<u64>,
+    /// Session-channel budget (incident 2026-07-29 M10): permits held BELOW the
+    /// server's MaxSessions so we can never wedge ourselves at sshd's wall. A
+    /// `ChannelGuard` holds one permit for the channel's whole life. Behind an
+    /// `Arc` because guards outlive individual borrows (they ride tasks).
+    channel_budget: Arc<Semaphore>,
+    /// Peak concurrent channels ever seen on this lane — lets a later refusal
+    /// tell "we leaked ghosts" (peak was higher) from "this server is just
+    /// strict" (never got above the wall). See `note_open_failure`.
+    channel_peak: AtomicUsize,
+    /// Unix millis of the last self-recycle triggered by a suspected ghost
+    /// leak — a 10-minute breaker so a genuinely strict server can't loop.
+    last_recycle: AtomicU64,
+    /// Set by `note_open_failure` when a refusal looks like leaked ghost slots;
+    /// the supervisor picks it up and recycles the transport (reusing the same
+    /// reconnect path that restarts terminals). Immune to the F23 loop via the
+    /// `last_recycle` breaker.
+    wedged: AtomicBool,
+}
+
+/// RAII wrapper around a session channel that makes CHANNEL_CLOSE impossible to
+/// skip (incident 2026-07-29 M8/M9). Dropping a plain russh `Channel` sends
+/// NOTHING — the server keeps counting the slot until the whole connection dies
+/// (verified in russh 0.62.4: only `.into_stream()` wraps `ChannelCloseOnDrop`).
+/// So every abandon path — an early `?`, a cancelled future, a panicking task —
+/// must still hang up. This guard's `Drop` spawns a best-effort close; call
+/// `close()` to await it, or `into_inner()`/`defuse()` when the channel is being
+/// handed to `.into_stream()` or the server already closed it.
+pub struct ChannelGuard {
+    channel: Option<Channel<client::Msg>>,
+    _permit: OwnedSemaphorePermit,
+    purpose: &'static str,
+    lane: String,
+}
+
+impl ChannelGuard {
+    /// Take ownership of the channel — the caller guarantees another mechanism
+    /// closes it (`.into_stream()`'s ChannelCloseOnDrop, or the server already
+    /// closed). The permit rides with the guard until here, so accounting is
+    /// still correct up to the handoff.
+    pub fn into_inner(mut self) -> Channel<client::Msg> {
+        crate::diag::event(
+            "channel",
+            format!("{}/{}: handed to stream (accounting released)", self.lane, self.purpose),
+        );
+        self.channel.take().expect("channel taken twice")
+    }
+
+    /// Explicitly close now (bounded), consuming the guard — the deterministic
+    /// happy-path hang-up. Never blocks the caller on a half-open socket.
+    pub async fn close(mut self) {
+        if let Some(ch) = self.channel.take() {
+            let _ = tokio::time::timeout(Duration::from_secs(3), ch.close()).await;
+            crate::diag::event("channel", format!("{}/{}: closed", self.lane, self.purpose));
+        }
+    }
+}
+
+impl std::ops::Deref for ChannelGuard {
+    type Target = Channel<client::Msg>;
+    fn deref(&self) -> &Self::Target {
+        self.channel.as_ref().expect("channel used after close")
+    }
+}
+
+impl std::ops::DerefMut for ChannelGuard {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.channel.as_mut().expect("channel used after close")
+    }
+}
+
+impl Drop for ChannelGuard {
+    fn drop(&mut self) {
+        // Only fires on a path that DIDN'T call close()/into_inner() — an early
+        // return, a cancelled future, a panic. Spawn a detached close so a
+        // dropped-mid-command channel still sends CHANNEL_CLOSE and frees the
+        // slot (the exact leak from the incident's run_cancellable path).
+        if let Some(ch) = self.channel.take() {
+            let (lane, purpose) = (self.lane.clone(), self.purpose);
+            crate::diag::event(
+                "channel",
+                format!("{lane}/{purpose}: abandoned — closing on drop (leak guard)"),
+            );
+            tokio::spawn(async move {
+                let _ = tokio::time::timeout(Duration::from_secs(3), ch.close()).await;
+            });
+        }
+    }
 }
 
 fn now_millis() -> u64 {
@@ -167,15 +294,17 @@ impl Connection {
         if let Some(session) = guard.as_ref() {
             return Ok(session.clone());
         }
-        let channel = self.open_channel().await?;
+        let channel = self.open_channel("sftp").await?;
         channel
             .request_subsystem(true, "sftp")
             .await
-            .map_err(|e| format!("failed to start SFTP subsystem: {e}"))?;
+            .map_err(|e| format!("failed to start SFTP subsystem: {e}"))?; // guard closes on ?
         // 32 pipelined write acks (default 8): uploads are throughput ÷
         // round-trip too — 8 × 255 KB capped a 37 ms route at ~54 MB/s.
+        // into_inner() hands the channel to the stream (ChannelCloseOnDrop owns
+        // the hang-up from here); the budget permit releases at the handoff.
         let session = SftpSession::new_with_config(
-            channel.into_stream(),
+            channel.into_inner().into_stream(),
             russh_sftp::client::Config {
                 max_concurrent_writes: 32,
                 ..Default::default()
@@ -231,7 +360,7 @@ impl Connection {
         self: &Arc<Self>,
         app: &AppHandle,
     ) -> Result<Arc<Connection>, String> {
-        let _dial = self.session_dial.lock().await;
+        let _dial = self.gate.token.lock().await; // one dial in flight per host
         let id = format!("{}::transfer-{}", self.id, &Uuid::new_v4().to_string()[..8]);
         emit_status(app, &id, ConnectionState::Connecting, None);
         match open_sibling(self, id.clone(), LANE_TRANSFER).await {
@@ -274,6 +403,7 @@ impl Connection {
         }
         let id = format!("{}::data", self.id);
         emit_status(app, &id, ConnectionState::Connecting, None);
+        let _dial = self.gate.token.lock().await; // one dial in flight per host
         // No compression on the data lane: bulk transfers are the one place
         // zlib turns from a slow-link win into a hard CPU ceiling.
         match open_sibling(self, id.clone(), LANE_DATA).await {
@@ -298,21 +428,106 @@ impl Connection {
         }
     }
 
-    /// Open a fresh session channel on the live handle. Used by SFTP, the PTY
-    /// layer, and exec; reading the lock means a reconnect (which write-locks)
-    /// is briefly serialized against new channels.
-    pub async fn open_channel(&self) -> Result<Channel<client::Msg>, String> {
-        self.open_channel_raw().await.map_err(|e| match e {
-            // The refusal users actually hit: the server's per-connection
-            // session cap — every terminal, the file browser (SFTP), and each
-            // background command counts against it.
-            russh::Error::ChannelOpenFailure(_) => {
-                "the server's session limit is reached (sshd MaxSessions, default 10) — \
-                 close a terminal, or raise MaxSessions in sshd_config"
-                    .to_string()
+    /// Open a session channel wrapped in a [`ChannelGuard`] so it can never be
+    /// abandoned without a CHANNEL_CLOSE (incident 2026-07-29 M8/M9), and gated
+    /// by this lane's channel budget so we can't wedge ourselves at sshd's
+    /// `MaxSessions` (M10). `purpose` is a short static label for the diag log
+    /// ("pty", "exec", "sftp", "sftp-fast"). Used by SFTP, the PTY layer, and
+    /// exec; reading the live lock means a reconnect (which write-locks) is
+    /// briefly serialized against new channels.
+    pub async fn open_channel(&self, purpose: &'static str) -> Result<ChannelGuard, String> {
+        // Budget first: never even attempt a channel the server can't grant.
+        let permit = match tokio::time::timeout(
+            CHANNEL_WAIT,
+            self.channel_budget.clone().acquire_owned(),
+        )
+        .await
+        {
+            Ok(Ok(p)) => p,
+            Ok(Err(_)) => return Err("connection is closing".to_string()),
+            Err(_) => {
+                return Err(
+                    "this host is at its session limit — close a terminal or the file \
+                     browser and try again"
+                        .to_string(),
+                )
             }
-            e => format!("could not open SSH channel: {e}"),
-        })
+        };
+        match self.open_channel_raw().await {
+            Ok(channel) => {
+                // Track the high-water mark (permits already reflects this open).
+                let open_now = CHANNEL_BUDGET - self.channel_budget.available_permits();
+                self.channel_peak.fetch_max(open_now, Ordering::Relaxed);
+                Ok(ChannelGuard {
+                    channel: Some(channel),
+                    _permit: permit,
+                    purpose,
+                    lane: self.id.clone(),
+                })
+            }
+            Err(russh::Error::ChannelOpenFailure(_)) => {
+                // We were UNDER our own cap yet the server refused — either it's
+                // stricter than us, or we've leaked ghost slots. Drop this
+                // attempt's permit first so the count reflects real channels.
+                drop(permit);
+                self.note_open_failure();
+                Err("the server's session limit is reached (sshd MaxSessions) — \
+                     Straylight is recovering the connection"
+                    .to_string())
+            }
+            Err(e) => {
+                drop(permit);
+                Err(format!("could not open SSH channel: {e}"))
+            }
+        }
+    }
+
+    /// A server refusal reached us while our own budget said there was room.
+    /// Discriminate leaked ghosts (recycle once) from a genuinely strict server
+    /// (adapt our cap, never loop) — incident 2026-07-29 M11.
+    fn note_open_failure(&self) {
+        let open_now = CHANNEL_BUDGET - self.channel_budget.available_permits();
+        let peak = self.channel_peak.load(Ordering::Relaxed);
+        if peak > open_now {
+            // We once held more channels than we do now, yet the server still
+            // refuses at this lower count → it's counting slots we lost track
+            // of. Recycle the transport (once per 10 min) to reclaim them.
+            let now = now_millis();
+            let last = self.last_recycle.load(Ordering::Relaxed);
+            if now.saturating_sub(last) > 10 * 60 * 1000 {
+                self.last_recycle.store(now, Ordering::Relaxed);
+                self.wedged.store(true, Ordering::SeqCst);
+                crate::diag::alert(
+                    "warn",
+                    format!(
+                        "Connection to {} hit the host's session limit with leaked slots \
+                         (held {peak}, now {open_now}) — recycling to reclaim them.",
+                        self.info.host
+                    ),
+                );
+            } else {
+                crate::diag::event(
+                    "recycle",
+                    format!("{}: refusal within breaker window — not recycling again", self.id),
+                );
+            }
+        } else {
+            // Never got above this count → this IS the server's ceiling. Shrink
+            // our budget to it so we queue politely instead of hammering the
+            // wall (permanent for this app session).
+            let free = self.channel_budget.available_permits();
+            if free > 0 {
+                self.channel_budget.forget_permits(free);
+                crate::diag::alert(
+                    "warn",
+                    format!(
+                        "Host {} allows only {open_now} concurrent sessions — Straylight will \
+                         queue new terminals rather than fail.",
+                        self.info.host
+                    ),
+                );
+            }
+        }
     }
 
     /// Open a `direct-tcpip` channel to `host:port` as reachable from the server
@@ -844,9 +1059,14 @@ pub async fn ssh_connect(
         last_activity: AtomicU64::new(now_millis()),
         data: Mutex::new(None),
         data_fail: std::sync::Mutex::new(None),
-        session_dial: Mutex::new(()),
+        gate: DialGate::new(),
+        is_main: true,
         profile: LANE_MAIN,
         epoch: watch::Sender::new(0),
+        channel_budget: Arc::new(Semaphore::new(CHANNEL_BUDGET)),
+        channel_peak: AtomicUsize::new(0),
+        last_recycle: AtomicU64::new(0),
+        wedged: AtomicBool::new(false),
     });
 
     state
@@ -974,6 +1194,11 @@ pub async fn ssh_reconnect(
             conn.touch_activity();
             *conn.state.lock().await = ConnectionState::Connected;
             emit_status(&app, &conn_id, ConnectionState::Connected, None);
+            // Release any child lanes that were parked waiting for main after a
+            // give-up, and re-arm the supervisor.
+            if conn.is_main {
+                conn.gate.main_up.send_replace(true);
+            }
             ensure_supervisor(app, conn);
             log::info!("connection {conn_id} reconnected (manual)");
             Ok(())
@@ -1087,9 +1312,10 @@ pub async fn session_lane_connect(
     limit: u32,
 ) -> Result<String, String> {
     let parent = state.ssh_connection(&conn_id).await?;
-    // Serialize the cap check + dial per host: no race can overshoot the cap,
-    // and sshd never sees more than one handshake from us at a time.
-    let _dial = parent.session_dial.lock().await;
+    // Serialize the cap check + dial per host through the shared gate token: no
+    // race can overshoot the cap, and sshd never sees more than one handshake
+    // from us at a time (this also serializes against reconnect dials).
+    let _dial = parent.gate.token.lock().await;
     let prefix = format!("{conn_id}::session-");
     let count = state
         .sessions
@@ -1161,15 +1387,34 @@ enum Probe {
 /// Watch a connection's health. Doubt (probe timeouts) only marks the
 /// connection `Degraded` — every channel stays open; most stalls recover and
 /// nothing is lost. Only hard evidence (a transport error, confirmed twice)
-/// moves to `Reconnecting` + the reestablish loop, which retries with backoff
-/// (capped at 30 s) until it recovers or the user disconnects — never give up
-/// on our own (the house no-automatic-timeouts rule: the user decides).
+/// moves to `Reconnecting` + `reconnect_after`, which recovers sequentially
+/// (children wait for main) with jittered backoff, and — unlike before — GIVES
+/// UP after `MAX_RECONNECT_ATTEMPTS`, parking in `Failed` so a dead host can't
+/// drive a forever reconnect storm (incident 2026-07-29). The user's Reconnect
+/// re-arms it.
 async fn supervise(app: AppHandle, conn: Arc<Connection>) {
     // When the current Degraded episode started (None = healthy).
     let mut degraded_since: Option<std::time::Instant> = None;
     loop {
         if sleep_or_stopped(&conn, PROBE_INTERVAL_SECS).await {
             return;
+        }
+
+        // The channel accounting flagged a ghost-slot wedge — recycle the
+        // transport (reuses the reconnect path, so terminals restart). The
+        // last_recycle breaker already gated this to at most once per 10 min.
+        if conn.wedged.swap(false, Ordering::SeqCst) {
+            if conn.is_stopped() {
+                return;
+            }
+            log::warn!("connection {} recycling to reclaim leaked session slots", conn.id);
+            crate::diag::event("recycle", format!("{}: recycling (ghost slots)", conn.id));
+            if reconnect_after(&app, &conn, "leaked session slots reclaimed", &mut degraded_since)
+                .await
+            {
+                return;
+            }
+            continue;
         }
 
         // Traffic within the last interval is proof of life — skip the probe
@@ -1266,62 +1511,166 @@ async fn supervise(app: AppHandle, conn: Arc<Connection>) {
                 if conn.is_stopped() {
                     return;
                 }
-
-                let stalled = degraded_since
-                    .take()
-                    .map(|s| format!(" after {}s degraded", s.elapsed().as_secs()))
-                    .unwrap_or_default();
-                *conn.state.lock().await = ConnectionState::Reconnecting;
-                emit_status(
-                    &app,
-                    &conn.id,
-                    ConnectionState::Reconnecting,
-                    Some(format!("connection lost ({cause}) — reconnecting…")),
-                );
-                log::warn!(
-                    "connection {} transport dead ({cause}){stalled}; reconnecting",
-                    conn.id
-                );
-
-                let mut delay = 1u64;
-                let mut attempt = 0u32;
-                loop {
-                    if conn.is_stopped() {
-                        return;
-                    }
-                    attempt += 1;
-                    match reestablish(&conn).await {
-                        Ok(()) => {
-                            conn.reset_sftp().await;
-                            conn.touch_activity();
-                            *conn.state.lock().await = ConnectionState::Connected;
-                            emit_status(&app, &conn.id, ConnectionState::Connected, None);
-                            log::info!("connection {} reconnected", conn.id);
-                            break;
-                        }
-                        Err(e) => {
-                            emit_status(
-                                &app,
-                                &conn.id,
-                                ConnectionState::Reconnecting,
-                                Some(format!(
-                                    "reconnect attempt {attempt} failed: {e} — retrying in {delay}s"
-                                )),
-                            );
-                            log::info!(
-                                "connection {} reconnect attempt {attempt} failed: {e}",
-                                conn.id
-                            );
-                            if sleep_or_stopped(&conn, delay).await {
-                                return;
-                            }
-                            delay = (delay * 2).min(30);
-                        }
-                    }
+                // Sequential, backoff-limited, give-up-capable recovery (the
+                // user's design + M14/M15/M16). Returns true if we should park.
+                if reconnect_after(&app, &conn, &cause, &mut degraded_since).await {
+                    return;
                 }
             }
         }
     }
+}
+
+/// Give up (park in `Failed`) after this many consecutive reconnect failures.
+/// The incident's ~2 dials/min-forever storm is exactly what this cap kills; at
+/// 1→60 s jittered backoff it's ~7 minutes of trying before the user is asked to
+/// intervene with the Reconnect button.
+const MAX_RECONNECT_ATTEMPTS: u32 = 12;
+
+/// Drive one lane back up (incident 2026-07-29 M14/M15/M16 + the user's
+/// sequential design). A CHILD lane first waits for the main lane to be up —
+/// main is the pathfinder, so a whole-host drop recovers as one polite backoff
+/// cycle on main followed by the children one at a time (via the gate token),
+/// never N simultaneous dials. Dials use jittered exponential backoff capped at
+/// 60 s and GIVE UP after `MAX_RECONNECT_ATTEMPTS`, parking in `Failed`. Returns
+/// `true` if the supervisor should stop (user disconnected, or we gave up).
+async fn reconnect_after(
+    app: &AppHandle,
+    conn: &Connection,
+    cause: &str,
+    degraded_since: &mut Option<std::time::Instant>,
+) -> bool {
+    let stalled = degraded_since
+        .take()
+        .map(|s| format!(" after {}s degraded", s.elapsed().as_secs()))
+        .unwrap_or_default();
+    *conn.state.lock().await = ConnectionState::Reconnecting;
+    emit_status(
+        app,
+        &conn.id,
+        ConnectionState::Reconnecting,
+        Some(format!("connection lost ({cause}) — reconnecting…")),
+    );
+    log::warn!("connection {} reconnecting ({cause}){stalled}", conn.id);
+
+    if conn.is_main {
+        // Announce main is down so children hold their dials.
+        conn.gate.main_up.send_replace(false);
+    } else if wait_for_main_up(conn).await {
+        return true; // stopped while waiting for main
+    }
+
+    let mut delay = 1u64;
+    let mut attempt = 0u32;
+    loop {
+        if conn.is_stopped() {
+            return true;
+        }
+        // A child whose main dropped again mid-recovery re-holds until it's back.
+        if !conn.is_main && !*conn.gate.main_up.borrow() && wait_for_main_up(conn).await {
+            return true;
+        }
+        attempt += 1;
+        match reestablish(conn).await {
+            Ok(()) => {
+                conn.reset_sftp().await;
+                conn.touch_activity();
+                *conn.state.lock().await = ConnectionState::Connected;
+                emit_status(app, &conn.id, ConnectionState::Connected, None);
+                if conn.is_main {
+                    conn.gate.main_up.send_replace(true); // release the children
+                }
+                log::info!("connection {} reconnected (attempt {attempt})", conn.id);
+                crate::diag::event("reconnect", format!("{}: recovered on attempt {attempt}", conn.id));
+                return false;
+            }
+            Err(e) => {
+                if attempt >= MAX_RECONNECT_ATTEMPTS {
+                    *conn.state.lock().await = ConnectionState::Failed;
+                    emit_status(
+                        app,
+                        &conn.id,
+                        ConnectionState::Failed,
+                        Some(format!(
+                            "reconnect stopped after {attempt} tries — click Reconnect to retry"
+                        )),
+                    );
+                    log::warn!("connection {} gave up after {attempt} reconnect attempts", conn.id);
+                    crate::diag::event(
+                        "reconnect",
+                        format!("{}: gave up after {attempt} attempts ({e})", conn.id),
+                    );
+                    return true; // park; the manual Reconnect re-arms the supervisor
+                }
+                let wait = jittered(delay);
+                emit_status(
+                    app,
+                    &conn.id,
+                    ConnectionState::Reconnecting,
+                    Some(format!(
+                        "reconnect attempt {attempt} failed: {e} — retrying in ~{}s",
+                        wait.as_secs().max(1)
+                    )),
+                );
+                crate::diag::event("reconnect", format!("{}: attempt {attempt} failed ({e})", conn.id));
+                if sleep_or_stopped_dur(conn, wait).await {
+                    return true;
+                }
+                delay = (delay * 2).min(60);
+            }
+        }
+    }
+}
+
+/// Block until this host's MAIN lane is up again (or the connection is
+/// stopped). Returns `true` if stopped while waiting.
+async fn wait_for_main_up(conn: &Connection) -> bool {
+    let mut rx = conn.gate.main_up.subscribe();
+    loop {
+        if conn.is_stopped() {
+            return true;
+        }
+        if *rx.borrow_and_update() {
+            return false;
+        }
+        tokio::select! {
+            _ = rx.changed() => {}
+            _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+        }
+    }
+}
+
+/// `base_secs` ± 25%, so lanes coming off one shared drop don't resynchronise
+/// into a fresh storm. Entropy from the wall clock's sub-second nanos (no rng
+/// dependency, and this doesn't need to be cryptographic).
+fn jittered(base_secs: u64) -> Duration {
+    let base_ms = base_secs.saturating_mul(1000);
+    let spread = base_ms / 2; // full ±25% window
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as u64)
+        .unwrap_or(0);
+    let offset = if spread > 0 {
+        (nanos % (spread + 1)) as i64 - (spread / 2) as i64
+    } else {
+        0
+    };
+    Duration::from_millis((base_ms as i64 + offset).max(250) as u64)
+}
+
+/// Like [`sleep_or_stopped`] but takes a `Duration` (for jittered backoff).
+async fn sleep_or_stopped_dur(conn: &Connection, dur: Duration) -> bool {
+    let mut remaining = dur;
+    let step = Duration::from_millis(250);
+    while remaining > Duration::ZERO {
+        if conn.is_stopped() {
+            return true;
+        }
+        let s = remaining.min(step);
+        tokio::time::sleep(s).await;
+        remaining -= s;
+    }
+    conn.is_stopped()
 }
 
 /// Leave `Degraded` for `Connected` when life is confirmed again.
@@ -1347,6 +1696,41 @@ async fn recover_if_degraded(
     }
 }
 
+/// The outcome of a timeout-bounded channel open that NEVER strands a slot: on
+/// timeout the open future is handed to a detached task that closes the channel
+/// if the server confirms late, instead of being dropped (the incident's probe
+/// strand — a leaked slot every ~12 s on a lossy link).
+enum OpenOutcome {
+    Opened(Channel<client::Msg>),
+    TimedOut,
+    Failed(russh::Error),
+}
+
+async fn open_with_timeout(conn: &Connection, dur: Duration) -> OpenOutcome {
+    let handle = conn.live.read().await.handle.clone();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let result = handle.channel_open_session().await;
+        // If the waiter already timed out (rx dropped), send fails and we still
+        // own the result — close a late-confirmed channel so no slot is stranded.
+        if let Err(back) = tx.send(result) {
+            if let Ok(ch) = back {
+                let _ = tokio::time::timeout(Duration::from_secs(3), ch.close()).await;
+                crate::diag::event("channel", "probe/late: closed a stranded open");
+            }
+        }
+    });
+    match tokio::time::timeout(dur, rx).await {
+        Ok(Ok(Ok(ch))) => {
+            conn.touch_activity();
+            OpenOutcome::Opened(ch)
+        }
+        Ok(Ok(Err(e))) => OpenOutcome::Failed(e),
+        Ok(Err(_)) => OpenOutcome::TimedOut, // task vanished (shouldn't happen)
+        Err(_) => OpenOutcome::TimedOut,     // timed out; the task closes a late channel
+    }
+}
+
 /// One health probe: open + close a throwaway channel. An active REFUSAL (e.g.
 /// `MaxSessions` reached — every terminal + SFTP + exec counts against it) is
 /// proof of life: the server answered us. A TIMEOUT is only doubt — a stalled
@@ -1354,17 +1738,28 @@ async fn recover_if_degraded(
 /// must never be mistaken for a dead one (that mistake restarted every
 /// terminal in a loop; F23). Only a hard transport error means dead.
 async fn probe(conn: &Connection) -> Probe {
-    match tokio::time::timeout(PROBE_TIMEOUT, conn.open_channel_raw()).await {
-        Ok(Ok(channel)) => {
+    // A lane at its channel budget is busy, and busy is alive — don't push a
+    // probe channel toward the server's own wall (and don't consume the slot).
+    if conn.channel_budget.available_permits() == 0 {
+        return Probe::Alive;
+    }
+    match open_with_timeout(conn, PROBE_TIMEOUT).await {
+        OpenOutcome::Opened(channel) => {
             // Close the probe channel so an idle connection doesn't leak one
             // channel per interval — but never block the loop on a half-open
             // socket waiting for the close handshake.
             let _ = tokio::time::timeout(Duration::from_secs(3), channel.close()).await;
             Probe::Alive
         }
-        Ok(Err(russh::Error::ChannelOpenFailure(_))) => Probe::Alive,
-        Ok(Err(e)) => Probe::Dead(e.to_string()),
-        Err(_) => Probe::Doubt,
+        OpenOutcome::Failed(russh::Error::ChannelOpenFailure(_)) => {
+            // Server answered (alive) — but with the budget cap in place, a
+            // refusal means ghosts or a strict server; let the accounting decide
+            // (may set `wedged` for the supervisor to recycle).
+            conn.note_open_failure();
+            Probe::Alive
+        }
+        OpenOutcome::Failed(e) => Probe::Dead(e.to_string()),
+        OpenOutcome::TimedOut => Probe::Doubt,
     }
 }
 
@@ -1433,13 +1828,23 @@ async fn open_sibling(
         last_activity: AtomicU64::new(now_millis()),
         data: Mutex::new(None),
         data_fail: std::sync::Mutex::new(None),
-        session_dial: Mutex::new(()),
+        // Share the host's dial gate so this child serializes and waits behind
+        // the main lane; a child is never the pathfinder.
+        gate: conn.gate.clone(),
+        is_main: false,
         profile,
         epoch: watch::Sender::new(0),
+        channel_budget: Arc::new(Semaphore::new(CHANNEL_BUDGET)),
+        channel_peak: AtomicUsize::new(0),
+        last_recycle: AtomicU64::new(0),
+        wedged: AtomicBool::new(false),
     }))
 }
 
 async fn reestablish(conn: &Connection) -> Result<(), String> {
+    // One dial in flight per host — this is where the same-second parallel
+    // dials that flooded the incident's auth log are serialized away.
+    let _token = conn.gate.token.lock().await;
     // A reconnect can't prompt; on a known host the key still verifies (and a
     // changed key correctly refuses — the supervisor keeps retrying).
     let outcome = Arc::new(std::sync::Mutex::new(HostKeyOutcome::Pending));

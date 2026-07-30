@@ -19,10 +19,38 @@ use crate::transport::{
 /// A [`FileTransport`] backed by an SSH connection's SFTP subsystem.
 pub struct SftpTransport(pub Arc<Connection>);
 
-#[async_trait::async_trait]
-impl FileTransport for SftpTransport {
-    async fn list_dir(&self, path: &str) -> Result<DirListing, String> {
+/// A SESSION-level SFTP failure — the whole SFTP session is wedged (the server's
+/// per-session handle table is full: "Limit exceeded: Handle limit reached") —
+/// as opposed to a plain per-file error (no such file, permission denied) which
+/// must NOT trigger a reset. Kept deliberately narrow so a normal error never
+/// resets the session (incident 2026-07-30).
+fn is_session_fatal(e: &str) -> bool {
+    let e = e.to_ascii_lowercase();
+    e.contains("handle limit") || e.contains("limit exceeded") || e.contains("too many open")
+}
+
+impl SftpTransport {
+    /// Drop the wedged SFTP session so the next op opens a FRESH one with zero
+    /// handles — the self-heal for a handle-exhausted data lane. The transport
+    /// (terminals, the main lane) is untouched. Also reclaims any handles leaked
+    /// by russh_sftp's read_dir error path: they die with the old session.
+    /// Incident 2026-07-30: turns "wedged until a manual reconnect" into a
+    /// ~1-round-trip recovery.
+    async fn heal(&self, err: &str) {
+        crate::diag::alert(
+            "warn",
+            format!(
+                "SFTP on {} hit the server's handle limit ({err}) — recovered by resetting \
+                 the file session; your terminals were untouched.",
+                self.0.info.host
+            ),
+        );
+        self.0.reset_sftp().await;
+    }
+
+    async fn list_dir_once(&self, path: &str) -> Result<DirListing, String> {
         let sftp = self.0.sftp().await?;
+        let started = std::time::Instant::now();
 
         let base = if path.is_empty() || path == "." {
             sftp.canonicalize(".")
@@ -82,6 +110,16 @@ impl FileTransport for SftpTransport {
         }
 
         sort_entries(&mut entries);
+        // Attribution for the "big folder = whole-app lag" report: if this is
+        // slow, the cost is the SFTP read (a whole-directory walk + a round-trip
+        // per symlink) — not the frontend. Cheap; only logs the notable ones.
+        let ms = started.elapsed().as_millis();
+        if ms > 300 || entries.len() > 800 {
+            crate::diag::event(
+                "sftp",
+                format!("list {base}: {} entries in {ms}ms", entries.len()),
+            );
+        }
         self.0.touch_activity(); // completed SFTP op = proof of life
         Ok(DirListing {
             path: base,
@@ -89,7 +127,7 @@ impl FileTransport for SftpTransport {
         })
     }
 
-    async fn read_file(&self, path: &str) -> Result<FileContent, String> {
+    async fn read_file_once(&self, path: &str) -> Result<FileContent, String> {
         let sftp = self.0.sftp().await?;
 
         let meta = sftp
@@ -153,24 +191,7 @@ impl FileTransport for SftpTransport {
         })
     }
 
-    async fn stat(&self, path: &str) -> Result<FileStat, String> {
-        let sftp = self.0.sftp().await?;
-
-        let meta = sftp
-            .metadata(path.to_string())
-            .await
-            .map_err(|e| format!("could not stat {path}: {e}"))?;
-        self.0.touch_activity();
-        Ok(FileStat {
-            path: path.to_string(),
-            size: meta.size.unwrap_or(0),
-            is_dir: meta.is_dir(),
-            modified: meta.mtime.map(|m| m as i64).unwrap_or(0),
-            permissions: mode_to_rwx(meta.permissions.unwrap_or(0)),
-        })
-    }
-
-    async fn write_file(
+    async fn write_file_once(
         &self,
         path: &str,
         content: &str,
@@ -214,6 +235,64 @@ impl FileTransport for SftpTransport {
             conflict: false,
             modified,
         })
+    }
+}
+
+#[async_trait::async_trait]
+impl FileTransport for SftpTransport {
+    async fn list_dir(&self, path: &str) -> Result<DirListing, String> {
+        // Self-heal: a handle-exhausted SFTP session gets reset + retried ONCE
+        // on a fresh session (incident 2026-07-30). A plain per-file error is
+        // returned as-is.
+        match self.list_dir_once(path).await {
+            Err(e) if is_session_fatal(&e) => {
+                self.heal(&e).await;
+                self.list_dir_once(path).await
+            }
+            r => r,
+        }
+    }
+
+    async fn read_file(&self, path: &str) -> Result<FileContent, String> {
+        match self.read_file_once(path).await {
+            Err(e) if is_session_fatal(&e) => {
+                self.heal(&e).await;
+                self.read_file_once(path).await
+            }
+            r => r,
+        }
+    }
+
+    async fn stat(&self, path: &str) -> Result<FileStat, String> {
+        let sftp = self.0.sftp().await?;
+
+        let meta = sftp
+            .metadata(path.to_string())
+            .await
+            .map_err(|e| format!("could not stat {path}: {e}"))?;
+        self.0.touch_activity();
+        Ok(FileStat {
+            path: path.to_string(),
+            size: meta.size.unwrap_or(0),
+            is_dir: meta.is_dir(),
+            modified: meta.mtime.map(|m| m as i64).unwrap_or(0),
+            permissions: mode_to_rwx(meta.permissions.unwrap_or(0)),
+        })
+    }
+
+    async fn write_file(
+        &self,
+        path: &str,
+        content: &str,
+        expected_modified: Option<i64>,
+    ) -> Result<WriteResult, String> {
+        match self.write_file_once(path, content, expected_modified).await {
+            Err(e) if is_session_fatal(&e) => {
+                self.heal(&e).await;
+                self.write_file_once(path, content, expected_modified).await
+            }
+            r => r,
+        }
     }
 
     async fn rename(&self, path: &str, new_name: &str) -> Result<String, String> {
@@ -306,12 +385,13 @@ impl FileTransport for SftpTransport {
         }
         // A dedicated raw SFTP session on its own channel, so 32 in-flight
         // reads never contend with the shared session's everyday requests.
-        let channel = self.0.open_channel().await?;
+        let channel = self.0.open_channel("sftp-fast").await?;
         channel
             .request_subsystem(true, "sftp")
             .await
-            .map_err(|e| format!("failed to start SFTP subsystem: {e}"))?;
-        let mut raw = russh_sftp::client::RawSftpSession::new(channel.into_stream());
+            .map_err(|e| format!("failed to start SFTP subsystem: {e}"))?; // guard closes on ?
+        // Hand the channel to the stream (ChannelCloseOnDrop owns the hang-up).
+        let mut raw = russh_sftp::client::RawSftpSession::new(channel.into_inner().into_stream());
         raw.init()
             .await
             .map_err(|e| format!("could not initialize SFTP: {e}"))?;

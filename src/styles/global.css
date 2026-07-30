@@ -2049,7 +2049,10 @@
   background: var(--orange);
 }
 
-.dot--disconnected {
+.dot--disconnected,
+/* Reconnect gave up and parked — solid red like disconnected (not the amber
+   "reconnecting" pulse), because it will NOT recover on its own. */
+.dot--failed {
   background: var(--red);
 }
 

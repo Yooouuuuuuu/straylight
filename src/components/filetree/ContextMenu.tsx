@@ -139,7 +139,7 @@ export function ContextMenu() {
             className="context-menu__item"
             disabled={selection.length > 1}
             title={selection.length > 1 ? "Rename works on one item at a time" : undefined}
-            onClick={() => startRename(menu.connId, menu.path)}
+            onClick={() => startRename(menu.connId, menu.path, "explorer")}
           >
             Rename<span className="context-menu__key">F2</span>
           </button>

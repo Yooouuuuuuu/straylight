@@ -246,7 +246,7 @@ export function useKeyboard() {
           break;
         case "renameSelected":
           if (!inEditable && !inTransfer && store.selected) {
-            store.startRename(store.selected.connId, store.selected.path);
+            store.startRename(store.selected.connId, store.selected.path, "explorer");
             event.preventDefault();
           }
           break;

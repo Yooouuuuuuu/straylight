@@ -35,7 +35,7 @@ function Group({ hosts, cls }: { hosts: Host[]; cls: string }) {
               className={
                 h.state === "connected"
                   ? undefined
-                  : h.state === "disconnected"
+                  : h.state === "disconnected" || h.state === "failed"
                     ? "conns-gauge--down"
                     : "conns-gauge--active"
               }

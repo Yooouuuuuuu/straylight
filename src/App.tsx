@@ -15,6 +15,7 @@ import {
 import {
   backendReset,
   localConnect,
+  onDiagAlert,
   onPortForwardError,
   onSshStatus,
   onTransferProgress,
@@ -289,6 +290,13 @@ export default function App() {
           "warn",
           `${name}: ${message ?? "connection lost — reconnecting…"}`,
         );
+      } else if (next === "failed") {
+        // Reconnect gave up and parked (incident 2026-07-29) — an actionable
+        // error, not the transient "reconnecting" warning.
+        store.pushNotice(
+          "error",
+          `${name}: ${message ?? "reconnect stopped — click Reconnect to try again."}`,
+        );
       } else if (next === "disconnected") {
         store.pushNotice(
           message ? "error" : "info",
@@ -445,6 +453,18 @@ export default function App() {
   useEffect(() => {
     const unlistenPromise = onPortForwardError((e) =>
       useAppStore.getState().pushNotice("error", e.message),
+    );
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  // Self-diagnostics alerts (CPU spin tripwire, connection recycle, strict
+  // server cap) — the backend already wrote the detail to the diag ring buffer;
+  // this just surfaces the one-line notice (incident 2026-07-29).
+  useEffect(() => {
+    const unlistenPromise = onDiagAlert((a) =>
+      useAppStore.getState().pushNotice(a.level, a.message),
     );
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());

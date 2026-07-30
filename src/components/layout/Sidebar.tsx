@@ -374,7 +374,7 @@ export function Sidebar() {
                   {conn.user}@{conn.host}
                 </span>
               </Tip>
-              {r.state === "disconnected" && (
+              {(r.state === "disconnected" || r.state === "failed") && (
                 <Tip label="Reconnect">
                   <button
                     className="icon-btn"

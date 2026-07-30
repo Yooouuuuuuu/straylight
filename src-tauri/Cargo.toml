@@ -1,6 +1,6 @@
 [package]
 name = "straylight"
-version = "0.11.3"
+version = "0.11.4"
 description = "Lightweight SSH file manager, terminal, and code viewer"
 authors = ["Straylight contributors"]
 edition = "2021"
@@ -75,6 +75,9 @@ required-features = ["zlib-diag"]
 # spawn — a GUI app shelling out to `cmd /c ver` can flash a console).
 [target.'cfg(windows)'.dependencies]
 windows-version = "0.1"
+# GetProcessTimes for the diag CPU self-monitor (incident 2026-07-29 M5/M6) —
+# already in the tree transitively, so this adds features, not a new crate.
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
 [profile.release]
 # Optimize for a small installer, matching Straylight's goals.

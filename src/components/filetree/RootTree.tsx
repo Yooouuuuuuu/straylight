@@ -192,6 +192,12 @@ export function RootTree({
     repoColorForPath(s.repos, connId, rootPath, "within"),
   );
 
+  // Last successful listing time per folder. Lets the window-focus auto-refresh
+  // skip re-reading a BIG folder it just read: a 5000-entry folder costs ~2s per
+  // SFTP read (round-trip-bound) and was being re-listed on every focus, freezing
+  // the app every few seconds (incident 2026-07-30, confirmed from the diag log).
+  const loadedAt = useRef<Map<string, number>>(new Map());
+
   const loadDir = useCallback(
     async (path: string) => {
       setDirs((prev) => ({
@@ -214,6 +220,7 @@ export function RootTree({
           ...prev,
           [path]: { entries: listing.entries, loading: false, error: null },
         }));
+        loadedAt.current.set(path, Date.now());
       } catch (error) {
         setDirs((prev) => ({
           ...prev,
@@ -263,7 +270,16 @@ export function RootTree({
   useEffect(() => {
     if (refreshToken === 0) return;
     void loadDir(rootPath).then(() => markRefreshed(connId));
-    expanded.forEach((path) => void loadDir(path));
+    expanded.forEach((path) => {
+      // Auto-refresh (window focus) skips a LARGE folder listed in the last 15s
+      // — it was re-reading 5000-entry folders every few seconds at ~2s each.
+      // Small folders always refresh; an explicit re-expand (toggleDir) always
+      // reloads regardless of this.
+      const count = dirs[path]?.entries?.length ?? 0;
+      const at = loadedAt.current.get(path);
+      if (count > 1500 && at && Date.now() - at < 15_000) return;
+      void loadDir(path);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshToken]);
 
@@ -404,7 +420,9 @@ export function RootTree({
             (n) => n.connId === connId && n.path === entry.path,
           )}
           renaming={
-            renaming?.connId === connId && renaming?.path === entry.path
+            renaming?.scope === "explorer" &&
+            renaming?.connId === connId &&
+            renaming?.path === entry.path
           }
           onToggle={() => toggleDir(entry.path)}
           onOpen={(opts) => void openRemoteFile(connId, entry, opts)}

@@ -94,7 +94,10 @@ async fn open_ssh_pty(
     rows: u32,
     mut rx: mpsc::UnboundedReceiver<PtyCommand>,
 ) -> Result<(), String> {
-    let mut channel = connection.open_channel().await?;
+    // A ChannelGuard so the shell channel is CHANNEL_CLOSE'd on every exit —
+    // including a request_pty/request_shell failure below (the `?` drops the
+    // guard, which closes) — never leaking a session slot (incident M8/M9).
+    let mut channel = connection.open_channel("pty").await?;
     channel
         .request_pty(false, "xterm-256color", cols, rows, 0, 0, &[])
         .await
@@ -154,13 +157,10 @@ async fn open_ssh_pty(
                 }
             }
         }
-        // Actively CLOSE the channel, bounded. EOF alone leaves an interactive
-        // PTY shell running server-side, and a dropped channel never sends
-        // CHANNEL_CLOSE — so every closed terminal would permanently hold one
-        // of sshd's session slots (MaxSessions, default 10) until the whole
-        // connection died. CHANNEL_CLOSE makes sshd HUP the shell and free the
-        // slot immediately.
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), channel.close()).await;
+        // Deterministic hang-up (the guard bounds the close internally). EOF
+        // alone leaves the shell running server-side and holds the slot; only
+        // CHANNEL_CLOSE frees it. On a task panic the guard's Drop still closes.
+        channel.close().await;
         let _ = task_app.emit(
             "pty-output",
             PtyOutput { pty_id: task_id.clone(), data: Vec::new() },

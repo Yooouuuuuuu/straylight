@@ -5,6 +5,7 @@
 //! File operations go through the transport-agnostic [`transport::FileTransport`].
 
 pub mod containers;
+pub mod diag;
 pub mod ports;
 pub mod exec;
 pub mod forward;
@@ -319,6 +320,8 @@ pub fn run() {
             use tauri::Manager;
             let state = app.state::<AppState>();
             let _ = state.app.set(app.handle().clone());
+            // Diagnostics ring buffer + CPU self-monitor (detect-and-report).
+            diag::init(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -376,6 +379,7 @@ pub fn run() {
             vcs::vcs_unstage,
             vcs::vcs_commit,
             vcs::vcs_log,
+            diag::diag_dump,
             vcs::vcs_remote,
             vcs::vcs_tag,
             vcs::vcs_commit_files,

@@ -47,6 +47,12 @@ export interface TreeNode {
   isDir: boolean;
 }
 
+/** Which surface owns an in-flight inline rename. A single global `renaming`
+ *  state is shared across the explorer trees and the two transfer panes; the
+ *  scope keeps only the ORIGINATING surface's rename box mounted, so the same
+ *  host+path shown in two places can't render two boxes that deadlock focus. */
+export type RenameScope = "explorer" | "transfer";
+
 /** One open file in the editor. The live text lives in a Monaco model keyed by
  *  `id`; `content` is the seed used to create that model. */
 export interface EditorTab {
@@ -708,7 +714,11 @@ interface AppState {
   propertiesFor: TreeNode[] | null;
   /** The one in-flight transfer, or null when idle. */
   activeTransfer: ActiveTransfer | null;
-  renaming: { connId: string; path: string } | null;
+  /** The one in-flight inline rename. `scope` names the OWNING surface so the
+   *  same connId+path shown in two mounted places (explorer + a transfer pane
+   *  on the same host) doesn't render two competing rename boxes that fight for
+   *  focus and lock up. */
+  renaming: { connId: string; path: string; scope: RenameScope } | null;
   newEntry: { connId: string; parent: string; isDir: boolean } | null;
   /** Items pending delete confirmation (one or many). */
   confirmDelete: TreeNode[] | null;
@@ -1067,7 +1077,7 @@ interface AppState {
   }) => Promise<void>;
   updateTransferProgress: (progress: TransferProgress) => void;
   cancelActiveTransfer: () => void;
-  startRename: (connId: string, path: string) => void;
+  startRename: (connId: string, path: string, scope: RenameScope) => void;
   cancelRename: () => void;
   openNewEntry: (connId: string, parent: string, isDir: boolean) => void;
   closeNewEntry: () => void;
@@ -2534,8 +2544,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const t = get().activeTransfer;
     if (t) void fsTransferCancel(t.id);
   },
-  startRename: (connId, path) =>
-    set({ renaming: { connId, path }, contextMenu: null }),
+  startRename: (connId, path, scope) =>
+    set({ renaming: { connId, path, scope }, contextMenu: null }),
   cancelRename: () => set({ renaming: null }),
   openNewEntry: (connId, parent, isDir) =>
     set({ newEntry: { connId, parent, isDir }, contextMenu: null }),

@@ -11,6 +11,50 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.11.4] - 2026-07-30
+
+Hardening after a field incident where a client-side SSH defect left a remote
+host unreachable until it was power-cycled
+(docs/dev/incident-2026-07-29-engai01.md). The root causes were on our side —
+leaked SSH resources and a reconnect loop with no backoff. This release makes
+those failure modes structurally impossible or self-healing, and adds
+diagnostics so the next issue is visible from the app instead of the server's
+journal.
+
+### Added
+
+- **Self-diagnostics.** Command Palette → "Diagnostics: Save report" writes a
+  report of recent connection events — channel opens/closes, health probes,
+  reconnect attempts, and recoveries — to a file. A CPU self-monitor also flags
+  the app if it ever holds a full core with no transfer running, capturing the
+  same report.
+
+### Changed
+
+- **Reconnect backs off and gives up.** After a drop, reconnection now uses
+  exponential backoff with jitter (1→60 s) and stops after ~7 minutes into a
+  "Failed" state — the Reconnect button re-arms it — instead of dialing roughly
+  twice a minute forever. A host's connections recover in order (the main one
+  first) rather than all at once, so a struggling server sees one polite retry
+  per cycle, not a storm.
+
+### Fixed
+
+- **SSH session channels can no longer leak.** Terminals, remote commands, and
+  file sessions are guaranteed to hang up on every path — success, error,
+  cancel, or drop — so a connection can't silently wedge itself at the server's
+  session limit; if it somehow does, it now recovers on its own.
+- **The file browser recovers from a full SFTP handle table.** When the server
+  refuses new file operations ("Limit exceeded: Handle limit reached"), the
+  explorer resets the file session and retries automatically instead of showing
+  "folder unavailable" until you manually reconnect.
+- **A large folder no longer freezes the app when the window regains focus.** A
+  big expanded folder was being fully re-listed on every focus (thousands of
+  entries, every few seconds); it's now skipped if it was just listed.
+- **Inline rename can't deadlock.** Renaming a file that's shown in two places at
+  once (the explorer and a transfer pane on the same host) no longer opens two
+  rename boxes that fight for focus.
+
 ## [0.11.3] - 2026-07-30
 
 ### Fixed

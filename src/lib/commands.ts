@@ -7,7 +7,7 @@
  *  operations (the repo card is the better surface). */
 import { refreshApp } from "./appRefresh";
 import { copyPath } from "./fileOps";
-import { sshReconnect } from "./ipc";
+import { diagDump, sshReconnect } from "./ipc";
 import { openFileByPath } from "./openFile";
 import { saveActiveFile } from "./saveFile";
 import {
@@ -161,6 +161,14 @@ export function allCommands(): Command[] {
         const path = settingsFilePath();
         if (path && s.localConnId) void openFileByPath(s.localConnId, path, "settings.json");
       },
+    },
+    {
+      id: "diag.save",
+      title: "Diagnostics: Save report",
+      run: () =>
+        void diagDump()
+          .then((path) => app().pushNotice("info", `Diagnostics saved to ${path}`))
+          .catch((e) => app().pushNotice("error", `Couldn't save diagnostics: ${String(e)}`)),
     },
     {
       id: "restore.settings",

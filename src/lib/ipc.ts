@@ -24,6 +24,9 @@ export type ConnectionState =
    *  and usable (possibly slow). Doubt is not death (docs/connections.md). */
   | "degraded"
   | "reconnecting"
+  /** Reconnect gave up after the attempt cap and parked — the Reconnect button
+   *  re-arms it (incident 2026-07-29: stops the forever-retry storm). */
+  | "failed"
   | "disconnected";
 
 export interface ConnectionStatus {
@@ -910,4 +913,20 @@ export function onSshStatus(
   return listen<ConnectionStatus>("ssh-status", (event) =>
     handler(event.payload),
   );
+}
+
+/** A self-diagnostics alert (CPU spin tripwire, connection recycle, strict-server
+ *  cap) the backend wants surfaced as a toast (incident 2026-07-29). */
+export function onDiagAlert(
+  handler: (a: { level: "info" | "warn" | "error"; message: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ level: "info" | "warn" | "error"; message: string }>(
+    "diag-alert",
+    (event) => handler(event.payload),
+  );
+}
+
+/** Write the in-memory diagnostics ring buffer to a file; returns its path. */
+export function diagDump(): Promise<string> {
+  return invoke("diag_dump");
 }
