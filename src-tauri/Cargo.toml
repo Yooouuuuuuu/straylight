@@ -1,6 +1,6 @@
 [package]
 name = "straylight"
-version = "0.11.4"
+version = "0.11.5"
 description = "Lightweight SSH file manager, terminal, and code viewer"
 authors = ["Straylight contributors"]
 edition = "2021"
@@ -28,6 +28,9 @@ tauri-plugin-process = "2"
 # Native OS clipboard read/write — avoids the WebView2 "allow clipboard" prompt
 # that navigator.clipboard.readText() triggers on first paste.
 tauri-plugin-clipboard-manager = "2"
+# One running app: a "Open with Straylight" launch (or a second exe start)
+# forwards its argv to the running window instead of opening a duplicate.
+tauri-plugin-single-instance = "2"
 
 # SSH / SFTP. russh 0.6x: keys live in `russh::keys` (ssh-key based; the old
 # russh-keys crate is merged). Non-default `ring` backend — the default

@@ -16,11 +16,14 @@ import {
   backendReset,
   localConnect,
   onDiagAlert,
+  onOpenPath,
   onPortForwardError,
   onSshStatus,
   onTransferProgress,
   onVcsFsChange,
+  takeOpenPath,
 } from "./lib/ipc";
+import { openLocalTarget } from "./lib/openFile";
 import { connKeyForConnId, useAppStore, type DockToken } from "./store/appStore";
 import { useVcsStore } from "./store/vcsStore";
 import { initDrafts } from "./lib/drafts";
@@ -152,6 +155,7 @@ export default function App() {
 
   const terminalPanel = useRef<ImperativePanelHandle>(null);
   const restored = useRef(false);
+  const tookLaunchPath = useRef(false);
 
   // Horizontal widths (px) for the fixed-width columns. The editor is flex:1
   // and absorbs everything else, so hiding a column gives its space to the
@@ -254,6 +258,28 @@ export default function App() {
     const store = useAppStore.getState();
     if (store.terminals.length === 0) store.openTerminal(localConnId, "Local");
   }, [localConnId]);
+
+  // "Open with Straylight" (Windows right-click). Two arrival paths:
+  //  - first launch: the backend stashed the argv path; take it once the local
+  //    session is ready (a folder pins as a root, a file opens as a tab).
+  //  - already running: a second launch forwards its path here as an event
+  //    (single-instance) — the window is focused backend-side.
+  useEffect(() => {
+    if (!localConnId || tookLaunchPath.current) return;
+    tookLaunchPath.current = true;
+    void takeOpenPath().then((t) => {
+      if (t) void openLocalTarget(localConnId, t);
+    });
+  }, [localConnId]);
+  useEffect(() => {
+    const un = onOpenPath((t) => {
+      const id = useAppStore.getState().localConnId;
+      if (id) void openLocalTarget(id, t);
+    });
+    return () => {
+      void un.then((f) => f());
+    };
+  }, []);
 
   // Reflect backend-driven remote status (drops, reconnects, errors) in the
   // store. The connId is preserved across a reconnect, so tabs and the file tree

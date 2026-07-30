@@ -930,3 +930,25 @@ export function onDiagAlert(
 export function diagDump(): Promise<string> {
   return invoke("diag_dump");
 }
+
+/** A local path handed to us by the Windows "Open with Straylight" right-click
+ *  verb (`straylight.exe "<path>"`). A folder becomes a pinned Local root; a
+ *  file opens in the editor. */
+export interface OpenTarget {
+  path: string;
+  isDir: boolean;
+}
+
+/** Pick up a first-launch "Open with Straylight" path (null if none / already
+ *  taken). Call once the Local connection is ready. */
+export function takeOpenPath(): Promise<OpenTarget | null> {
+  return invoke("take_open_path");
+}
+
+/** A "Open with Straylight" path forwarded from a second launch while the app
+ *  was already running (single-instance). */
+export function onOpenPath(
+  handler: (t: OpenTarget) => void,
+): Promise<UnlistenFn> {
+  return listen<OpenTarget>("open-path", (event) => handler(event.payload));
+}

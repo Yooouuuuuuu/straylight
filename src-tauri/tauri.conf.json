@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Straylight",
-  "version": "0.11.4",
+  "version": "0.11.5",
   "identifier": "dev.straylight.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -46,7 +46,8 @@
     "windows": {
       "webviewInstallMode": { "type": "embedBootstrapper" },
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerHooks": "./installer-hooks.nsh"
       }
     },
     "icon": [

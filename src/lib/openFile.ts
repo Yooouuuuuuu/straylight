@@ -104,6 +104,22 @@ export async function openFileAtLine(
   useAppStore.getState().setRevealTarget({ connId, path, line });
 }
 
+/** Act on a path handed to us by the Windows "Open with Straylight" verb: a
+ *  folder is pinned as a Local explorer root; a file opens as a real tab. Paths
+ *  arrive in native (backslash) form, matching the local transport. */
+export async function openLocalTarget(
+  localConnId: string,
+  target: { path: string; isDir: boolean },
+): Promise<void> {
+  if (target.isDir) {
+    useAppStore.getState().addPinnedFolder(target.path);
+  } else {
+    await openFileByPath(localConnId, target.path, basename(target.path), {
+      preview: false,
+    });
+  }
+}
+
 /** Open a file by path (used for e.g. the SSH config). */
 export async function openFileByPath(
   connId: string,

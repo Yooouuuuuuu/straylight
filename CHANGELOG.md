@@ -11,6 +11,16 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.11.5] - 2026-07-30
+
+### Added
+
+- **"Open with Straylight" (Windows).** Right-click a file or folder in Explorer
+  and choose *Open with Straylight*: a folder opens as a local root, a file opens
+  in the editor. If the app is already running, the path opens in the existing
+  window instead of launching a second copy. The context-menu entry is added on
+  install and removed on uninstall.
+
 ## [0.11.4] - 2026-07-30
 
 Hardening after a field incident where a client-side SSH defect left a remote
