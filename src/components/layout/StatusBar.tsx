@@ -15,6 +15,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { setTabEol } from "../../lib/editorModels";
 import { tabHostColor } from "../../lib/hostColors";
 import { uiConfig } from "../../lib/settings";
+import { isWorkspace } from "../../lib/windowRole";
 import { useAppStore } from "../../store/appStore";
 import { useVcsStore } from "../../store/vcsStore";
 import {
@@ -199,17 +200,24 @@ export function StatusBar() {
         </>
       )}
 
-      <span className="statusbar__sep" />
-      <span
-        className="statusbar__item statusbar__item--button statusbar__panel-btn"
-        onClick={() => toggleTerminal()}
-      >
-        <IconTerminalGlyph size={13} />
-        <span className="statusbar__panel-label">TERMINAL</span>
-        {bellInPanel && <IconBell size={10} className="statusbar__panelbell" />}
-      </span>
+      {/* Terminal + Sessions live in the main window (and the sessions pop-out);
+          the workspace window is explorer + editor only, so its panels are
+          force-hidden (App.tsx) and these toggles would be dead. */}
+      {!isWorkspace && (
+        <>
+          <span className="statusbar__sep" />
+          <span
+            className="statusbar__item statusbar__item--button statusbar__panel-btn"
+            onClick={() => toggleTerminal()}
+          >
+            <IconTerminalGlyph size={13} />
+            <span className="statusbar__panel-label">TERMINAL</span>
+            {bellInPanel && <IconBell size={10} className="statusbar__panelbell" />}
+          </span>
+        </>
+      )}
 
-      {(!uiConfig.disableChat || terminals.some((t) => t.inChat)) && (
+      {!isWorkspace && (!uiConfig.disableChat || terminals.some((t) => t.inChat)) && (
         <>
           <span className="statusbar__sep" />
           <span

@@ -157,6 +157,50 @@
   color: var(--titlebar-fg);
 }
 
+/* Pop-out identity (docs/dev/multi-window.md): a colored chip next to the brand
+   plus a matching recolor of the bar's accent underline, so the Workspace /
+   Sessions windows are unmistakably siblings of — not — the main window. The
+   two roles borrow the theme's own pink / green, so each theme dresses them in
+   its native palette. Set a hair off the wordmark (brand gap + this margin). */
+.titlebar__role {
+  position: relative;
+  top: 1px; /* dropped a hair below the wordmark's centerline */
+  margin-left: calc(var(--space-3) + 3px);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 7px;
+  line-height: 1.5;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+.titlebar__role--workspace {
+  color: var(--pink);
+  background: color-mix(in srgb, var(--pink) 18%, transparent);
+  border-color: color-mix(in srgb, var(--pink) 42%, transparent);
+}
+.titlebar__role--sessions {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  border-color: color-mix(in srgb, var(--green) 42%, transparent);
+}
+
+/* The bar's accent underline (a dim red by default) takes the role color. */
+.titlebar--workspace {
+  border-bottom-color: color-mix(in srgb, var(--pink) 55%, var(--bg-secondary));
+}
+.titlebar--sessions {
+  border-bottom-color: color-mix(in srgb, var(--green) 55%, var(--bg-secondary));
+}
+
+/* Sets the multi-window group (⧉ ⬒ ⛶) off from the app buttons (⌘ ⚙); the
+   group's other side is spaced by the window controls' own --winctl margin. */
+.titlebar__gap {
+  flex: 0 0 auto;
+  width: calc(var(--space-4) * 3);
+}
+
 .titlebar__status {
   display: flex;
   align-items: center;

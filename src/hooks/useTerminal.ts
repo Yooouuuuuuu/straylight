@@ -6,6 +6,7 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 
 import { FitAddon } from "@xterm/addon-fit";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -17,15 +18,19 @@ import {
   ptyOpen,
   ptyResize,
   ptyWrite,
+  setPtyOwner,
+  takeSessionReplay,
   windowsBuildNumber,
 } from "../lib/ipc";
 import { isPassthroughShortcut } from "../lib/shortcuts";
 import {
   registerTerminalFocus,
   registerTerminalInput,
+  registerTerminalSerialize,
   registerTerminalText,
   unregisterTerminalFocus,
   unregisterTerminalInput,
+  unregisterTerminalSerialize,
   unregisterTerminalText,
 } from "../lib/terminalFocus";
 import {
@@ -67,6 +72,11 @@ export function useTerminal(
   // Dedicated session-lane connection carrying the PTY (null = connId). Only
   // the PTY rides it — theme, host color, and tree refresh stay on connId.
   ptyConnId: string | null = null,
+  // ATTACH mode (sessions pop-out, docs/dev/multi-window.md): when set, this view
+  // re-attaches to an ALREADY-OPEN backend PTY instead of opening its own — no
+  // `pty_open`, and crucially no `pty_close` on unmount (the shell is owned by
+  // another window and must survive). Null = normal owning behavior (unchanged).
+  attachPtyId: string | null = null,
 ) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -85,10 +95,33 @@ export function useTerminal(
     if (id) registerTerminalSlot(id, host, container);
 
     let disposed = false;
-    let ptyId: string | null = null;
+    // In attach mode the PTY id is known up front (we're re-attaching to it), so
+    // the output filter below matches immediately; otherwise it's set once our
+    // own `pty_open` resolves.
+    let ptyId: string | null = attachPtyId;
     let unlisten: UnlistenFn | null = null;
     const encoder = new TextEncoder();
     const scriptTimers: number[] = [];
+    // The serialize addon captures alt-screen/mouse/paste modes but NOT cursor
+    // visibility (DECTCEM `?25`), so we track it ourselves from the stream and
+    // append it to the serialized state — otherwise a re-attaching view shows a
+    // stray cursor over a full-screen TUI that hid it (docs/dev/multi-window.md).
+    let cursorHidden = false;
+    const scanCursorMode = (data: ArrayLike<number>) => {
+      for (let i = data.length - 6; i >= 0; i--) {
+        if (
+          data[i] === 0x1b && // ESC
+          data[i + 1] === 0x5b && // [
+          data[i + 2] === 0x3f && // ?
+          data[i + 3] === 0x32 && // 2
+          data[i + 4] === 0x35 // 5
+        ) {
+          if (data[i + 5] === 0x6c) cursorHidden = true; // ?25l — hide
+          else if (data[i + 5] === 0x68) cursorHidden = false; // ?25h — show
+          break; // last one in the chunk wins
+        }
+      }
+    };
 
     // ConPTY (Windows local & WSL terminals) needs xterm's windows-pty
     // heuristics, or resize reflow drops/duplicates scrollback lines. SSH
@@ -118,12 +151,22 @@ export function useTerminal(
 
     const fit = new FitAddon();
     term.loadAddon(fit);
+    // Serialize full state (buffer + scrollback + modes + cursor + alt-screen) so
+    // a re-attaching view in another window can reconstruct a TUI exactly
+    // (docs/dev/multi-window.md).
+    const serializeAddon = new SerializeAddon();
+    term.loadAddon(serializeAddon);
     term.open(host);
     termRef.current = term;
     // Re-themed (and refit on font changes) live when settings.json changes.
     registerTerminal(term, { connId, refit: () => fit.fit() });
     fitRef.current = fit;
     if (id) registerTerminalFocus(id, () => term.focus());
+    if (id)
+      registerTerminalSerialize(
+        id,
+        () => serializeAddon.serialize() + (cursorHidden ? "\x1b[?25l" : "\x1b[?25h"),
+      );
     // Serialize the buffer (last ~400 lines) on demand — the usage probe reads
     // this to tell a rendered /usage panel from a "command not found".
     if (id)
@@ -226,6 +269,7 @@ export function useTerminal(
       if (disposed || output.ptyId !== ptyId) return;
       if (output.data.length > 0) {
         term.write(new Uint8Array(output.data));
+        scanCursorMode(output.data);
         markBusy();
       } else if (id) {
         clearTimeout(busyTimer);
@@ -239,52 +283,94 @@ export function useTerminal(
       else unlisten = un;
     });
 
-    // Open the PTY sized to the current terminal (on the session lane when
-    // this agent has one).
-    void ptyOpen(ptyConnId ?? connId, term.cols, term.rows, command)
-      .then((openedId) => {
-        if (disposed) {
-          void ptyClose(openedId);
-          return;
-        }
-        ptyId = openedId;
-        // A fresh PTY (first open or an epoch restart) is alive again.
-        if (id) useAppStore.getState().setPtyDead(id, false);
-        // Take focus for an interactively opened shell — but never yank it
-        // out of an open dialog (session restore opens WSL/remote terminals
-        // while the user may be typing a password).
-        if (!document.querySelector(".modal-overlay")) term.focus();
-        // Type the requested command into the fresh shell (e.g. a container
-        // exec from the Containers tab) — visible and cancelable like any input.
-        if (initialInput) {
-          void ptyWrite(openedId, encoder.encode(`${initialInput}\r`));
-        }
-        // Let external actions (the usage probe's Esc + /usage refresh) write
-        // into this live PTY by id.
-        if (id) {
-          registerTerminalInput(id, (data) => {
-            if (!disposed && ptyId) {
-              void ptyWrite(ptyId, encoder.encode(data));
-            }
-          });
-        }
-        // Timed keystrokes (the usage probe's claude / trust-prompt enters /
-        // /usage) — delays measured from PTY-open, generous for slow machines.
-        // Cancelled with the terminal.
-        for (const step of scriptedInput ?? []) {
-          scriptTimers.push(
-            window.setTimeout(() => {
+    if (attachPtyId) {
+      // Attach to an already-open backend PTY (sessions pop-out): output is
+      // already subscribed above (ptyId was preset to it), so we neither open a
+      // PTY nor run fresh-shell scripting. Input leaves by the same registered
+      // path the owning branch uses below.
+      if (!document.querySelector(".modal-overlay")) term.focus();
+      // This window now renders it → claim its output (targeted emit); a brief
+      // overlap with the releasing window during a pop is fine (last claim wins).
+      void setPtyOwner(attachPtyId);
+      // Reconstruct the session in this fresh view. A full-screen TUI (htop/vim)
+      // sets its modes (alt-screen, hidden cursor) ONCE at startup and then only
+      // sends cell updates, so a bare attach shows a live-but-broken screen
+      // (cursor stuck, flashing). The releasing window stashed a full serialized
+      // state; replay it to restore modes + cursor + screen exactly. The
+      // ResizeObserver then fits us to this pane and the app repaints at our size
+      // (docs/dev/multi-window.md).
+      if (id) {
+        void takeSessionReplay(id).then((data) => {
+          if (!data || disposed) return;
+          term.write(data);
+          // Seed cursor tracking from the replay — it arrives via this direct
+          // write, not the live stream scanned above — so a later re-stash on
+          // pop-back keeps the right cursor state.
+          const hide = data.lastIndexOf("\x1b[?25l");
+          const show = data.lastIndexOf("\x1b[?25h");
+          if (hide !== show) cursorHidden = hide > show;
+        });
+        registerTerminalInput(id, (data) => {
+          if (!disposed && ptyId) void ptyWrite(ptyId, encoder.encode(data));
+        });
+      }
+    }
+
+    // Open the PTY sized to the current terminal (on the session lane when this
+    // agent has one). Skipped in attach mode — the shell already exists.
+    if (!attachPtyId) {
+      void ptyOpen(ptyConnId ?? connId, term.cols, term.rows, command)
+        .then((openedId) => {
+          if (disposed) {
+            void ptyClose(openedId);
+            return;
+          }
+          ptyId = openedId;
+          // A fresh PTY (first open or an epoch restart) is alive again. Record
+          // its id on the session so a re-attaching view (sessions pop-out) can
+          // find this same shell (docs/dev/multi-window.md).
+          if (id) {
+            useAppStore.getState().setPtyDead(id, false);
+            useAppStore.getState().setTerminalPtyId(id, openedId);
+          }
+          // This window renders it → claim its output (targeted emit, not broadcast).
+          void setPtyOwner(openedId);
+          // Take focus for an interactively opened shell — but never yank it
+          // out of an open dialog (session restore opens WSL/remote terminals
+          // while the user may be typing a password).
+          if (!document.querySelector(".modal-overlay")) term.focus();
+          // Type the requested command into the fresh shell (e.g. a container
+          // exec from the Containers tab) — visible and cancelable like any input.
+          if (initialInput) {
+            void ptyWrite(openedId, encoder.encode(`${initialInput}\r`));
+          }
+          // Let external actions (the usage probe's Esc + /usage refresh) write
+          // into this live PTY by id.
+          if (id) {
+            registerTerminalInput(id, (data) => {
               if (!disposed && ptyId) {
-                void ptyWrite(ptyId, encoder.encode(step.text));
+                void ptyWrite(ptyId, encoder.encode(data));
               }
-            }, step.delayMs),
-          );
-        }
-      })
-      .catch((error) => {
-        term.writeln(`\r\n\x1b[31mFailed to open terminal: ${error}\x1b[0m`);
-        if (id) useAppStore.getState().setPtyDead(id, true);
-      });
+            });
+          }
+          // Timed keystrokes (the usage probe's claude / trust-prompt enters /
+          // /usage) — delays measured from PTY-open, generous for slow machines.
+          // Cancelled with the terminal.
+          for (const step of scriptedInput ?? []) {
+            scriptTimers.push(
+              window.setTimeout(() => {
+                if (!disposed && ptyId) {
+                  void ptyWrite(ptyId, encoder.encode(step.text));
+                }
+              }, step.delayMs),
+            );
+          }
+        })
+        .catch((error) => {
+          term.writeln(`\r\n\x1b[31mFailed to open terminal: ${error}\x1b[0m`);
+          if (id) useAppStore.getState().setPtyDead(id, true);
+        });
+    }
 
     const dataSub = term.onData((data) => {
       // A locked terminal (usage probe) is display-only — drop the keyboard.
@@ -362,10 +448,15 @@ export function useTerminal(
       titleSub.dispose();
       bellSub.dispose();
       if (unlisten) unlisten();
-      if (ptyId) void ptyClose(ptyId);
+      // The view NEVER closes the PTY on unmount — a terminal's shell outlives
+      // its view (docs/dev/multi-window.md): popping the sessions out, or moving
+      // them back, just tears down and re-creates views on the same live shells.
+      // `closeTerminal` and `restartConnTerminals` own the close; this teardown
+      // only disposes the xterm and its listeners.
       if (id) unregisterTerminalFocus(id);
       if (id) unregisterTerminalInput(id);
       if (id) unregisterTerminalText(id);
+      if (id) unregisterTerminalSerialize(id);
       unregisterTerminal(term);
       termRef.current = null;
       fitRef.current = null;
@@ -373,6 +464,10 @@ export function useTerminal(
       if (id) unregisterTerminalSlot(id, host);
       host.remove();
     };
+    // attachPtyId is intentionally NOT a dep: it's captured at mount so a fresh
+    // open (which sets the session's ptyId) can't retrigger this effect into a
+    // re-attach. A restart bumps `epoch`, which remounts the whole view, and a
+    // pop-out/back remounts it too — so re-attach always rides a remount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connId, ptyConnId]);
 

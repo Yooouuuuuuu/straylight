@@ -11,6 +11,23 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-01
+
+### Added
+
+- **Multiple windows.** Pop the workspace (explorer + editor) or your sessions
+  (terminals and agents) out into their own window from the title bar — one per
+  monitor, if you like. Pop-outs share the main window's live connections and
+  running sessions, so a terminal moved into the Sessions window keeps its
+  shell, scrollback, and full-screen programs like `htop` running, with no
+  reconnect. The Sessions window is the full F11 view — groups, host order,
+  bells, and drag-reordering all carry over and come back. Each window is
+  labelled and color-coded (Workspace pink, Sessions green) with its own
+  taskbar title; closing a pop-out returns its panels to the main window, and
+  closing the main window closes them all. Each window loads only what it
+  shows — the Sessions window skips the code editor entirely and the Workspace
+  window skips the terminal stack, keeping extra windows light on memory.
+
 ## [0.11.5] - 2026-07-30
 
 ### Added

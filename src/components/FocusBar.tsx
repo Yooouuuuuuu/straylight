@@ -1,8 +1,10 @@
-/** The Sessions focus bottom bar — a full-width strip standing in for the
- *  status bar (hidden in the focus view). Same footprint and the notification
- *  bell in its usual bottom-right spot; the mode name at left and a quiet
- *  "back to editor" hint before the bell. */
+/** The full-width bottom strip that stands in for the status bar wherever the
+ *  sessions run alone — the F11 focus view (main window) and the popped-out
+ *  Sessions window. Same footprint, with the notification bell in its usual
+ *  bottom-right spot; a mode name sits at left (the F11 hint, or just the
+ *  window's name when it's the pop-out). */
 import { useAppStore } from "../store/appStore";
+import { isSessions } from "../lib/windowRole";
 import { BellPop } from "./BellPop";
 import { IconBell } from "./icons";
 import { Tip } from "./Tooltip";
@@ -15,7 +17,7 @@ export function FocusBar() {
   return (
     <footer className="statusbar focus-bar">
       <span className="focus-bar__label">
-        press F11 to exit Session focus mode
+        {isSessions ? "Sessions" : "press F11 to exit Session focus mode"}
       </span>
       <span className="statusbar__spacer" />
       <Tip label="Notifications">

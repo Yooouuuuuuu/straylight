@@ -57,3 +57,23 @@ export function unregisterTerminalText(id: string): void {
 export function readTerminalText(id: string): string {
   return texts.get(id)?.() ?? "";
 }
+
+/** Sibling registry: serialize a terminal's FULL state (buffer + scrollback +
+ *  modes + cursor + alt-screen) to a replayable escape-sequence string, via
+ *  xterm's serialize addon. Used to reconstruct a session in a fresh view when it
+ *  pops out to / back from its own window — a full-screen TUI (htop/vim) sets its
+ *  modes once at startup, so a bare re-attach would miss them; replaying this
+ *  restores them (docs/dev/multi-window.md). Null if unknown. */
+const serializers = new Map<string, () => string>();
+
+export function registerTerminalSerialize(id: string, read: () => string): void {
+  serializers.set(id, read);
+}
+
+export function unregisterTerminalSerialize(id: string): void {
+  serializers.delete(id);
+}
+
+export function readTerminalSerialized(id: string): string | null {
+  return serializers.get(id)?.() ?? null;
+}

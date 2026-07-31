@@ -133,11 +133,119 @@ export function sessionLaneConnect(
   return invoke("session_lane_connect", { connId, label, limit });
 }
 
-/** Sweep everything a PREVIOUS page left in the backend (connections, lanes,
- *  transfers, PTYs, forwards). Called once at webview boot — after a dev
- *  reload or renderer crash-recovery, all of it is orphaned. */
-export function backendReset(): Promise<void> {
-  return invoke("backend_reset");
+/** This window's boot (multi-window liveness, docs/dev/multi-window.md): clear
+ *  the calling window's declared resources, then sweep anything no *live* window
+ *  still needs. For the sole `main` window this equals the old `backend_reset`;
+ *  a second window sharing main's connections leaves them untouched. */
+export function windowBoot(): Promise<void> {
+  return invoke("window_boot");
+}
+
+/** Mirror this window's connection list to the backend liveness registry,
+ *  replacing its whole set (docs/dev/multi-window.md). Pushed whenever the list
+ *  changes; the sweep keeps any connection ≥1 live window still shows. `conns`
+ *  are ROOT connIds (local + each remote/WSL); a connection's PTYs, forwards,
+ *  and session lanes cascade off it, so only connections are declared. */
+export function windowSetRefs(refs: { conns: string[] }): Promise<void> {
+  return invoke("window_set_refs", refs);
+}
+
+/** Publish the main window's connection list (JSON) so a workspace window can
+ *  adopt the SAME connIds instead of dialing its own (docs/dev/multi-window.md).
+ *  Main-only. */
+export function setConnsSnapshot(snapshot: string): Promise<void> {
+  return invoke("set_conns_snapshot", { snapshot });
+}
+
+/** Pull the latest published connection snapshot (null if main hasn't published
+ *  yet). A workspace window calls this on boot. */
+export function getConnsSnapshot(): Promise<string | null> {
+  return invoke("get_conns_snapshot");
+}
+
+/** Live connection-snapshot updates (main connected/disconnected a host) so a
+ *  workspace window stays in sync. */
+export function onConnsSnapshot(
+  handler: (snapshot: string) => void,
+): Promise<UnlistenFn> {
+  return listen<string>("conns-snapshot", (event) => handler(event.payload));
+}
+
+/** Publish the main window's CHAT-session list (JSON) so the sessions pop-out
+ *  window can adopt it and re-attach to the same PTYs (docs/dev/multi-window.md).
+ *  Main-only. */
+export function setSessionsSnapshot(snapshot: string): Promise<void> {
+  return invoke("set_sessions_snapshot", { snapshot });
+}
+
+/** Pull the latest session snapshot (null if none). The sessions window calls
+ *  this on boot. */
+export function getSessionsSnapshot(): Promise<string | null> {
+  return invoke("get_sessions_snapshot");
+}
+
+/** Live session-snapshot updates (an agent opened/closed/renamed) so the sessions
+ *  window stays current. */
+export function onSessionsSnapshot(
+  handler: (snapshot: string) => void,
+): Promise<UnlistenFn> {
+  return listen<string>("sessions-snapshot", (event) => handler(event.payload));
+}
+
+/** The sessions pop-out sets this true on boot / false on close so the main
+ *  window can lock its CHAT panel while the sessions are popped out. */
+export function setSessionsPopped(on: boolean): Promise<void> {
+  return invoke("set_sessions_popped", { on });
+}
+
+/** Read the current popped-out state (main calls this on boot to restore its
+ *  lock if it reloaded while the sessions window was open). */
+export function getSessionsPopped(): Promise<boolean> {
+  return invoke("get_sessions_popped");
+}
+
+/** Live popped-out state changes — main locks/unlocks its CHAT panel. */
+export function onSessionsPopped(
+  handler: (on: boolean) => void,
+): Promise<UnlistenFn> {
+  return listen<boolean>("sessions-popped", (event) => handler(event.payload));
+}
+
+/** The workspace window flags itself open/closed so main can lock its workspace
+ *  button while it's open (docs/dev/multi-window.md). */
+export function setWorkspacePopped(on: boolean): Promise<void> {
+  return invoke("set_workspace_popped", { on });
+}
+
+/** Read the current workspace-open state (main, on boot). */
+export function getWorkspacePopped(): Promise<boolean> {
+  return invoke("get_workspace_popped");
+}
+
+/** Live workspace-open changes — main locks/unlocks its workspace button. */
+export function onWorkspacePopped(
+  handler: (on: boolean) => void,
+): Promise<UnlistenFn> {
+  return listen<boolean>("workspace-popped", (event) => handler(event.payload));
+}
+
+/** Stash a session's serialized terminal state for the window about to re-attach
+ *  to it — set by the window releasing the view (docs/dev/multi-window.md). */
+export function setSessionReplay(id: string, data: string): Promise<void> {
+  return invoke("set_session_replay", { id, data });
+}
+
+/** Take (once) a session's stashed replay state; the attaching view writes it to
+ *  reconstruct a full-screen TUI's modes/cursor/screen. Null if none. */
+export function takeSessionReplay(id: string): Promise<string | null> {
+  return invoke("take_session_replay", { id });
+}
+
+/** Claim a PTY's rendering for THIS window, so its output is emitted only here
+ *  instead of broadcast to every window (docs/dev/multi-window.md). Called when a
+ *  terminal view mounts. */
+export function setPtyOwner(ptyId: string): Promise<void> {
+  return invoke("set_pty_owner", { ptyId });
 }
 
 export function sshDisconnect(connId: string): Promise<void> {

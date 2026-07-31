@@ -11,6 +11,7 @@ import { basename } from "../lib/format";
 import {
   fsTransferBatch,
   fsTransferCancel,
+  ptyClose,
   sessionLaneConnect,
   sshDisconnect,
   type ConnectionState,
@@ -233,6 +234,11 @@ export interface TerminalSession {
   /** A usage-check probe: closed automatically when the focus view exits. */
   usageProbe?: boolean;
   epoch: number;
+  /** The live backend PTY id (from `pty_open`). Stored so a terminal's *view*
+   *  can be torn down and re-created on the same shell — the sessions pop-out
+   *  window mounts a fresh xterm re-attached to this PTY (docs/dev/multi-window.md).
+   *  Null when no PTY is live (never opened, or dead awaiting an epoch restart). */
+  ptyId?: string | null;
   /** Lives in the CHAT column instead of the panel (the shell survives the
    *  move — its DOM is reparented, never remounted). */
   inChat?: boolean;
@@ -598,6 +604,60 @@ function loadTermTarget(): TerminalTargetPref {
   return v === "local" || v === "remote" || v === "wsl" ? v : "auto";
 }
 
+/** The session-registry payload — everything the sessions hand-off carries
+ *  (docs/dev/multi-window.md): the CHAT sessions (live PTYs only), the F11
+ *  layout state (purpose groups + host order, so drags survive the hop), and
+ *  the per-session status maps (bells, finished times, thinking, dead PTYs) —
+ *  the pop-out must look EXACTLY like the F11 view it replaces, and vice
+ *  versa on return. */
+export interface SessionRegistry {
+  sessions: TerminalSession[];
+  purposes: ChatPurpose[];
+  hostOrder: string[];
+  /** The selected session, so the other window opens on the same one. */
+  activeId: string | null;
+  belled: Record<string, true>;
+  finishedAt: Record<string, number>;
+  thinking: Record<string, true>;
+  thinkingSince: Record<string, number>;
+  ptyDead: Record<string, true>;
+}
+
+/** Build the registry payload from the current state. Only sessions with an
+ *  open PTY are carried — an attach needs a live shell; the status maps are
+ *  trimmed to those sessions. */
+export function buildSessionRegistry(s: {
+  terminals: TerminalSession[];
+  chatPurposes: ChatPurpose[];
+  chatHostOrder: string[];
+  chatActiveId: string | null;
+  belled: Record<string, true>;
+  finishedAt: Record<string, number>;
+  thinking: Record<string, true>;
+  thinkingSince: Record<string, number>;
+  ptyDead: Record<string, true>;
+}): SessionRegistry {
+  const sessions = s.terminals.filter((t) => t.inChat && t.ptyId);
+  const pick = <V,>(m: Record<string, V>): Record<string, V> => {
+    const out: Record<string, V> = {};
+    for (const t of sessions) if (t.id in m) out[t.id] = m[t.id];
+    return out;
+  };
+  return {
+    sessions,
+    purposes: s.chatPurposes,
+    hostOrder: s.chatHostOrder,
+    activeId: sessions.some((t) => t.id === s.chatActiveId)
+      ? s.chatActiveId
+      : null,
+    belled: pick(s.belled),
+    finishedAt: pick(s.finishedAt),
+    thinking: pick(s.thinking),
+    thinkingSince: pick(s.thinkingSince),
+    ptyDead: pick(s.ptyDead),
+  };
+}
+
 interface AppState {
   // Local session (always available) ------------------------------------
   localConnId: string | null;
@@ -730,6 +790,27 @@ interface AppState {
 
   // Actions --------------------------------------------------------------
   setLocalConnId: (id: string) => void;
+  /** Adopt the main window's connections wholesale (workspace pop-out — it
+   *  mirrors main's live sessions rather than dialing its own; see
+   *  docs/dev/multi-window.md). Replaces localConnId + remotes + wsls. */
+  adoptConnections: (snap: {
+    localConnId: string | null;
+    remotes: RemoteWorkspace[];
+    wsls: RemoteWorkspace[];
+  }) => void;
+  /** Adopt the main window's CHAT sessions (sessions pop-out) — replace the
+   *  terminal list so this window renders + re-attaches them (docs/dev/multi-window.md). */
+  adoptSessions: (reg: SessionRegistry) => void;
+  mergeSessions: (reg: SessionRegistry) => void;
+  clearChatSessions: () => void;
+  /** True while the sessions pop-out window is open — the main window locks its
+   *  CHAT panel so exactly one window renders the sessions (the lock model). */
+  sessionsPoppedOut: boolean;
+  setSessionsPoppedOut: (on: boolean) => void;
+  /** True while the workspace window is open — main disables its workspace
+   *  button (docs/dev/multi-window.md). */
+  workspaceOpen: boolean;
+  setWorkspaceOpen: (on: boolean) => void;
   addPinnedFolder: (path: string) => void;
   removePinnedFolder: (path: string) => void;
 
@@ -1124,12 +1205,22 @@ interface AppState {
    *  when the shell dies). Cleared when a fresh PTY opens (epoch restart). */
   ptyDead: Record<string, true>;
   setPtyDead: (terminalId: string, on: boolean) => void;
+  /** Record (or clear) a terminal's live backend PTY id — set when its PTY opens
+   *  so a re-attaching view (the sessions pop-out) can find the same shell. */
+  setTerminalPtyId: (terminalId: string, ptyId: string | null) => void;
 }
 
 let noticeId = 0;
 let tabCounter = 0;
-let terminalCounter = 0;
-let purposeCounter = 0;
+
+/** Globally-unique ids for things that CROSS windows (docs/dev/multi-window.md).
+ *  Terminals and purpose groups are created independently in main AND the
+ *  sessions pop-out, then merged back by id on return — a per-window counter
+ *  collides across that hand-off (the pop-out's "term-1" dedupes against
+ *  main's unrelated "term-1" and silently vanishes). Random ids can't collide.
+ *  Tabs and notices stay window-local, so their counters are fine. */
+const crossWindowId = (prefix: string) =>
+  `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 
 export const useAppStore = create<AppState>()((set, get) => ({
   localConnId: null,
@@ -1202,6 +1293,75 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   setLocalConnId: (localConnId) => set({ localConnId }),
 
+  adoptConnections: (snap) =>
+    set(() => ({
+      localConnId: snap.localConnId,
+      ...remoteMirror(snap.remotes ?? []),
+      ...wslMirror(snap.wsls ?? []),
+    })),
+
+  // The pop-out's boot: take the registry wholesale — sessions, F11 layout
+  // (purposes + host order), and the status maps. This window starts empty,
+  // so a replace is exact (docs/dev/multi-window.md).
+  adoptSessions: (reg) =>
+    set((s) => ({
+      terminals: reg.sessions,
+      chatPurposes: reg.purposes,
+      chatHostOrder: reg.hostOrder,
+      chatActiveId: reg.activeId ?? s.chatActiveId,
+      belled: reg.belled,
+      finishedAt: reg.finishedAt,
+      thinking: reg.thinking,
+      thinkingSince: reg.thinkingSince,
+      ptyDead: reg.ptyDead,
+      activeTerminalId: reg.sessions.some((t) => t.id === s.activeTerminalId)
+        ? s.activeTerminalId
+        : (reg.sessions[0]?.id ?? null),
+    })),
+
+  // The return: absorb sessions this window doesn't have (by id — ids are
+  // cross-window unique), keeping its own non-CHAT terminals untouched; the
+  // shared PTYs re-attach on render. Layout (purposes + host order) is taken
+  // wholesale — the pop-out owned it while popped; main's copy was frozen at
+  // the pop. Status maps overlay per session (docs/dev/multi-window.md).
+  mergeSessions: (reg) =>
+    set((s) => {
+      const have = new Set(s.terminals.map((t) => t.id));
+      const missing = reg.sessions.filter((t) => !have.has(t.id));
+      return {
+        terminals: missing.length ? [...s.terminals, ...missing] : s.terminals,
+        chatPurposes: reg.purposes,
+        chatHostOrder: reg.hostOrder,
+        chatActiveId: reg.activeId ?? s.chatActiveId,
+        belled: { ...s.belled, ...reg.belled },
+        finishedAt: { ...s.finishedAt, ...reg.finishedAt },
+        thinking: { ...s.thinking, ...reg.thinking },
+        thinkingSince: { ...s.thinkingSince, ...reg.thinkingSince },
+        ptyDead: { ...s.ptyDead, ...reg.ptyDead },
+      };
+    }),
+
+  // The pop hand-off (docs/dev/multi-window.md): drop the CHAT sessions from
+  // this window's list WITHOUT closing their PTYs — the shells live in the
+  // backend and the pop-out re-attaches to them; these entries were only
+  // main's views of them. Non-CHAT terminals are untouched.
+  clearChatSessions: () =>
+    set((s) => {
+      const terminals = s.terminals.filter((t) => !t.inChat);
+      return {
+        terminals,
+        activeTerminalId: terminals.some((t) => t.id === s.activeTerminalId)
+          ? s.activeTerminalId
+          : (terminals[0]?.id ?? null),
+      };
+    }),
+
+  sessionsPoppedOut: false,
+  setSessionsPoppedOut: (on) => set({ sessionsPoppedOut: on }),
+
+  workspaceOpen: false,
+  setWorkspaceOpen: (on) => set({ workspaceOpen: on }),
+
   addPinnedFolder: (path) =>
     set((s) => {
       if (s.pinnedFolders.includes(path)) return {};
@@ -1242,10 +1402,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
       return { ...remoteMirror(remotes), connState: "connected", connMessage: null };
     }),
 
-  clearRemote: (connId) =>
+  clearRemote: (connId) => {
+    const target = connId ?? get().remotes[0]?.conn.connId;
+    if (!target) return;
+    // The view no longer closes PTYs on unmount, so hang up this host's shells
+    // here (dead already if it dropped — this reclaims the backend handle).
+    for (const t of get().terminals) {
+      if (t.connId === target && t.ptyId) void ptyClose(t.ptyId).catch(() => {});
+    }
     set((s) => {
-      const target = connId ?? s.remotes[0]?.conn.connId;
-      if (!target) return {};
       const remotes = s.remotes.filter((r) => r.conn.connId !== target);
       // Close any tabs and terminals belonging to that remote.
       const tabs = s.tabs.filter((t) => t.connId !== target);
@@ -1265,7 +1430,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
         activeTerminalId,
         lastActiveByHost,
       };
-    }),
+    });
+  },
 
   setRemoteState: (connId, state, message = null) =>
     set((s) => {
@@ -1322,7 +1488,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
       return wslMirror(wsls);
     }),
 
-  removeWsl: (connId) =>
+  removeWsl: (connId) => {
+    // The view no longer closes PTYs on unmount — hang up this distro's shells.
+    for (const t of get().terminals) {
+      if (t.connId === connId && t.ptyId) void ptyClose(t.ptyId).catch(() => {});
+    }
     set((s) => {
       const wsls = s.wsls.filter((w) => w.conn.connId !== connId);
       if (wsls.length === s.wsls.length) return {};
@@ -1341,7 +1511,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
         activeTerminalId,
         lastActiveByHost,
       };
-    }),
+    });
+  },
 
   setWslConnState: (connId, state) =>
     set((s) =>
@@ -1510,7 +1681,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   openTerminal: (connId, label, command = null, initialInput = null) =>
     set((s) => {
-      const id = `term-${(terminalCounter += 1)}`;
+      const id = crossWindowId("term");
       // Keep titles unique per connection so two shells on the same workspace are
       // distinguishable (e.g. "Local", "Local 2") without clashing across hosts.
       let title = label;
@@ -1535,7 +1706,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }),
 
   openTerminalInChat: (connId, label, opts) => {
-    const id = `term-${(terminalCounter += 1)}`;
+    const id = crossWindowId("term");
     set((s) => {
       let title = label;
       let n = 1;
@@ -1601,12 +1772,17 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   closeTerminal: (id) => {
+    const sess = get().terminals.find((t) => t.id === id);
     // A session-lane agent owns its connection — closing the agent hangs the
     // dedicated SSH connection up with it (the backend frees the sshd slot).
-    const lane = get().terminals.find((t) => t.id === id)?.laneConnId;
+    const lane = sess?.laneConnId;
     if (lane && lane.includes("::session-")) {
       void sshDisconnect(lane).catch(() => {});
     }
+    // The terminal's view no longer closes its PTY on unmount (the PTY outlives
+    // the view — docs/dev/multi-window.md), so closing the terminal is what
+    // closes the shell. Harmless if the lane disconnect above already killed it.
+    if (sess?.ptyId) void ptyClose(sess.ptyId).catch(() => {});
     set((s) => {
       const sess = s.terminals.find((t) => t.id === id);
       if (!sess) return {};
@@ -1711,7 +1887,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   chatPurposes: [],
   addPurpose: (name) => {
-    const id = `grp-${(purposeCounter += 1)}`;
+    const id = crossWindowId("grp");
     set((s) => {
       const color = PURPOSE_COLORS[s.chatPurposes.length % PURPOSE_COLORS.length];
       return {
@@ -1841,18 +2017,33 @@ export const useAppStore = create<AppState>()((set, get) => ({
       return { activeTerminalId: next.id };
     }),
 
-  restartConnTerminals: (connId) =>
+  restartConnTerminals: (connId) => {
+    // Match by the lane actually carrying the PTY: a main-lane reconnect
+    // restarts only the shared terminals (agents on their own session lanes
+    // never died with it), and a session-lane reconnect restarts just its
+    // one agent.
+    const affected = (t: TerminalSession) =>
+      (t.laneConnId ?? t.connId) === connId;
+    // The view no longer closes the PTY on unmount, so the restart owns it:
+    // hang up each dead PTY, then bump epoch (remount) with its id cleared so
+    // the fresh view opens a new shell instead of re-attaching a corpse.
+    for (const t of get().terminals) {
+      if (affected(t) && t.ptyId) void ptyClose(t.ptyId).catch(() => {});
+    }
     set((s) => ({
-      // Match by the lane actually carrying the PTY: a main-lane reconnect
-      // restarts only the shared terminals (agents on their own session lanes
-      // never died with it), and a session-lane reconnect restarts just its
-      // one agent.
       terminals: s.terminals.map((t) =>
-        (t.laneConnId ?? t.connId) === connId ? { ...t, epoch: t.epoch + 1 } : t,
+        affected(t) ? { ...t, epoch: t.epoch + 1, ptyId: null } : t,
       ),
-    })),
+    }));
+  },
 
-  closeConnTerminals: (connId) =>
+  closeConnTerminals: (connId) => {
+    // The view no longer closes PTYs on unmount, so hang up each removed
+    // terminal's shell here (usually already dead if the host dropped — this
+    // reclaims the backend handle either way).
+    for (const t of get().terminals) {
+      if (t.connId === connId && t.ptyId) void ptyClose(t.ptyId).catch(() => {});
+    }
     set((s) => {
       const terminals = s.terminals.filter((t) => t.connId !== connId);
       const panel = terminals.filter((t) => !t.inChat);
@@ -1865,7 +2056,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
         ? s.chatActiveId
         : (terminals.find((t) => t.inChat && !t.usageProbe)?.id ?? null);
       return { terminals, activeTerminalId, chatActiveId };
-    }),
+    });
+  },
 
   openAppTab: (kind) =>
     set((s) => {
@@ -2676,5 +2868,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const ptyDead = { ...s.ptyDead };
       delete ptyDead[terminalId];
       return { ptyDead };
+    }),
+
+  setTerminalPtyId: (terminalId, ptyId) =>
+    set((s) => {
+      const terminals = s.terminals.map((t) =>
+        t.id === terminalId ? { ...t, ptyId } : t,
+      );
+      return { terminals };
     }),
 }));

@@ -5,8 +5,10 @@
  *  deleting keys falls back to the built-in default (Straylight). */
 import type { ITheme, Terminal } from "@xterm/xterm";
 
+import type * as monaco from "monaco-editor";
+
 import { hostColorForConnKey } from "./hostColors";
-import { monaco } from "./monaco";
+import { monacoRef } from "./monacoRef";
 import {
   editorColors,
   savedThemes,
@@ -245,8 +247,14 @@ function applyTerminalThemes(): void {
 }
 
 function applyThemeLayers(): void {
-  monaco.editor.defineTheme(CUSTOM_THEME, buildMonacoTheme());
-  monaco.editor.setTheme(CUSTOM_THEME);
+  // The editor theme applies only where Monaco is loaded — not the Sessions
+  // pop-out. Editor windows preload Monaco at boot (main.tsx) before this ever
+  // runs, so the ref is bound; the Sessions window skips this block for good.
+  const mo = monacoRef();
+  if (mo) {
+    mo.editor.defineTheme(CUSTOM_THEME, buildMonacoTheme());
+    mo.editor.setTheme(CUSTOM_THEME);
+  }
   const font = currentTermFont();
   // Expose the terminal font size as a CSS var so chrome that wants to match
   // the terminal (the focus view's section headers) tracks it live.

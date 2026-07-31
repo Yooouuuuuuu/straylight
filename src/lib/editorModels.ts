@@ -4,7 +4,8 @@
  *  activeEditor bridge (save/reload plumbing) is installed once over this
  *  registry and works regardless of which group currently shows the tab. */
 import { setEditorBridge } from "./activeEditor";
-import { monaco } from "./monaco";
+import type * as monaco from "monaco-editor";
+import { monacoRef } from "./monacoRef";
 import { useAppStore, type EditorTab } from "../store/appStore";
 
 const LIGHTWEIGHT_BYTES = 50 * 1024 * 1024;
@@ -36,8 +37,13 @@ export function recomputeDirty(tabId: string): void {
 export function acquireModel(tab: EditorTab): monaco.editor.ITextModel {
   let model = models.get(tab.id);
   if (!model) {
+    // Only reached with an editor in play (MonacoWrapper mount / draft restore),
+    // and editor windows preload Monaco at boot — so the ref is always bound
+    // here. The throw makes a broken assumption loud instead of silent.
+    const mo = monacoRef();
+    if (!mo) throw new Error("acquireModel: Monaco not loaded");
     const lightweight = tab.size >= LIGHTWEIGHT_BYTES;
-    model = monaco.editor.createModel(
+    model = mo.editor.createModel(
       tab.content,
       lightweight ? "plaintext" : tab.language,
     );
@@ -79,10 +85,12 @@ export function applyDraftContent(tabId: string, content: string): boolean {
 export function setTabEol(tabId: string, eol: "LF" | "CRLF"): boolean {
   const model = models.get(tabId);
   if (!model) return false;
+  const mo = monacoRef();
+  if (!mo) return false;
   model.setEOL(
     eol === "LF"
-      ? monaco.editor.EndOfLineSequence.LF
-      : monaco.editor.EndOfLineSequence.CRLF,
+      ? mo.editor.EndOfLineSequence.LF
+      : mo.editor.EndOfLineSequence.CRLF,
   );
   recomputeDirty(tabId);
   return true;

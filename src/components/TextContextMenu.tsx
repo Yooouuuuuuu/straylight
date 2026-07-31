@@ -11,8 +11,10 @@ import { useEffect, useState } from "react";
 
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 
+import type * as monaco from "monaco-editor";
+
 import { editorAtNode } from "../lib/editorModels";
-import { monaco } from "../lib/monaco";
+import { monacoRef } from "../lib/monacoRef";
 import { useMenuClamp } from "../hooks/useMenuClamp";
 import { useAppStore } from "../store/appStore";
 
@@ -71,10 +73,15 @@ export function TextContextMenu() {
     menu.kind === "field" &&
     menu.field instanceof HTMLInputElement &&
     menu.field.type === "password";
+  // An editor menu only appears once an editor exists, so Monaco is loaded and
+  // the ref is bound; the `true` arm is unreachable defensive cover.
+  const mo = monacoRef();
   const writable =
     menu.kind === "field"
       ? !menu.field.readOnly && !menu.field.disabled
-      : !menu.editor.getOption(monaco.editor.EditorOption.readOnly);
+      : mo
+        ? !menu.editor.getOption(mo.editor.EditorOption.readOnly)
+        : true;
   const hasSelection =
     menu.kind === "field"
       ? menu.field.selectionStart !== menu.field.selectionEnd

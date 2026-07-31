@@ -41,6 +41,14 @@ export function TerminalPanel() {
   const localConnId = useAppStore((s) => s.localConnId);
   const terminals = useAppStore((s) => s.terminals);
   const activeTerminalId = useAppStore((s) => s.activeTerminalId);
+  const ptyDead = useAppStore((s) => s.ptyDead);
+  // While the sessions are popped out, this (main) window RELEASES its agents:
+  // they're dropped from the render so their views unmount — the shells live on
+  // in the backend and the sessions window renders them (docs/dev/multi-window.md).
+  const sessionsPoppedOut = useAppStore((s) => s.sessionsPoppedOut);
+  const renderedTerminals = terminals.filter(
+    (t) => !(sessionsPoppedOut && t.inChat),
+  );
   const openTerminal = useAppStore((s) => s.openTerminal);
   const closeTerminal = useAppStore((s) => s.closeTerminal);
   const setActiveTerminal = useAppStore((s) => s.setActiveTerminal);
@@ -340,7 +348,7 @@ export function TerminalPanel() {
               <kbd>{keyLabelFor("terminal.new") ?? "Ctrl+Shift+`"}</kbd>
             </div>
           )}
-          {terminals.map((t) => (
+          {renderedTerminals.map((t) => (
             <div
               key={t.id}
               className="terminal-instance"
@@ -368,6 +376,10 @@ export function TerminalPanel() {
                 scriptedInput={t.scriptedInput ?? null}
                 locked={!!t.locked}
                 ptyConnId={t.laneConnId ?? null}
+                // Attach to an already-live PTY (a re-mount after pop-out/back,
+                // or the sessions window); a fresh terminal has no ptyId yet and
+                // opens its own (docs/dev/multi-window.md).
+                attachPtyId={t.ptyId && !ptyDead[t.id] ? t.ptyId : null}
               />
             </div>
           ))}

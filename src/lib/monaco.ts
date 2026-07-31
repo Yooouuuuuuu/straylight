@@ -14,6 +14,7 @@ import HtmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
 import TsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 
 import { openExternal } from "./ipc";
+import { bindMonaco } from "./monacoRef";
 import { buildMonacoTheme } from "./themes";
 
 declare global {
@@ -21,6 +22,12 @@ declare global {
     MonacoEnvironment?: monaco.Environment;
   }
 }
+
+// Publish the value namespace so eager modules (the theme layer, the model
+// registry, the text context menu) can reach Monaco without importing it
+// directly — the mechanism that keeps Monaco out of editor-less windows
+// (lib/monacoRef.ts). Runs on module eval, i.e. the instant this chunk loads.
+bindMonaco(monaco);
 
 export const FALLBACK_THEME = "straylight";
 

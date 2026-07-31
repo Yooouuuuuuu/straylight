@@ -11,7 +11,7 @@ use russh::keys::PrivateKeyWithHashAlg;
 use russh::Channel;
 use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tokio::sync::{watch, Mutex, OwnedSemaphorePermit, RwLock, Semaphore};
 use uuid::Uuid;
 
@@ -1211,63 +1211,133 @@ pub async fn ssh_reconnect(
     }
 }
 
-/// Drop EVERYTHING the backend holds for a previous frontend. Called once at
-/// webview boot: after a dev reload or a renderer crash-recovery, the fresh
-/// page knows no connection ids — so every session, lane, transfer, PTY, and
-/// forward left behind is an orphan: still holding server slots, still
-/// probing, and (worst) a headless transfer keeps pumping with nobody able to
-/// cancel it. That combination is what turned one renderer crash into a
-/// wedged app and a starved WSL relay.
-#[tauri::command]
-pub async fn backend_reset(state: State<'_, crate::AppState>) -> Result<(), String> {
-    for intr in state.transfers.lock().await.values() {
-        intr.trip_cancel();
+/// Hang up one SSH connection (its data lane first, then the main handle),
+/// each disconnect bounded because the socket may be a corpse. Shared by the
+/// full reset and the multi-window liveness sweep.
+async fn teardown_ssh(conn: Arc<Connection>) {
+    conn.mark_stopped();
+    if let Some(lane) = conn.data.lock().await.take() {
+        lane.mark_stopped();
+        let _ = tokio::time::timeout(Duration::from_secs(2), async {
+            let _ = lane
+                .live
+                .read()
+                .await
+                .handle
+                .disconnect(russh::Disconnect::ByApplication, "", "en")
+                .await;
+        })
+        .await;
     }
-    // Session lanes are top-level map entries too, so draining covers main
-    // lanes, session lanes, and stale Local entries alike.
-    let sessions: Vec<(String, crate::Session)> =
-        state.sessions.lock().await.drain().collect();
+    let _ = tokio::time::timeout(Duration::from_secs(2), async {
+        let _ = conn
+            .live
+            .read()
+            .await
+            .handle
+            .disconnect(russh::Disconnect::ByApplication, "", "en")
+            .await;
+    })
+    .await;
+}
+
+/// Multi-window liveness sweep (docs/dev/multi-window.md): tear down every
+/// backend resource that no LIVE window still declares. The survive-set is the
+/// union of live windows' registered keys; `app.webview_windows()` is the
+/// liveness oracle. On the sole `main` window `window_boot` drives this with an
+/// empty survive-set — the orphan cleanup after a dev reload or crash-recovery,
+/// when the fresh page knows no connection ids and everything left is an orphan.
+pub async fn sweep_dead(state: &crate::AppState, app: &AppHandle) {
+    let live: std::collections::HashSet<String> =
+        app.webview_windows().keys().cloned().collect();
+    let keep = state.reg_live_union(&live);
+
+    // Sessions (main lanes, session lanes, Local) — kept by ROOT connId, so a
+    // data/session lane lives exactly as long as its parent connection.
+    let dead_sessions: Vec<(String, crate::Session)> = {
+        let mut sessions = state.sessions.lock().await;
+        let dead_ids: Vec<String> = sessions
+            .keys()
+            .filter(|id| !keep.contains(&crate::conn_key(crate::root_conn_id(id))))
+            .cloned()
+            .collect();
+        dead_ids
+            .into_iter()
+            .filter_map(|id| sessions.remove(&id).map(|s| (id, s)))
+            .collect()
+    };
     let mut dropped = 0u32;
-    for (_, session) in sessions {
+    for (_, session) in dead_sessions {
         if let crate::Session::Ssh(conn) = session {
             dropped += 1;
-            conn.mark_stopped();
-            if let Some(lane) = conn.data.lock().await.take() {
-                lane.mark_stopped();
-                let _ = tokio::time::timeout(Duration::from_secs(2), async {
-                    let _ = lane
-                        .live
-                        .read()
-                        .await
-                        .handle
-                        .disconnect(russh::Disconnect::ByApplication, "", "en")
-                        .await;
-                })
-                .await;
-            }
-            let _ = tokio::time::timeout(Duration::from_secs(2), async {
-                let _ = conn
-                    .live
-                    .read()
-                    .await
-                    .handle
-                    .disconnect(russh::Disconnect::ByApplication, "", "en")
-                    .await;
-            })
-            .await;
+            teardown_ssh(conn).await;
         }
     }
-    // Dropping the handles ends the PTY tasks (their command channel closes).
-    state.ptys.lock().await.clear();
-    for (_, forward) in state.forwards.lock().await.drain() {
+    // PTYs cascade off their connection: keep a PTY iff its (root) connection
+    // survives. Dropping the handle ends the task (its command channel closes).
+    state
+        .ptys
+        .lock()
+        .await
+        .retain(|_, h| keep.contains(&crate::conn_key(crate::root_conn_id(&h.conn_id))));
+    // Forwards cascade off their connection too (ForwardInfo carries the connId).
+    let dead_forwards: Vec<crate::forward::ForwardEntry> = {
+        let mut forwards = state.forwards.lock().await;
+        let dead_ids: Vec<String> = forwards
+            .iter()
+            .filter(|(_, e)| {
+                !keep.contains(&crate::conn_key(crate::root_conn_id(&e.info.conn_id)))
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        dead_ids
+            .into_iter()
+            .filter_map(|id| forwards.remove(&id))
+            .collect()
+    };
+    for forward in dead_forwards {
         forward.task.abort();
     }
+    // Transfers are NOT swept by liveness: a transfer can't outlive its
+    // connection, and tearing that connection down (above) already stops it; a
+    // transfer on a KEPT connection belongs to a live window and must continue.
     if dropped > 0 {
-        log::info!(
-            "backend reset: dropped {dropped} orphaned connection(s) left by a previous page"
-        );
+        log::info!("liveness sweep: dropped {dropped} connection(s) no live window needs");
     }
+}
+
+/// A window's boot: clears the calling window's declared refs, then sweeps
+/// everything no live window still needs. For the sole `main` window the
+/// survive-set is empty, so this drops everything a previous page left behind
+/// (session-restore then re-dials); a second window that shares main's
+/// connections leaves them untouched because main still declares them.
+#[tauri::command]
+pub async fn window_boot(
+    window: WebviewWindow,
+    state: State<'_, crate::AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    state.reg_clear_window(window.label());
+    sweep_dead(&state, &app).await;
     Ok(())
+}
+
+/// Replace this window's whole declared connection set in one shot — the batched
+/// form the frontend pushes whenever its connection list changes. More robust
+/// than declaring at each connect/disconnect site: the store IS the truth of
+/// what a window references, so mirroring it wholesale can't drift. `conns` are
+/// ROOT connIds (local + each remote/WSL); a connection's PTYs, forwards, and
+/// session lanes all cascade off it in the sweep, so only connections are ever
+/// declared. Key format stays server-side.
+#[tauri::command]
+pub fn window_set_refs(window: WebviewWindow, state: State<'_, crate::AppState>, conns: Vec<String>) {
+    let set: std::collections::HashSet<String> =
+        conns.iter().map(|id| crate::conn_key(id)).collect();
+    state
+        .window_refs
+        .lock()
+        .unwrap()
+        .insert(window.label().to_string(), set);
 }
 
 /// Hang up an ephemeral transfer lane and forget it (bounded — the socket may

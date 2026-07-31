@@ -15,7 +15,7 @@ use std::io::{Read, Write};
 use std::sync::Arc;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -32,6 +32,43 @@ pub struct PtyOutput {
     pub data: Vec<u8>,
 }
 
+/// Emit a PTY-output chunk to the ONE window that renders this terminal — the
+/// lock model guarantees exactly one — instead of broadcasting to every window.
+/// Broadcasting terminal output to windows that ignore it wastes work and, during
+/// a pop-out, floods a window that's mid-create/destroy with dead PostMessages
+/// (docs/dev/multi-window.md). Until a window claims the PTY (`set_pty_owner`, on
+/// view mount) we broadcast, so the very first chunks are never lost.
+fn emit_pty_output(app: &AppHandle, pty_id: &str, data: Vec<u8>) {
+    let payload = PtyOutput {
+        pty_id: pty_id.to_string(),
+        data,
+    };
+    let owner = app
+        .state::<AppState>()
+        .pty_owners
+        .lock()
+        .unwrap()
+        .get(pty_id)
+        .cloned();
+    match owner {
+        Some(label) => {
+            let _ = app.emit_to(label, "pty-output", payload);
+        }
+        None => {
+            let _ = app.emit("pty-output", payload);
+        }
+    }
+}
+
+/// Forget a PTY's render-owner (its task ended). Keeps the map from leaking.
+fn clear_pty_owner(app: &AppHandle, pty_id: &str) {
+    app.state::<AppState>()
+        .pty_owners
+        .lock()
+        .unwrap()
+        .remove(pty_id);
+}
+
 /// A control message sent from a Tauri command to the PTY's owning task.
 pub enum PtyCommand {
     Data(Vec<u8>),
@@ -42,6 +79,10 @@ pub enum PtyCommand {
 /// Handle stored in [`AppState::ptys`]; the sender side of the control channel.
 pub struct PtyHandle {
     pub tx: mpsc::UnboundedSender<PtyCommand>,
+    /// The connection this PTY runs on (a host connId or a `::session-k` lane).
+    /// The multi-window liveness sweep keeps a PTY exactly as long as its
+    /// connection lives — it cascades, never declared on its own.
+    pub conn_id: String,
 }
 
 enum PtyTarget {
@@ -82,7 +123,7 @@ pub async fn pty_open(
         .ptys
         .lock()
         .await
-        .insert(pty_id.clone(), PtyHandle { tx });
+        .insert(pty_id.clone(), PtyHandle { tx, conn_id });
     Ok(pty_id)
 }
 
@@ -121,17 +162,11 @@ async fn open_ssh_pty(
                             // Server output = proof of life; an active terminal
                             // spares the supervisor its probe.
                             conn.touch_activity();
-                            let _ = task_app.emit(
-                                "pty-output",
-                                PtyOutput { pty_id: task_id.clone(), data: data.to_vec() },
-                            );
+                            emit_pty_output(&task_app, &task_id, data.to_vec());
                         }
                         Some(russh::ChannelMsg::ExtendedData { data, .. }) => {
                             conn.touch_activity();
-                            let _ = task_app.emit(
-                                "pty-output",
-                                PtyOutput { pty_id: task_id.clone(), data: data.to_vec() },
-                            );
+                            emit_pty_output(&task_app, &task_id, data.to_vec());
                         }
                         Some(russh::ChannelMsg::Eof)
                         | Some(russh::ChannelMsg::Close)
@@ -161,10 +196,8 @@ async fn open_ssh_pty(
         // alone leaves the shell running server-side and holds the slot; only
         // CHANNEL_CLOSE frees it. On a task panic the guard's Drop still closes.
         channel.close().await;
-        let _ = task_app.emit(
-            "pty-output",
-            PtyOutput { pty_id: task_id.clone(), data: Vec::new() },
-        );
+        emit_pty_output(&task_app, &task_id, Vec::new());
+        clear_pty_owner(&task_app, &task_id);
         log::info!("pty {task_id} closed");
     });
 
@@ -254,26 +287,11 @@ fn open_local_pty(
         loop {
             match reader.read(&mut buf) {
                 Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    if reader_app
-                        .emit(
-                            "pty-output",
-                            PtyOutput {
-                                pty_id: reader_id.clone(),
-                                data: buf[..n].to_vec(),
-                            },
-                        )
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
+                Ok(n) => emit_pty_output(&reader_app, &reader_id, buf[..n].to_vec()),
             }
         }
-        let _ = reader_app.emit(
-            "pty-output",
-            PtyOutput { pty_id: reader_id.clone(), data: Vec::new() },
-        );
+        emit_pty_output(&reader_app, &reader_id, Vec::new());
+        clear_pty_owner(&reader_app, &reader_id);
     });
 
     // Input / resize / close. Writes to a PTY are small and non-blocking in

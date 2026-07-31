@@ -267,7 +267,7 @@ export function FocusView() {
       setUsageFailed(hostName(connId));
       pushNotice(
         "warn",
-        `Couldn't load usage on ${hostName(connId)} — install Claude Code there and set up the environment so the "claude" command works in its terminal. Then click "check usage" to retry.`,
+        `Couldn't load usage on ${hostName(connId)} — confirm Claude Code is set up for environment and logged in already before retry.`,
       );
     }
   };

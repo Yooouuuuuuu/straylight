@@ -35,6 +35,148 @@ pub enum Session {
     Local,
 }
 
+/// A local path handed to us on launch by the Windows "Open with Straylight"
+/// context-menu verb (`straylight.exe "<path>"`). A folder becomes a pinned
+/// Local root; a file opens in the editor.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenTarget {
+    pub path: String,
+    pub is_dir: bool,
+}
+
+/// Pick the first launch argument that is an existing path on disk (skip the
+/// exe name and any `-` flags), and note whether it's a directory. Returns None
+/// for a plain launch.
+fn resolve_open_target(argv: &[String]) -> Option<OpenTarget> {
+    for arg in argv.iter().skip(1) {
+        if arg.starts_with('-') {
+            continue;
+        }
+        if let Ok(meta) = std::fs::metadata(arg) {
+            return Some(OpenTarget {
+                path: arg.clone(),
+                is_dir: meta.is_dir(),
+            });
+        }
+    }
+    None
+}
+
+/// The path to open on first-launch, handed to the frontend once it's up (the
+/// running-instance case is delivered as an `open-path` event instead). Taken
+/// exactly once.
+#[tauri::command]
+fn take_open_path(state: tauri::State<AppState>) -> Option<OpenTarget> {
+    state.pending_open.lock().unwrap().take()
+}
+
+/// The main window publishes its connection list here (JSON authored by the
+/// frontend) so a workspace window can adopt the SAME connIds instead of dialing
+/// its own. Latest-wins, and broadcast live to every window as `conns-snapshot`
+/// (docs/dev/multi-window.md).
+#[tauri::command]
+fn set_conns_snapshot(app: tauri::AppHandle, state: tauri::State<AppState>, snapshot: String) {
+    use tauri::Emitter;
+    *state.conns_snapshot.lock().unwrap() = Some(snapshot.clone());
+    let _ = app.emit("conns-snapshot", snapshot);
+}
+
+/// A workspace window pulls the latest connection snapshot on boot; the live
+/// `conns-snapshot` event carries every later change.
+#[tauri::command]
+fn get_conns_snapshot(state: tauri::State<AppState>) -> Option<String> {
+    state.conns_snapshot.lock().unwrap().clone()
+}
+
+/// The main window publishes its CHAT-session list here so the sessions pop-out
+/// window can adopt it and re-attach to the same backend PTYs. Latest wins,
+/// broadcast live as `sessions-snapshot` (docs/dev/multi-window.md).
+#[tauri::command]
+fn set_sessions_snapshot(app: tauri::AppHandle, state: tauri::State<AppState>, snapshot: String) {
+    use tauri::Emitter;
+    *state.sessions_snapshot.lock().unwrap() = Some(snapshot.clone());
+    let _ = app.emit("sessions-snapshot", snapshot);
+}
+
+/// The sessions pop-out pulls the latest session snapshot on boot; later changes
+/// arrive via the `sessions-snapshot` event.
+#[tauri::command]
+fn get_sessions_snapshot(state: tauri::State<AppState>) -> Option<String> {
+    state.sessions_snapshot.lock().unwrap().clone()
+}
+
+/// The sessions pop-out sets this true on boot and (via the window-destroy
+/// handler) false on close. The main window watches `sessions-popped` to lock /
+/// unlock its CHAT panel — the lock model (docs/dev/multi-window.md).
+#[tauri::command]
+fn set_sessions_popped(app: tauri::AppHandle, state: tauri::State<AppState>, on: bool) {
+    use tauri::Emitter;
+    *state.sessions_popped.lock().unwrap() = on;
+    let _ = app.emit("sessions-popped", on);
+}
+
+/// The main window reads this on boot (in case it reloaded while the sessions
+/// window was open) to restore its lock state.
+#[tauri::command]
+fn get_sessions_popped(state: tauri::State<AppState>) -> bool {
+    *state.sessions_popped.lock().unwrap()
+}
+
+/// The workspace window sets this true on boot / false on close so main can lock
+/// its workspace button while the window is open (docs/dev/multi-window.md).
+#[tauri::command]
+fn set_workspace_popped(app: tauri::AppHandle, state: tauri::State<AppState>, on: bool) {
+    use tauri::Emitter;
+    *state.workspace_popped.lock().unwrap() = on;
+    let _ = app.emit("workspace-popped", on);
+}
+
+/// Main reads this on boot to restore its workspace-button lock.
+#[tauri::command]
+fn get_workspace_popped(state: tauri::State<AppState>) -> bool {
+    *state.workspace_popped.lock().unwrap()
+}
+
+/// Stash a session's serialized terminal state for the window that will re-attach
+/// to it (set by the window releasing the view — main on pop-out, the sessions
+/// window on close).
+#[tauri::command]
+fn set_session_replay(state: tauri::State<AppState>, id: String, data: String) {
+    state.session_replays.lock().unwrap().insert(id, data);
+}
+
+/// Take (once) a session's stashed replay state — the attaching view writes it
+/// into its fresh xterm to reconstruct a TUI's modes/cursor/screen.
+#[tauri::command]
+fn take_session_replay(state: tauri::State<AppState>, id: String) -> Option<String> {
+    state.session_replays.lock().unwrap().remove(&id)
+}
+
+/// The calling window claims a PTY's rendering, so its output is emitted only to
+/// this window instead of broadcast to all (docs/dev/multi-window.md). Called on
+/// view mount by whichever window shows the terminal.
+#[tauri::command]
+fn set_pty_owner(window: tauri::WebviewWindow, state: tauri::State<AppState>, pty_id: String) {
+    state
+        .pty_owners
+        .lock()
+        .unwrap()
+        .insert(pty_id, window.label().to_string());
+}
+
+// The multi-window liveness registry (`window_refs`) keys resources by their ROOT
+// connection: windows declare connections, and PTYs / forwards / session lanes
+// cascade off them in the sweep (docs/dev/multi-window.md).
+pub fn conn_key(root_id: &str) -> String {
+    format!("conn:{root_id}")
+}
+/// The root (main) connId of a lane id: `mainId::session-3` → `mainId`, so a data
+/// or session lane shares its parent connection's fate in the sweep.
+pub fn root_conn_id(id: &str) -> &str {
+    id.split("::").next().unwrap_or(id)
+}
+
 /// Global application state, shared across all Tauri commands.
 pub struct AppState {
     /// The Tauri app handle, set once at startup — lets deep code (the lazy
@@ -75,6 +217,43 @@ pub struct AppState {
     /// `host:port`), stashed when an unknown-host connect was refused so
     /// `ssh_trust_host` can write the accepted one into `known_hosts`.
     pub pending_host_keys: Mutex<HashMap<String, russh::keys::PublicKey>>,
+    /// A path from a "Open with Straylight" launch, waiting for the frontend to
+    /// pick it up on boot (std Mutex — touched from the sync single-instance
+    /// callback and the `take_open_path` command).
+    pub pending_open: std::sync::Mutex<Option<OpenTarget>>,
+    /// Multi-window liveness (docs/dev/multi-window.md): per window label, the set
+    /// of backend resource keys (`conn:<rootId>`, `pty:<id>`, `fwd:<id>`,
+    /// `xfer:<id>`) that window declares it needs. The one rule: a resource
+    /// survives iff at least one LIVE window's set holds its key — `sweep_dead`
+    /// tears down the rest. std Mutex: ops are quick and never `.await` (the sync
+    /// window-destroy handler touches it too).
+    pub window_refs: std::sync::Mutex<HashMap<String, std::collections::HashSet<String>>>,
+    /// The MAIN window's published connection list (JSON authored by the
+    /// frontend). A workspace window adopts it so it references the SAME backend
+    /// connections instead of dialing its own (docs/dev/multi-window.md). Latest
+    /// wins; changes are also broadcast live as the `conns-snapshot` event.
+    pub conns_snapshot: std::sync::Mutex<Option<String>>,
+    /// The MAIN window's published CHAT-session list (JSON). The sessions
+    /// pop-out window adopts it and re-attaches to the SAME backend PTYs
+    /// (docs/dev/multi-window.md). Broadcast live as `sessions-snapshot`.
+    pub sessions_snapshot: std::sync::Mutex<Option<String>>,
+    /// Whether the sessions pop-out window is currently open. While true the main
+    /// window LOCKS its CHAT panel so exactly one window renders the sessions
+    /// (the lock model — no double-render, no sync). Broadcast as `sessions-popped`.
+    pub sessions_popped: std::sync::Mutex<bool>,
+    /// Whether the workspace window is open — only so main can lock its workspace
+    /// button while it is (docs/dev/multi-window.md). Broadcast as `workspace-popped`.
+    pub workspace_popped: std::sync::Mutex<bool>,
+    /// Per-session serialized terminal state (keyed by terminal id), handed off
+    /// between windows so a re-attaching view can restore a full-screen TUI's
+    /// modes + cursor + screen instead of appearing blank (docs/dev/multi-window.md).
+    /// The releasing window sets it; the attaching window takes it (once).
+    pub session_replays: std::sync::Mutex<HashMap<String, String>>,
+    /// Which window renders each PTY (pty id → window label), so its output is
+    /// emitted to that ONE window instead of broadcast to all — the lock model
+    /// guarantees exactly one renderer (docs/dev/multi-window.md). Claimed by the
+    /// frontend on view mount; cleared when the PTY's task ends.
+    pub pty_owners: std::sync::Mutex<HashMap<String, String>>,
 }
 
 impl AppState {
@@ -92,7 +271,36 @@ impl AppState {
             jj_paths: Mutex::new(HashMap::new()),
             vcs_ops: Mutex::new(HashMap::new()),
             pending_host_keys: Mutex::new(HashMap::new()),
+            pending_open: std::sync::Mutex::new(None),
+            window_refs: std::sync::Mutex::new(HashMap::new()),
+            conns_snapshot: std::sync::Mutex::new(None),
+            sessions_snapshot: std::sync::Mutex::new(None),
+            sessions_popped: std::sync::Mutex::new(false),
+            workspace_popped: std::sync::Mutex::new(false),
+            session_replays: std::sync::Mutex::new(HashMap::new()),
+            pty_owners: std::sync::Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Forget a window's whole set — its boot clears it (then re-declares as it
+    /// re-attaches), its close removes it for good.
+    pub fn reg_clear_window(&self, label: &str) {
+        self.window_refs.lock().unwrap().remove(label);
+    }
+
+    /// The survive-set: the union of the ref-sets of the windows named in `live`.
+    pub fn reg_live_union(
+        &self,
+        live: &std::collections::HashSet<String>,
+    ) -> std::collections::HashSet<String> {
+        let refs = self.window_refs.lock().unwrap();
+        let mut union = std::collections::HashSet::new();
+        for (label, set) in refs.iter() {
+            if live.contains(label) {
+                union.extend(set.iter().cloned());
+            }
+        }
+        union
     }
 
     /// Resolve a session id to a file transport (SFTP or local). SFTP rides
@@ -156,7 +364,7 @@ impl AppState {
         if let Some(app) = self.app.get() {
             if let Ok(lane) = conn.open_transfer_lane(app).await {
                 let id = lane.id.clone();
-                // Registered so the host-disconnect sweep and backend_reset
+                // Registered so the host-disconnect sweep and the liveness sweep
                 // kill it with everything else; removed by drop_transfer_lane.
                 self.sessions
                     .lock()
@@ -307,6 +515,21 @@ pub fn run() {
     .init();
 
     tauri::Builder::default()
+        // MUST be the first plugin (single-instance requirement). A second launch
+        // — the "Open with Straylight" verb while the app is already open, or a
+        // second exe start — forwards its argv here and exits, instead of opening
+        // a duplicate window. We focus the existing window and hand the path to
+        // the frontend as an `open-path` event.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            use tauri::{Emitter, Manager};
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+            if let Some(target) = resolve_open_target(&argv) {
+                let _ = app.emit("open-path", target);
+            }
+        }))
         // Remember window size / position / maximized across launches.
         .plugin(tauri_plugin_window_state::Builder::default().build())
         // Auto-update (GitHub Releases) + relaunch after an update installs.
@@ -322,7 +545,61 @@ pub fn run() {
             let _ = state.app.set(app.handle().clone());
             // Diagnostics ring buffer + CPU self-monitor (detect-and-report).
             diag::init(app.handle().clone());
+            // A first-launch "Open with Straylight" path (the running-instance
+            // case comes through the single-instance callback instead). Stashed
+            // for the frontend to pick up via `take_open_path` once it's booted.
+            *state.pending_open.lock().unwrap() =
+                resolve_open_target(&std::env::args().collect::<Vec<_>>());
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            use tauri::{Emitter, Manager};
+            // Multi-window liveness (docs/dev/multi-window.md): when a window
+            // CLOSES, forget its declared resources and sweep anything no live
+            // window still needs. A page reload does NOT fire this (the window
+            // persists) — reload cleanup stays with `window_boot`.
+            if let tauri::WindowEvent::Destroyed = event {
+                let app = window.app_handle().clone();
+                let label = window.label().to_string();
+                // `main` is primary: secondary windows (workspace, sessions) are
+                // subordinate views and must not outlive it. Force-close them —
+                // `destroy` (not `close`) bypasses their close handlers (the
+                // sessions window's stash-on-close is pointless once main is gone
+                // and would only delay exit) — so closing main closes the app
+                // (docs/dev/multi-window.md).
+                if label == "main" {
+                    for (l, w) in app.webview_windows() {
+                        if l != "main" {
+                            let _ = w.destroy();
+                        }
+                    }
+                }
+                // The sessions pop-out closed → clear the popped flag so main
+                // unlocks its CHAT panel (the lock model).
+                if label == "sessions" {
+                    *app.state::<AppState>().sessions_popped.lock().unwrap() = false;
+                    let _ = app.emit("sessions-popped", false);
+                }
+                // The workspace window closed → unlock main's workspace button.
+                if label == "workspace" {
+                    *app.state::<AppState>().workspace_popped.lock().unwrap() = false;
+                    let _ = app.emit("workspace-popped", false);
+                }
+                app.state::<AppState>().reg_clear_window(&label);
+                // Forget any PTYs this window was rendering: otherwise their
+                // next output keeps targeting a now-dead handle (emit_to →
+                // PostMessage 0x80070578). Cleared, they fall back to broadcast
+                // until a live window re-claims them (docs/dev/multi-window.md).
+                app.state::<AppState>()
+                    .pty_owners
+                    .lock()
+                    .unwrap()
+                    .retain(|_, owner| *owner != label);
+                tauri::async_runtime::spawn(async move {
+                    let state = app.state::<AppState>();
+                    ssh::connection::sweep_dead(state.inner(), &app).await;
+                });
+            }
         })
         .invoke_handler(tauri::generate_handler![
             ssh::config::ssh_list_config_hosts,
@@ -332,7 +609,8 @@ pub fn run() {
             ssh::connection::ssh_reconnect,
             ssh::connection::ssh_trust_host,
             ssh::connection::session_lane_connect,
-            ssh::connection::backend_reset,
+            ssh::connection::window_boot,
+            ssh::connection::window_set_refs,
             ui_close_devtools,
             reveal_path,
             open_external,
@@ -380,6 +658,18 @@ pub fn run() {
             vcs::vcs_commit,
             vcs::vcs_log,
             diag::diag_dump,
+            take_open_path,
+            set_conns_snapshot,
+            get_conns_snapshot,
+            set_sessions_snapshot,
+            get_sessions_snapshot,
+            set_sessions_popped,
+            get_sessions_popped,
+            set_workspace_popped,
+            get_workspace_popped,
+            set_session_replay,
+            take_session_replay,
+            set_pty_owner,
             vcs::vcs_remote,
             vcs::vcs_tag,
             vcs::vcs_commit_files,

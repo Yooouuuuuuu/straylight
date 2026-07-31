@@ -14,6 +14,9 @@ import {
   settingsFilePath,
 } from "../../lib/settings";
 import { toggleFocusView } from "../../lib/focusMode";
+import { isSecondary, isSessions, isWorkspace } from "../../lib/windowRole";
+import { popOutSessions } from "../../lib/sessionReplay";
+import { openWorkspaceWindow } from "../../lib/workspaceWindow";
 import { checkForUpdate } from "../../lib/updater";
 import {
   applyTheme,
@@ -51,6 +54,11 @@ export function TitleBar() {
   // the explainer rides the native title.
   const focusView = useAppStore((s) => s.focusView);
   const lockedTitle = focusView ? "Locked in session focus (F11)" : undefined;
+  // Multi-window button locks (docs/dev/multi-window.md): the sessions button and
+  // focus mode lock while the sessions are popped out; the workspace button locks
+  // while its window is open.
+  const sessionsPoppedOut = useAppStore((s) => s.sessionsPoppedOut);
+  const workspaceOpen = useAppStore((s) => s.workspaceOpen);
   const updateAvailable = useAppStore((s) => s.updateAvailable);
   // Shown dim on the Check-for-updates row — the app's at-a-glance version.
   const [appVersion, setAppVersion] = useState<string | null>(null);
@@ -84,7 +92,9 @@ export function TitleBar() {
   }, []);
 
   const requestClose = () => {
-    if (confirmEnabled("exit")) {
+    // Secondary windows (workspace / sessions) just close — no "quit the app?"
+    // prompt; closing the sessions window simply pops back.
+    if (!isSecondary && confirmEnabled("exit")) {
       setExitSilence(false); // fresh checkbox per dialog
       setExitAsk(true);
     } else void appWindow.close();
@@ -106,10 +116,15 @@ export function TitleBar() {
   // Keyboard contract from the shared hook: Enter closes (primary), Esc
   // stays, Tab/arrows cycle checkbox + buttons, focus trapped + restored.
   const dlg = useDialogKeys(() => setExitAsk(false), exitAsk);
-  // Native title stays the app name — the taskbar and Alt+Tab read
-  // "Straylight", not the connected host (the in-window bar is custom-drawn).
   useEffect(() => {
-    appWindow.setTitle("Straylight").catch(() => {});
+    // Per-window title so the taskbar / Alt+Tab distinguishes the pop-outs
+    // instead of three identical "Straylight" (docs/dev/multi-window.md).
+    const title = isWorkspace
+      ? "Straylight — Workspace"
+      : isSessions
+        ? "Straylight — Sessions"
+        : "Straylight";
+    appWindow.setTitle(title).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -120,7 +135,9 @@ export function TitleBar() {
   };
 
   return (
-    <header className="titlebar">
+    <header
+      className={`titlebar${isWorkspace ? " titlebar--workspace" : isSessions ? " titlebar--sessions" : ""}`}
+    >
       {/* Two clusters positioned over the explorer's W and R toggles
           (--gauge-w-x / --gauge-r-x, derived from the sidebar width). */}
       <ConnectionGauge />
@@ -128,40 +145,91 @@ export function TitleBar() {
         <div className="titlebar__brand" data-tauri-drag-region>
           <Logo />
           <span className="titlebar__title">Straylight</span>
+          {/* A colored chip marks a pop-out window as a sibling of main. */}
+          {isWorkspace && (
+            <span className="titlebar__role titlebar__role--workspace">
+              Workspace
+            </span>
+          )}
+          {isSessions && (
+            <span className="titlebar__role titlebar__role--sessions">
+              Sessions
+            </span>
+          )}
         </div>
       </div>
       <div className="titlebar__controls">
-        <Tip
-          label={
-            settingsIssues.length > 0
-              ? `All commands (Ctrl+Shift+P) — ${settingsIssues.length} settings problem${settingsIssues.length === 1 ? "" : "s"}`
-              : "All commands (Ctrl+Shift+P)"
-          }
-        >
-          <button
-            className={`titlebar__btn ${settingsIssues.length > 0 ? "titlebar__btn--warn" : ""}`}
-            disabled={focusView}
-            title={lockedTitle}
-            onClick={() => useAppStore.getState().setPaletteOpen(true)}
+        {/* Palette — main + workspace, but not the sessions pop-out. */}
+        {!isSessions && (
+          <Tip
+            label={
+              settingsIssues.length > 0
+                ? `All commands (Ctrl+Shift+P) — ${settingsIssues.length} settings problem${settingsIssues.length === 1 ? "" : "s"}`
+                : "All commands (Ctrl+Shift+P)"
+            }
           >
-            ⌘
-          </button>
-        </Tip>
-        <Tip label="Settings">
-          <button
-            className="titlebar__btn"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((v) => !v)}
-          >
-            ⚙
-          </button>
-        </Tip>
-        <Tip label="Session focus mode (F11)">
-          <button className="titlebar__btn" onClick={() => toggleFocusView()}>
-            ⛶
-          </button>
-        </Tip>
+            <button
+              className={`titlebar__btn ${settingsIssues.length > 0 ? "titlebar__btn--warn" : ""}`}
+              disabled={focusView}
+              title={lockedTitle}
+              onClick={() => useAppStore.getState().setPaletteOpen(true)}
+            >
+              ⌘
+            </button>
+          </Tip>
+        )}
+        {/* Settings — main only. */}
+        {!isSecondary && (
+          <Tip label="Settings">
+            <button
+              className="titlebar__btn"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              ⚙
+            </button>
+          </Tip>
+        )}
+        {/* Multi-window group — main only: workspace · sessions · focus, spaced
+            off from the app actions and the window controls. */}
+        {!isSecondary && (
+          <>
+            <span className="titlebar__gap" />
+            <Tip label="Workspace window">
+              <button
+                className="titlebar__btn"
+                disabled={focusView || workspaceOpen}
+                title={workspaceOpen ? "Workspace window is open" : lockedTitle}
+                onClick={() => void openWorkspaceWindow()}
+              >
+                ⧉
+              </button>
+            </Tip>
+            <Tip label="Pop out sessions">
+              <button
+                className="titlebar__btn"
+                disabled={focusView || sessionsPoppedOut}
+                title={sessionsPoppedOut ? "Sessions are popped out" : lockedTitle}
+                onClick={() => void popOutSessions()}
+              >
+                ⬒
+              </button>
+            </Tip>
+            <Tip label="Session focus mode (F11)">
+              <button
+                className="titlebar__btn"
+                disabled={sessionsPoppedOut}
+                title={sessionsPoppedOut ? "Sessions are popped out" : undefined}
+                onClick={() => toggleFocusView()}
+              >
+                ⛶
+              </button>
+            </Tip>
+            {/* Trailing side of the group is spaced by the window controls'
+                own --winctl margin — no spacer needed here. */}
+          </>
+        )}
         {menuOpen && (
           <>
             <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />
@@ -291,7 +359,7 @@ export function TitleBar() {
             {maximized ? <IconRestore /> : <IconMaximize />}
           </button>
         </Tip>
-        <Tip label="Close">
+        <Tip label={isSessions ? "Return to main window" : "Close"}>
           <button
             className="titlebar__btn titlebar__btn--close"
             onClick={requestClose}

@@ -4,7 +4,7 @@
  *  A window always has a local session (opened at startup) and can attach a
  *  WSL distro plus up to three SSH remotes at once; trees, terminals, and
  *  tracked repos are all per-host. */
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   Panel,
   PanelGroup,
@@ -13,18 +13,38 @@ import {
 } from "react-resizable-panels";
 
 import {
-  backendReset,
+  getConnsSnapshot,
+  getSessionsPopped,
+  getSessionsSnapshot,
+  getWorkspacePopped,
   localConnect,
+  onConnsSnapshot,
   onDiagAlert,
   onOpenPath,
   onPortForwardError,
+  onSessionsPopped,
   onSshStatus,
   onTransferProgress,
   onVcsFsChange,
+  onWorkspacePopped,
+  setConnsSnapshot,
+  setSessionsPopped,
+  setSessionsSnapshot,
+  setWorkspacePopped,
   takeOpenPath,
+  windowBoot,
+  windowSetRefs,
 } from "./lib/ipc";
 import { openLocalTarget } from "./lib/openFile";
-import { connKeyForConnId, useAppStore, type DockToken } from "./store/appStore";
+import { stashSessionReplays } from "./lib/sessionReplay";
+import { isSecondary, isSessions, isWorkspace } from "./lib/windowRole";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  buildSessionRegistry,
+  connKeyForConnId,
+  useAppStore,
+  type DockToken,
+} from "./store/appStore";
 import { useVcsStore } from "./store/vcsStore";
 import { initDrafts } from "./lib/drafts";
 import { initFileWatching } from "./lib/fileWatch";
@@ -50,8 +70,6 @@ import { useKeyboard } from "./hooks/useKeyboard";
 import { useSSH } from "./hooks/useSSH";
 import { TitleBar } from "./components/layout/TitleBar";
 import { Sidebar } from "./components/layout/Sidebar";
-import { EditorArea } from "./components/layout/EditorArea";
-import { TerminalPanel } from "./components/layout/TerminalPanel";
 import { StatusBar } from "./components/layout/StatusBar";
 import { ScmPanel } from "./components/vcs/ScmPanel";
 import { ChatPanel } from "./components/chat/ChatPanel";
@@ -76,6 +94,20 @@ import { FocusBar } from "./components/FocusBar";
 import { Finder } from "./components/Finder";
 import { SearchInFiles } from "./components/SearchInFiles";
 import { ToastStack } from "./components/Toast";
+
+// Lazy so each heavy subtree becomes its own chunk, kept out of the windows
+// that never show it (docs/dev/multi-window.md): the editor (Monaco, ~5 MB) is
+// absent from the Sessions pop-out; the terminal stack (xterm) is absent from
+// the Workspace window. Editor windows preload Monaco at boot (main.tsx), so
+// this chunk resolves instantly there.
+const EditorArea = lazy(() =>
+  import("./components/layout/EditorArea").then((m) => ({ default: m.EditorArea })),
+);
+const TerminalPanel = lazy(() =>
+  import("./components/layout/TerminalPanel").then((m) => ({
+    default: m.TerminalPanel,
+  })),
+);
 
 /** The full left→right layout tokens; "explorer" is pinned first, the rest are
  *  the reorderable dock tokens. */
@@ -129,7 +161,10 @@ function saveHWidths(w: HWidths): void {
 export default function App() {
   const dialogOpen = useAppStore((s) => s.dialogOpen);
   const sidebarVisible = useAppStore((s) => s.sidebarVisible);
-  const terminalVisible = useAppStore((s) => s.terminalVisible);
+  // The workspace pop-out has no terminal panel or CHAT column — force both
+  // hidden at the source so every downstream layout/render check sees them off
+  // (docs/dev/multi-window.md, Option A).
+  const terminalVisible = useAppStore((s) => s.terminalVisible) && !isWorkspace;
   const localConnId = useAppStore((s) => s.localConnId);
   const setLocalConnId = useAppStore((s) => s.setLocalConnId);
   const setSidebarVisible = useAppStore((s) => s.setSidebarVisible);
@@ -144,7 +179,12 @@ export default function App() {
     s.wsls.map((w) => w.conn.connId).join(","),
   );
   const scmVisible = useVcsStore((s) => s.scmVisible);
-  const chatVisible = useAppStore((s) => s.chatVisible);
+  // While the sessions are popped out to their own window, main LOCKS its CHAT
+  // panel — hidden here so exactly one window renders the sessions (the lock
+  // model; the agents' PTYs stay alive in the still-mounted TerminalPanel).
+  const sessionsPoppedOut = useAppStore((s) => s.sessionsPoppedOut);
+  const chatVisible =
+    useAppStore((s) => s.chatVisible) && !isWorkspace && !sessionsPoppedOut;
   const dockOrder = useAppStore((s) => s.dockOrder);
   useAppStore((s) => s.settingsRev); // re-render when settings.json changes
   const hasChatResidents = useAppStore((s) =>
@@ -190,15 +230,64 @@ export default function App() {
 
   useKeyboard();
 
-  // Open the always-present local session once. First, sweep whatever a
-  // PREVIOUS page left in the backend — after a dev reload or a renderer
-  // crash-recovery this page knows no connection ids, so every session, lane,
-  // PTY, forward, and (worst) still-running transfer back there is an orphan
-  // that would keep holding server slots and bandwidth forever.
+  // Registry-write readiness (docs/dev/multi-window.md): a window may publish
+  // the session registry only once it KNOWS it's the owner — the pop-out after
+  // its boot pull, main after reading the popped flag. Publishing before that
+  // would overwrite the registry with a boot-empty list.
+  const sessionsSyncReady = useRef(false);
+
+  // Boot. First run this window's sweep (window_boot): for the sole `main` window
+  // it drops whatever a PREVIOUS page left in the backend (orphans after a reload
+  // or crash-recovery); once a second window exists it only sweeps what no live
+  // window still needs (docs/dev/multi-window.md).
+  //
+  // Then, per role:
+  //  - main: open the always-present local session and dial as usual (main owns
+  //    every connection).
+  //  - workspace: adopt main's live connections wholesale — the SAME connIds, so
+  //    it references the same backend sessions rather than dialing its own.
   useEffect(() => {
     if (localConnId) return;
     let active = true;
-    backendReset()
+    if (isSecondary) {
+      windowBoot()
+        .catch(() => {})
+        .then(() => getConnsSnapshot())
+        .then((json) => {
+          if (!active || !json) return;
+          try {
+            useAppStore.getState().adoptConnections(JSON.parse(json));
+          } catch {
+            /* a later conns-snapshot event will populate it */
+          }
+        });
+      // The sessions pop-out re-asserts the popped flag (main already set it
+      // during the hand-off) and pulls the session registry it now owns.
+      if (isSessions) {
+        void setSessionsPopped(true);
+        void getSessionsSnapshot().then((json) => {
+          // Owner from here on: publishing before this pull would overwrite
+          // the registry with this window's still-empty list.
+          sessionsSyncReady.current = true;
+          if (!active || !json) return;
+          try {
+            const reg = JSON.parse(json);
+            if (reg && Array.isArray(reg.sessions))
+              useAppStore.getState().adoptSessions(reg);
+          } catch {
+            /* keep the registry as-is; the sessions render on next pop cycle */
+          }
+        });
+      }
+      // The workspace window flags itself open so main can lock its workspace button.
+      if (isWorkspace) {
+        void setWorkspacePopped(true);
+      }
+      return () => {
+        active = false;
+      };
+    }
+    windowBoot()
       .catch(() => {})
       .then(() => localConnect())
       .then((id) => {
@@ -214,8 +303,143 @@ export default function App() {
     };
   }, [localConnId, setLocalConnId]);
 
-  // Persist the session (open tabs, last remote, panel visibility) on change.
-  useEffect(() => initSessionPersistence(), []);
+  // Main owns every connection: whenever its connection list changes it (a)
+  // declares the connIds to the backend liveness registry so a sweep keeps them,
+  // and (b) publishes the full list so any workspace window mirrors the SAME
+  // sessions (docs/dev/multi-window.md). The workspace window does neither — it's
+  // a subordinate view that adopts this snapshot.
+  useEffect(() => {
+    if (isSecondary) return;
+    const st = useAppStore.getState();
+    const conns: string[] = [];
+    if (localConnId) conns.push(localConnId);
+    for (const r of st.remotes) conns.push(r.conn.connId);
+    for (const w of st.wsls) conns.push(w.conn.connId);
+    void windowSetRefs({ conns });
+    void setConnsSnapshot(
+      JSON.stringify({ localConnId, remotes: st.remotes, wsls: st.wsls }),
+    );
+  }, [localConnId, remoteConnIds, wslConnIds]);
+
+  // Workspace window: stay in sync with main's live connections — adopt each
+  // snapshot as main connects/disconnects a host.
+  useEffect(() => {
+    if (!isSecondary) return;
+    const un = onConnsSnapshot((json) => {
+      try {
+        useAppStore.getState().adoptConnections(JSON.parse(json));
+      } catch {
+        /* a malformed payload just means we keep the last good one */
+      }
+    });
+    return () => {
+      void un.then((f) => f());
+    };
+  }, []);
+
+  // The session registry (the backend snapshot) has ONE writer at a time: the
+  // window that currently OWNS the sessions — main while docked, the pop-out
+  // while popped (docs/dev/multi-window.md). The owner republishes on every
+  // change so the registry is always current for the next hand-off; the other
+  // window never writes, so nothing can stomp sessions started elsewhere.
+  // Republish triggers: the sessions themselves and the F11 layout state
+  // (purpose groups, host order — so drags survive the hop). The status maps
+  // ride along on those writes plus the close-time final write.
+  const terminals = useAppStore((s) => s.terminals);
+  const chatPurposes = useAppStore((s) => s.chatPurposes);
+  const chatHostOrder = useAppStore((s) => s.chatHostOrder);
+  useEffect(() => {
+    if (isWorkspace) return; // never owns sessions
+    if (!sessionsSyncReady.current) return; // ownership not established yet
+    if (!isSessions && useAppStore.getState().sessionsPoppedOut) return; // popped: pop-out owns
+    void setSessionsSnapshot(
+      JSON.stringify(buildSessionRegistry(useAppStore.getState())),
+    );
+  }, [terminals, chatPurposes, chatHostOrder]);
+
+  // Main tracks whether the sessions are popped out, to lock its CHAT panel.
+  useEffect(() => {
+    if (isSecondary) return;
+    void getSessionsPopped().then((on) => {
+      useAppStore.getState().setSessionsPoppedOut(on);
+      // Ownership known — main may publish the registry (unless popped).
+      sessionsSyncReady.current = true;
+    });
+    const un = onSessionsPopped((on) => {
+      useAppStore.getState().setSessionsPoppedOut(on);
+      // On return (pop-out closed), absorb any sessions it started — it wrote
+      // its final list to the snapshot on close (docs/dev/multi-window.md).
+      if (!on) {
+        void getSessionsSnapshot().then((json) => {
+          if (!json) return;
+          try {
+            const reg = JSON.parse(json);
+            if (reg && Array.isArray(reg.sessions))
+              useAppStore.getState().mergeSessions(reg);
+          } catch {
+            /* keep what we have */
+          }
+        });
+      }
+    });
+    return () => {
+      void un.then((f) => f());
+    };
+  }, []);
+
+  // Main tracks whether the workspace window is open, to lock its workspace button.
+  useEffect(() => {
+    if (isSecondary) return;
+    void getWorkspacePopped().then((on) =>
+      useAppStore.getState().setWorkspaceOpen(on),
+    );
+    const un = onWorkspacePopped((on) =>
+      useAppStore.getState().setWorkspaceOpen(on),
+    );
+    return () => {
+      void un.then((f) => f());
+    };
+  }, []);
+
+  // (No live session-sync into the pop-out: the registry has one writer — the
+  // pop-out itself while it's open — so there's nothing to subscribe to.)
+
+  // Sessions window close = pop back: hold the close just long enough to
+  // serialize each session (so main can reconstruct the shells on re-attach),
+  // then force-close. `destroy` (not a re-issued `close`) reliably closes from
+  // inside the close-request handler (docs/dev/multi-window.md).
+  useEffect(() => {
+    if (!isSessions) return;
+    const win = getCurrentWindow();
+    let unlisten: (() => void) | undefined;
+    void win
+      .onCloseRequested(async (event) => {
+        event.preventDefault();
+        try {
+          await stashSessionReplays();
+          // The final registry write — sessions, layout, and status maps as
+          // they stand at this instant; main merges it on unpop.
+          await setSessionsSnapshot(
+            JSON.stringify(buildSessionRegistry(useAppStore.getState())),
+          );
+        } catch {
+          /* close anyway */
+        }
+        await win.destroy();
+      })
+      .then((un) => {
+        unlisten = un;
+      });
+    return () => unlisten?.();
+  }, []);
+
+  // Persist the session (open tabs, last remote, panel visibility) on change —
+  // main only. The workspace window shares localStorage with main, so letting it
+  // persist its own (deliberately sparse) view would clobber main's saved session.
+  useEffect(() => {
+    if (isSecondary) return;
+    return initSessionPersistence();
+  }, []);
 
   // Auto-reload clean open files when they change on disk (local: watcher;
   // remote/WSL: mtime poll) — watching a growing log just works.
@@ -237,7 +461,10 @@ export default function App() {
   useEffect(() => initThemes(), []);
   // Quiet auto-update check once on launch (no-op in dev; never interrupts —
   // an available update only lights the green dot on ⚙ → Check for updates).
-  useEffect(() => checkForUpdateOnLaunch(), []);
+  // Main only — one check per app launch, not one per window.
+  useEffect(() => {
+    if (!isSecondary) checkForUpdateOnLaunch();
+  }, []);
   useEffect(() => {
     if (localConnId)
       void initSettings(localConnId).finally(() => void initDrafts(localConnId));
@@ -247,14 +474,17 @@ export default function App() {
   // panel visibility, local tabs, and the last remote (auto-reconnect for key
   // hosts; pre-filled dialog for password hosts).
   useEffect(() => {
-    if (!localConnId || restored.current) return;
+    // The workspace pop-out doesn't restore a session (no tabs/remotes/panels to
+    // reopen) — it shares the main window's live connections instead.
+    if (!localConnId || restored.current || isSecondary) return;
     restored.current = true;
     void restoreSession(localConnId, connect);
   }, [localConnId, connect]);
 
-  // Ensure there's always at least one terminal once the local session is up.
+  // Ensure there's always at least one terminal once the local session is up —
+  // except in the workspace pop-out, which has no terminal panel.
   useEffect(() => {
-    if (!localConnId) return;
+    if (!localConnId || isSecondary) return;
     const store = useAppStore.getState();
     if (store.terminals.length === 0) store.openTerminal(localConnId, "Local");
   }, [localConnId]);
@@ -265,13 +495,16 @@ export default function App() {
   //  - already running: a second launch forwards its path here as an event
   //    (single-instance) — the window is focused backend-side.
   useEffect(() => {
-    if (!localConnId || tookLaunchPath.current) return;
+    // Launch paths belong to the main window — the workspace pop-out is a view,
+    // not a place to open files from Explorer.
+    if (!localConnId || tookLaunchPath.current || isSecondary) return;
     tookLaunchPath.current = true;
     void takeOpenPath().then((t) => {
       if (t) void openLocalTarget(localConnId, t);
     });
   }, [localConnId]);
   useEffect(() => {
+    if (isSecondary) return;
     const un = onOpenPath((t) => {
       const id = useAppStore.getState().localConnId;
       if (id) void openLocalTarget(id, t);
@@ -604,14 +837,20 @@ export default function App() {
       return (
         <div className="hcol hcol--editor" key="editor">
           <PanelGroup
-            key={localConnId ? "with-terminal" : "no-terminal"}
+            key={localConnId && !isWorkspace ? "with-terminal" : "no-terminal"}
             autoSaveId="straylight.layout.v"
             direction="vertical"
           >
             <Panel id="editor" order={1} minSize={0}>
-              <EditorArea />
+              {/* No editor in the Sessions pop-out — its chunk (Monaco) never
+                  loads there; the pane sits empty under the focus view. */}
+              {!isSessions && (
+                <Suspense fallback={null}>
+                  <EditorArea />
+                </Suspense>
+              )}
             </Panel>
-            {localConnId && (
+            {localConnId && !isWorkspace && (
               <>
                 <PanelResizeHandle className="resize-handle" />
                 <Panel
@@ -630,7 +869,9 @@ export default function App() {
                   }}
                   onExpand={() => setTerminalVisible(true)}
                 >
-                  <TerminalPanel />
+                  <Suspense fallback={null}>
+                    <TerminalPanel />
+                  </Suspense>
                 </Panel>
               </>
             )}
@@ -715,12 +956,14 @@ export default function App() {
             {renderElement(t)}
           </Fragment>
         ))}
-        {/* Focus view (F11): a full-window CHAT workspace over the body. */}
-        {focusView && <FocusView />}
+        {/* Focus view (F11): a full-window CHAT workspace over the body. The
+            sessions pop-out window IS this view, always (bound to its role, not
+            the toggle — docs/dev/multi-window.md). */}
+        {(focusView || isSessions) && <FocusView />}
       </div>
       {/* In the focus view the status bar is replaced by a slim full-width
           bar (same footprint, just the notification bell). */}
-      {focusView ? <FocusBar /> : <StatusBar />}
+      {focusView || isSessions ? <FocusBar /> : <StatusBar />}
       {dialogOpen && <ConnectionDialog />}
       <PassphraseDialog />
       <HostKeyDialog />
