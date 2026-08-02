@@ -330,7 +330,55 @@ impl FileTransport for SftpTransport {
 
     async fn remove(&self, path: &str) -> Result<(), String> {
         let sftp = self.0.sftp().await?;
+        // Same machine: one server-side `rm -rf` deletes a whole tree in one
+        // round trip — the SFTP fallback below walks it file by file (a
+        // 10k-file folder = 10k+ round trips, minutes over a real link). The
+        // delete was already recursive-destructive and confirm-gated upstream;
+        // this only changes the speed. `-f` also makes "already gone" a
+        // success, which is the right answer for a raced delete.
+        let cmd = format!("rm -rf -- {}", crate::exec::shell_quote(path));
+        if let Ok(out) = crate::exec::exec_ssh(&self.0, &cmd).await {
+            if out.code == 0 {
+                self.0.touch_activity();
+                return Ok(());
+            }
+            // `rm` refused (permissions, read-only fs) — the SFTP walk retries
+            // and surfaces its own, more specific error.
+        }
         remove_recursive(&sftp, path.to_string()).await
+    }
+
+    async fn remove_many(&self, paths: &[String]) -> Result<(), String> {
+        // One server-side `rm -rf` takes every path at once — a multi-select
+        // delete is one round trip, not one per item.
+        if paths.len() > 1 {
+            let mut cmd = String::from("rm -rf --");
+            for p in paths {
+                cmd.push(' ');
+                cmd.push_str(&crate::exec::shell_quote(p));
+            }
+            if let Ok(out) = crate::exec::exec_ssh(&self.0, &cmd).await {
+                if out.code == 0 {
+                    self.0.touch_activity();
+                    return Ok(());
+                }
+            }
+        }
+        // Single path, or the batch refused — per path (each retries rm →
+        // SFTP walk), collecting errors so every path gets its attempt.
+        // Already-deleted paths from a partial batch count as success
+        // (`rm -f`), so this can't double-report.
+        let mut errs: Vec<String> = Vec::new();
+        for p in paths {
+            if let Err(e) = self.remove(p).await {
+                errs.push(e);
+            }
+        }
+        if errs.is_empty() {
+            Ok(())
+        } else {
+            Err(errs.join("; "))
+        }
     }
 
     async fn move_to(&self, path: &str, dest_dir: &str) -> Result<String, String> {
@@ -356,6 +404,24 @@ impl FileTransport for SftpTransport {
         while sftp.metadata(dest.clone()).await.is_ok() {
             dest = join_path(dest_dir, &copy_variant(&name, n));
             n += 1;
+        }
+        // Both ends are the SAME machine: one server-side `cp -a` (recursive,
+        // preserves modes/times/links) copies without moving a byte over the
+        // link. The SFTP fallback below streams every file down to the client
+        // and back up — only for hosts where exec/`cp` isn't available
+        // (restricted shells).
+        let cmd = format!(
+            "cp -a -- {} {}",
+            crate::exec::shell_quote(path),
+            crate::exec::shell_quote(&dest),
+        );
+        if let Ok(out) = crate::exec::exec_ssh(&self.0, &cmd).await {
+            if out.code == 0 {
+                self.0.touch_activity();
+                return Ok(dest);
+            }
+            // `cp` exists but refused (permissions, odd fs) — fall through so
+            // the SFTP path retries and surfaces its own, specific error.
         }
         copy_recursive(&sftp, path.to_string(), dest.clone()).await?;
         Ok(dest)

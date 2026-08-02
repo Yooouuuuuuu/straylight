@@ -782,8 +782,9 @@ interface AppState {
   newEntry: { connId: string; parent: string; isDir: boolean } | null;
   /** Items pending delete confirmation (one or many). */
   confirmDelete: TreeNode[] | null;
-  /** Cut/copy buffer for the explorer; paste drops it into a folder. */
-  clipboard: { mode: "cut" | "copy"; node: TreeNode } | null;
+  /** Cut/copy buffer for the explorer — the whole same-host selection when
+   *  the acted-on node was part of it; paste drops it into a folder. */
+  clipboard: { mode: "cut" | "copy"; nodes: TreeNode[] } | null;
 
   // Notifications --------------------------------------------------------
   notices: Notice[];
@@ -1166,7 +1167,7 @@ interface AppState {
   closeConfirmDelete: () => void;
   applyRename: (connId: string, oldPath: string, newPath: string) => void;
   applyDelete: (connId: string, path: string) => void;
-  setClipboard: (mode: "cut" | "copy", node: TreeNode) => void;
+  setClipboard: (mode: "cut" | "copy", nodes: TreeNode[]) => void;
   clearClipboard: () => void;
 
   pushNotice: (kind: Notice["kind"], text: string) => void;
@@ -2774,7 +2775,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         : (tabs[tabs.length - 1]?.id ?? null);
       return { tabs, activeTabId };
     }),
-  setClipboard: (mode, node) => set({ clipboard: { mode, node } }),
+  setClipboard: (mode, nodes) => set({ clipboard: { mode, nodes } }),
   clearClipboard: () => set({ clipboard: null }),
 
   pushNotice: (kind, text) =>

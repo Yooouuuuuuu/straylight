@@ -11,6 +11,40 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-08-02
+
+### Added
+
+- **Multi-select cut, copy, and paste.** Cut or copy (Ctrl+X/C or right-click)
+  with several files selected and the whole selection rides the clipboard —
+  the Paste entry shows the count. Paste uses the same machinery as
+  drag-and-drop, so folder-plus-child selections are handled once, a few items
+  copy in parallel, and a toast reports what landed ("Copied 12 items").
+- **A real Containers table.** The Containers tab now lists podman *and*
+  docker (it previously stopped at the first engine found), in one sortable
+  table — Host, Engine, Names, Container ID, Image, Command, Created, Status,
+  Ports — with per-host checkboxes and a poll-interval control like the Ports
+  tab. Clicking a row still opens a shell inside the container.
+
+### Changed
+
+- **Big folders are fast now.** A folder with thousands of entries no longer
+  drags the whole explorer down — rows render far cheaper, and past 500
+  entries a folder switches to a simplified `ls`-style listing (names only,
+  headed by an item count) so even 10,000-file folders stay smooth.
+- **Same-host copy and delete run on the server.** Copying or deleting on a
+  remote used to stream every byte down and back up (or round-trip per file);
+  both now run as one command on the host — a large folder copies or deletes
+  near-instantly, and a multi-select delete is a single operation.
+- **The update prompt leads with what's new.** Checking for updates now shows
+  the release notes first, with the install mechanics below.
+
+### Fixed
+
+- Selecting a folder together with files inside it no longer deletes (or
+  copies) the children twice — no more "No such file" errors on batch delete.
+- Markdown preview text is selectable and copyable again.
+
 ## [0.12.0] - 2026-08-01
 
 ### Added

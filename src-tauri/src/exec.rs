@@ -129,7 +129,8 @@ async fn run_ssh(conn: &Connection, cwd: &str, argv: &[&str]) -> Result<CmdOutpu
 /// (e.g. `run_cancellable` cancels a hung `git fetch`), the guard's Drop still
 /// sends CHANNEL_CLOSE — without it, the slot leaked and the remote process was
 /// orphaned (incident 2026-07-29 Defect A, the top-ranked leak).
-async fn exec_ssh(conn: &Connection, command: &str) -> Result<CmdOutput, String> {
+/// `pub(crate)`: the SFTP transport reuses this for server-side `cp` copies.
+pub(crate) async fn exec_ssh(conn: &Connection, command: &str) -> Result<CmdOutput, String> {
     use russh::ChannelMsg;
     use std::time::Duration;
 

@@ -56,6 +56,9 @@ export interface Settings {
     /** Hosts the Ports tab doesn't monitor ("local" | "wsl:<distro>" |
      *  "user@host:port") — also drops them from the chip digits. */
     portsIgnoreHosts?: string[];
+    /** Hosts the Containers tab doesn't monitor (same keys as
+     *  `portsIgnoreHosts`) — also drops them from the chip digits. */
+    containersIgnoreHosts?: string[];
   };
   /** UI reduction switches (also checkboxes in Preferences → Interface).
    *  `localOnly: true` removes the explorer's L/W/R section toggles and every
@@ -126,6 +129,7 @@ const PANEL_DEFAULTS = {
   containersInterval: 30,
   hideSystemPorts: true,
   portsIgnoreHosts: [] as string[],
+  containersIgnoreHosts: [] as string[],
 };
 
 function settingsTemplate(): Settings {
@@ -427,6 +431,9 @@ async function loadAndApply(): Promise<void> {
     hideSystemPorts: pl.hideSystemPorts !== false,
     portsIgnoreHosts: Array.isArray(pl.portsIgnoreHosts)
       ? pl.portsIgnoreHosts.filter((h): h is string => typeof h === "string")
+      : [],
+    containersIgnoreHosts: Array.isArray(pl.containersIgnoreHosts)
+      ? pl.containersIgnoreHosts.filter((h): h is string => typeof h === "string")
       : [],
   };
 

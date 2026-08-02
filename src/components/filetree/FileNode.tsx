@@ -1,7 +1,15 @@
 /** A single row in the file tree: twisty, icon, name (or rename input), symlink
  *  marker, and a trailing size. Handles selection, right-click, and inline
- *  rename. */
-import { useEffect, useRef, useState } from "react";
+ *  rename.
+ *
+ *  PERFORMANCE CONTRACT (big folders): the component is memoized and every
+ *  callback prop is entry-first and referentially STABLE (RootTree wraps them
+ *  in useCallback) — so a selection click re-renders the two affected rows,
+ *  not all 8000. In `light` mode (folders past the RootTree gate) the row
+ *  drops its per-row extras — VCS decoration, size, tooltips, dir hover
+ *  buttons — a plain `ls`-style name row that's cheap to draw by the
+ *  thousand. */
+import { memo, useEffect, useRef, useState } from "react";
 
 import { formatSize, formatTimestamp } from "../../lib/format";
 import type { FileEntry } from "../../lib/ipc";
@@ -80,7 +88,7 @@ export function RenameInput({
   );
 }
 
-export function FileNode({
+export const FileNode = memo(function FileNode({
   connId,
   entry,
   depth,
@@ -88,6 +96,7 @@ export function FileNode({
   loading,
   active,
   renaming,
+  light,
   onToggle,
   onOpen,
   onSelect,
@@ -104,23 +113,29 @@ export function FileNode({
   loading: boolean;
   active: boolean;
   renaming: boolean;
-  onToggle: () => void;
-  onOpen: (opts?: { preview?: boolean }) => void;
-  onSelect: (mods: { ctrl: boolean; shift: boolean }) => void;
-  onContextMenu: (x: number, y: number) => void;
-  onCommitRename: (name: string) => void;
+  /** Simplified `ls`-style row for big folders: name only — no VCS
+   *  decoration, size, tooltips, or dir hover buttons. */
+  light: boolean;
+  onToggle: (entry: FileEntry) => void;
+  onOpen: (entry: FileEntry, opts?: { preview?: boolean }) => void;
+  onSelect: (entry: FileEntry, mods: { ctrl: boolean; shift: boolean }) => void;
+  onContextMenu: (entry: FileEntry, x: number, y: number) => void;
+  onCommitRename: (entry: FileEntry, name: string) => void;
   onCancelRename: () => void;
   /** Drag started on this row — the tree records the drag set (selection). */
-  onDragStartNode: () => void;
+  onDragStartNode: (entry: FileEntry) => void;
   /** A same-host drag was dropped on this folder — open Move/Copy at (x, y). */
-  onDropInto: (x: number, y: number) => void;
+  onDropInto: (entry: FileEntry, x: number, y: number) => void;
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
   const [dropOver, setDropOver] = useState(false);
   // VCS decoration for this path (tracked repos publish a normalized map).
   // Ignored state is inherited: anything inside an ignored directory dims too
-  // (git collapses fully-ignored dirs to a single entry).
+  // (git collapses fully-ignored dirs to a single entry). Light rows skip the
+  // walk (the selector still runs — hooks are unconditional — but returns a
+  // constant, so VCS updates never re-render them).
   const vcsKind = useVcsStore((s) => {
+    if (light) return undefined;
     const p = entry.path.replace(/\\/g, "/");
     const own = s.decorations[p];
     if (own) return own;
@@ -138,7 +153,7 @@ export function FileNode({
   // A folder that IS a tracked repo's root shows the repo's color (default
   // green) — real change letters (M/A/…) still win over it.
   const trackedColor = useVcsStore((s) =>
-    entry.isDir ? repoColorForPath(s.repos, connId, entry.path) : null,
+    !light && entry.isDir ? repoColorForPath(s.repos, connId, entry.path) : null,
   );
 
   // Keep the selected row visible when the selection moves by keyboard.
@@ -152,19 +167,30 @@ export function FileNode({
   const handleClick = (e: React.MouseEvent) => {
     const ctrl = e.ctrlKey || e.metaKey;
     const shift = e.shiftKey;
-    onSelect({ ctrl, shift });
+    onSelect(entry, { ctrl, shift });
     if (!ctrl && !shift) {
-      if (entry.isDir) onToggle();
-      else onOpen({ preview: true });
+      if (entry.isDir) onToggle(entry);
+      else onOpen(entry, { preview: true });
     }
   };
   const handleDoubleClick = () => {
-    if (!entry.isDir) onOpen({ preview: false });
+    if (!entry.isDir) onOpen(entry, { preview: false });
   };
 
   const twistyClass = entry.isDir
     ? `file-node__twisty ${expanded ? "file-node__twisty--open" : ""}`
     : "file-node__twisty file-node__twisty--leaf";
+
+  const nameSpan = (
+    <span
+      className={`file-node__name ${entry.isDir ? "file-node__name--dir" : ""} ${
+        vcsKind ? vcsClass(vcsKind) : ""
+      }`}
+      style={!vcsDirect && trackedColor ? { color: trackedColor } : undefined}
+    >
+      {entry.name}
+    </span>
+  );
 
   return (
     <div
@@ -178,7 +204,7 @@ export function FileNode({
         renaming
           ? undefined
           : (e) => {
-              onDragStartNode();
+              onDragStartNode(entry);
               e.dataTransfer.effectAllowed = "copyMove";
               e.dataTransfer.setData("text/plain", entry.name);
             }
@@ -212,7 +238,7 @@ export function FileNode({
               e.preventDefault();
               setDropOver(false);
               if (canDropInto(connId, entry.path)) {
-                onDropInto(e.clientX, e.clientY);
+                onDropInto(entry, e.clientX, e.clientY);
               }
             }
           : undefined
@@ -232,12 +258,12 @@ export function FileNode({
         renaming
           ? undefined
           : (e) => {
-              if (e.button === 1 && !entry.isDir) onOpen({ preview: false });
+              if (e.button === 1 && !entry.isDir) onOpen(entry, { preview: false });
             }
       }
       onContextMenu={(event) => {
         event.preventDefault();
-        onContextMenu(event.clientX, event.clientY);
+        onContextMenu(entry, event.clientX, event.clientY);
       }}
     >
       <span className={twistyClass}>
@@ -249,21 +275,24 @@ export function FileNode({
       {renaming ? (
         <RenameInput
           initial={entry.name}
-          onCommit={onCommitRename}
+          onCommit={(name) => onCommitRename(entry, name)}
           onCancel={onCancelRename}
         />
+      ) : light ? (
+        <>
+          {/* ls-style: name (+ symlink marker), nothing else. Full details
+              stay one right-click → Properties away. */}
+          {nameSpan}
+          {entry.isSymlink && <span className="file-node__symlink">↪</span>}
+          {loading && (
+            <span className="file-node__spinner">
+              <span className="spinner spinner--sm" />
+            </span>
+          )}
+        </>
       ) : (
         <>
-          <Tip label={entryTooltip(entry)}>
-            <span
-              className={`file-node__name ${entry.isDir ? "file-node__name--dir" : ""} ${
-                vcsKind ? vcsClass(vcsKind) : ""
-              }`}
-              style={!vcsDirect && trackedColor ? { color: trackedColor } : undefined}
-            >
-              {entry.name}
-            </span>
-          </Tip>
+          <Tip label={entryTooltip(entry)}>{nameSpan}</Tip>
           {entry.isSymlink && (
             <Tip label={entry.symlinkTarget ?? ""}>
               <span className="file-node__symlink">↪</span>
@@ -322,4 +351,4 @@ export function FileNode({
       )}
     </div>
   );
-}
+});

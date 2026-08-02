@@ -54,12 +54,13 @@ async function runCheck(manual: boolean): Promise<void> {
     // stays on as a quiet reminder.
     useAppStore.getState().setUpdateAvailable(update.version);
     if (!manual) return;
-    // Manual check → the user asked, so offer the install now.
+    // Manual check → the user asked, so offer the install now. What's new
+    // leads (the release's `notes` from latest.json); mechanics follow.
     useVcsStore
       .getState()
       .askConfirm(
         `Update to ${update.version}?`,
-        `A new version of Straylight is available. It downloads in the background, then the app restarts to finish installing.${update.body ? `\n\n${update.body}` : ""}`,
+        `${update.body ? `${update.body}\n\n` : ""}Downloads in the background; the app restarts to finish installing.`,
         () => void install(update),
       );
   } catch (e) {

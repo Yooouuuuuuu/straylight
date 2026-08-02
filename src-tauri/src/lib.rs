@@ -626,6 +626,7 @@ pub fn run() {
             transport::fs_rename,
             transport::fs_create,
             transport::fs_remove,
+            transport::fs_remove_many,
             transport::fs_move,
             transport::fs_copy,
             transport::fs_transfer_batch,

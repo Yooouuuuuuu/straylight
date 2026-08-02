@@ -158,6 +158,68 @@ export function RootTree({
     },
     [connId],
   );
+
+  // Stable, entry-first handlers shared by every row (FileNode's memo
+  // contract): a fresh closure per row per render would defeat the memo and
+  // re-render every row of an 8000-file folder on each click.
+  // (handleToggle lives below, after toggleDir it wraps.)
+  const handleOpen = useCallback(
+    (entry: FileEntry, opts?: { preview?: boolean }) =>
+      void openRemoteFile(connId, entry, opts),
+    [connId],
+  );
+  const handleSelect = useCallback(
+    (entry: FileEntry, mods: { ctrl: boolean; shift: boolean }) => {
+      const node = {
+        connId,
+        path: entry.path,
+        name: entry.name,
+        isDir: entry.isDir,
+      };
+      if (mods.shift) {
+        // Anchor read at click time (getState) keeps this callback stable.
+        const sel = useAppStore.getState().selected;
+        const anchor = sel?.connId === connId ? sel.path : null;
+        const range = selectionRange(connId, anchor, entry.path).map((r) => ({
+          connId: r.connId,
+          path: r.path,
+          name: r.name,
+          isDir: r.isDir,
+        }));
+        if (range.length) setSelection(range, node);
+        else setSelected(node);
+      } else if (mods.ctrl) {
+        toggleSelected(node);
+      } else {
+        setSelected(node);
+      }
+    },
+    [connId, setSelection, setSelected, toggleSelected],
+  );
+  const handleContextMenu = useCallback(
+    (entry: FileEntry, x: number, y: number) =>
+      openContextMenu(
+        { connId, path: entry.path, name: entry.name, isDir: entry.isDir },
+        x,
+        y,
+      ),
+    [connId, openContextMenu],
+  );
+  const handleCommitRename = useCallback(
+    (entry: FileEntry, name: string) => void commitRename(connId, entry.path, name),
+    [connId],
+  );
+  const handleDropInto = useCallback(
+    (entry: FileEntry, x: number, y: number) =>
+      setDropMenu({
+        x,
+        y,
+        destDir: entry.path,
+        destName: entry.name,
+        nodes: getTreeDrag(),
+      }),
+    [],
+  );
   // The root's own metadata, so its header tip shows the same file info as
   // every row (path + mode/ownership + date). Best-effort; path-only until it
   // arrives.
@@ -271,10 +333,10 @@ export function RootTree({
     if (refreshToken === 0) return;
     void loadDir(rootPath).then(() => markRefreshed(connId));
     expanded.forEach((path) => {
-      // Auto-refresh (window focus) skips a LARGE folder listed in the last 15s
-      // — it was re-reading 5000-entry folders every few seconds at ~2s each.
-      // Small folders always refresh; an explicit re-expand (toggleDir) always
-      // reloads regardless of this.
+      // Auto-refresh (window focus) skips a LARGE folder listed in the last
+      // 15s. This protects the WIRE, not the renderer (light rows made drawing
+      // cheap): a 5000-entry SFTP listing is still ~2s of round trips however
+      // it's drawn. Manual refresh / re-expand always reloads.
       const count = dirs[path]?.entries?.length ?? 0;
       const at = loadedAt.current.get(path);
       if (count > 1500 && at && Date.now() - at < 15_000) return;
@@ -297,6 +359,11 @@ export function RootTree({
       });
     },
     [loadDir],
+  );
+  // Entry-first stable wrapper for the rows (see the handler block above).
+  const handleToggle = useCallback(
+    (entry: FileEntry) => toggleDir(entry.path),
+    [toggleDir],
   );
 
   // Expand/collapse used by keyboard navigation. The root itself collapses via
@@ -398,14 +465,32 @@ export function RootTree({
     if (rootSelected) headerRef.current?.scrollIntoView({ block: "nearest" });
   }, [rootSelected]);
 
+  /** Folders past this size render `ls`-style light rows (FileNode `light`:
+   *  name only — no VCS decoration, size, tooltips, or dir hover buttons)
+   *  behind a count note, so thousands of rows stay cheap to draw. */
+  const LIGHT_GATE = 500;
+
   const renderDir = (path: string, depth: number): ReactNode[] => {
     const state = dirs[path];
     if (!state?.entries) return [];
     const visible = showHidden
       ? state.entries
       : state.entries.filter((entry) => !entry.name.startsWith("."));
+    const light = visible.length > LIGHT_GATE;
 
     const rows: ReactNode[] = [];
+    if (light) {
+      // Tell the user this listing is different — and how big it is.
+      rows.push(
+        <div
+          key={`note:${path}`}
+          className="file-node__bignote"
+          style={{ paddingLeft: 6 + depth * 14 + 18 }}
+        >
+          {visible.length.toLocaleString()} items · simplified list
+        </div>,
+      );
+    }
     for (const entry of visible) {
       const isExpanded = expanded.has(entry.path);
       rows.push(
@@ -424,55 +509,15 @@ export function RootTree({
             renaming?.connId === connId &&
             renaming?.path === entry.path
           }
-          onToggle={() => toggleDir(entry.path)}
-          onOpen={(opts) => void openRemoteFile(connId, entry, opts)}
-          onSelect={(mods) => {
-            const node = {
-              connId,
-              path: entry.path,
-              name: entry.name,
-              isDir: entry.isDir,
-            };
-            if (mods.shift) {
-              const anchor = selected?.connId === connId ? selected.path : null;
-              const range = selectionRange(connId, anchor, entry.path).map((r) => ({
-                connId: r.connId,
-                path: r.path,
-                name: r.name,
-                isDir: r.isDir,
-              }));
-              if (range.length) setSelection(range, node);
-              else setSelected(node);
-            } else if (mods.ctrl) {
-              toggleSelected(node);
-            } else {
-              setSelected(node);
-            }
-          }}
-          onContextMenu={(x, y) =>
-            openContextMenu(
-              {
-                connId,
-                path: entry.path,
-                name: entry.name,
-                isDir: entry.isDir,
-              },
-              x,
-              y,
-            )
-          }
-          onCommitRename={(name) => void commitRename(connId, entry.path, name)}
-          onCancelRename={() => cancelRename()}
-          onDragStartNode={() => startNodeDrag(entry)}
-          onDropInto={(x, y) =>
-            setDropMenu({
-              x,
-              y,
-              destDir: entry.path,
-              destName: entry.name,
-              nodes: getTreeDrag(),
-            })
-          }
+          light={light}
+          onToggle={handleToggle}
+          onOpen={handleOpen}
+          onSelect={handleSelect}
+          onContextMenu={handleContextMenu}
+          onCommitRename={handleCommitRename}
+          onCancelRename={cancelRename}
+          onDragStartNode={startNodeDrag}
+          onDropInto={handleDropInto}
         />,
       );
       if (entry.isDir && isExpanded) {

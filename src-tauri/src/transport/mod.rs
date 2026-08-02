@@ -139,6 +139,24 @@ pub trait FileTransport: Send + Sync {
     /// Remove `path` (recursively for directories).
     async fn remove(&self, path: &str) -> Result<(), String>;
 
+    /// Remove several paths in one call. The default walks them one by one;
+    /// transports with a cheaper bulk form (one server-side `rm` for the lot)
+    /// override. Failures are collected, not short-circuited — every path gets
+    /// its attempt, and the Err joins whatever went wrong.
+    async fn remove_many(&self, paths: &[String]) -> Result<(), String> {
+        let mut errs: Vec<String> = Vec::new();
+        for p in paths {
+            if let Err(e) = self.remove(p).await {
+                errs.push(e);
+            }
+        }
+        if errs.is_empty() {
+            Ok(())
+        } else {
+            Err(errs.join("; "))
+        }
+    }
+
     /// Move `path` into `dest_dir` (same connection), keeping its basename.
     /// A no-op if it's already there; errors if the target name is taken.
     /// Returns the new absolute path.
@@ -379,6 +397,17 @@ pub async fn fs_remove(
     path: String,
 ) -> Result<(), String> {
     state.transport(&conn_id).await?.remove(&path).await
+}
+
+/// Batched delete — a multi-select removal is ONE transport call (and on SSH
+/// one server-side `rm`), not a round trip per item.
+#[tauri::command]
+pub async fn fs_remove_many(
+    state: State<'_, AppState>,
+    conn_id: String,
+    paths: Vec<String>,
+) -> Result<(), String> {
+    state.transport(&conn_id).await?.remove_many(&paths).await
 }
 
 #[tauri::command]

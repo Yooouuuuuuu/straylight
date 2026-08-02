@@ -301,7 +301,9 @@ function FinderModal({ onClose }: { onClose: () => void }) {
             <button
               className="context-menu__item"
               onClick={() => {
-                setClipboard("copy", entryNode(menu.entry));
+                // One quick-open result — a one-item buffer (the explorer's
+                // multi-selection is unrelated context here).
+                setClipboard("copy", [entryNode(menu.entry)]);
                 setMenu(null);
               }}
             >

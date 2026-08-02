@@ -380,6 +380,13 @@ export function fsRemove(connId: string, path: string): Promise<void> {
   return invoke("fs_remove", { connId, path });
 }
 
+/** Remove several paths in ONE call — on SSH a single server-side `rm` for
+ *  the whole batch. Rejects with a joined message if any path failed (each
+ *  still gets its attempt). */
+export function fsRemoveMany(connId: string, paths: string[]): Promise<void> {
+  return invoke("fs_remove_many", { connId, paths });
+}
+
 /** Move an entry into `destDir` (same connection); returns the new path. */
 export function fsMove(
   connId: string,
@@ -869,9 +876,13 @@ export interface ContainerInfo {
   status: string;
   ports: string;
   engine: string;
+  command: string;
+  /** Age in the engine's own words ("2 hours ago"). */
+  created: string;
 }
 
-/** Running containers on the host (podman preferred, else docker; [] if none). */
+/** Running containers on the host — podman AND docker, merged and deduped
+ *  by container id ([] if neither engine answers). */
 export function containerList(connId: string): Promise<ContainerInfo[]> {
   return invoke("container_list", { connId });
 }

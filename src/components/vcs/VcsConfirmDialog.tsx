@@ -40,7 +40,13 @@ export function VcsConfirmDialog() {
           <span className="modal__title">{confirm.title}</span>
         </div>
         <div className="modal__body">
-          <div className="conn-empty" style={{ textAlign: "left", padding: 0 }}>
+          {/* pre-line: bodies with real paragraphs (the update prompt's
+              release notes) keep their line breaks; single-line bodies are
+              unaffected. */}
+          <div
+            className="conn-empty"
+            style={{ textAlign: "left", padding: 0, whiteSpace: "pre-line" }}
+          >
             {confirm.body}
           </div>
         </div>

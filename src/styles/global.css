@@ -813,6 +813,14 @@
   padding: var(--space-5) !important;
 }
 
+/* Containers table: the whole row is the "open a shell inside" action. */
+.ports-table__row--click {
+  cursor: pointer;
+}
+.ports-table__row--click:hover td {
+  background: var(--bg-tertiary);
+}
+
 /* Settings / Themes editor tabs. */
 .app-tab {
   position: absolute;
@@ -1593,6 +1601,10 @@
   line-height: 1.65;
   font-size: 14px;
   color: var(--fg-primary);
+  /* Rendered DOCUMENT, not chrome: selectable/copyable, overriding the
+     app-wide user-select: none (like .toast__text / .bell-pop__text). */
+  user-select: text;
+  cursor: text;
 }
 
 .md-preview__body h1,
@@ -3417,6 +3429,16 @@ select option {
   color: var(--cyan);
   font-size: var(--font-size-xs);
   margin-left: var(--space-1);
+}
+
+/* First row of a big (>500 entries) folder's simplified listing: the count
+   plus why the rows look plainer (no sizes / git colors). */
+.file-node__bignote {
+  padding-top: 2px;
+  padding-bottom: 2px;
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
+  white-space: nowrap;
 }
 
 .file-node__meta {

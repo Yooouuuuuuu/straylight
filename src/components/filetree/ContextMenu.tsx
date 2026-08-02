@@ -1,7 +1,12 @@
 /** Right-click menu for a file-tree node. Closes on outside click / Escape. */
 import { useEffect } from "react";
 
-import { copyPath, downloadToLocal, pasteInto } from "../../lib/fileOps";
+import {
+  clipboardNodes,
+  copyPath,
+  downloadToLocal,
+  pasteInto,
+} from "../../lib/fileOps";
 import { dirname } from "../../lib/format";
 import { revealPath } from "../../lib/ipc";
 import { openSessionAt, openTerminalAt } from "../../lib/terminalTarget";
@@ -81,7 +86,7 @@ export function ContextMenu() {
         <button
           className="context-menu__item"
           onClick={() => {
-            setClipboard("cut", node);
+            setClipboard("cut", clipboardNodes(node));
             closeContextMenu();
           }}
         >
@@ -92,7 +97,7 @@ export function ContextMenu() {
         <button
           className="context-menu__item"
           onClick={() => {
-            setClipboard("copy", node);
+            setClipboard("copy", clipboardNodes(node));
             closeContextMenu();
           }}
         >
@@ -101,13 +106,17 @@ export function ContextMenu() {
       )}
       <button
         className="context-menu__item"
-        disabled={!clipboard || clipboard.node.connId !== menu.connId}
+        disabled={!clipboard || clipboard.nodes[0]?.connId !== menu.connId}
         onClick={() => {
           closeContextMenu();
           void pasteInto(menu.connId, parent);
         }}
       >
-        Paste<span className="context-menu__key">Ctrl+V</span>
+        Paste
+        {clipboard && clipboard.nodes.length > 1
+          ? ` (${clipboard.nodes.length})`
+          : ""}
+        <span className="context-menu__key">Ctrl+V</span>
       </button>
       {menu.isDir && (
         <>
