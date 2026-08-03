@@ -74,7 +74,14 @@ const POLL_MS = 3000;
 /** Start file watching + remote polling. Returns a cleanup function. */
 export function initFileWatching(): () => void {
   syncFileWatchers();
-  const unsubscribe = useAppStore.subscribe(syncFileWatchers);
+  // The watcher set derives from tabs + localConnId ALONE — skip the sync on
+  // every other store mutation (this subscriber fires on all of them: busy
+  // flips, titles, selections — docs/dev/code-scan-2026-08.md A4).
+  const unsubscribe = useAppStore.subscribe((state, prev) => {
+    if (state.tabs === prev.tabs && state.localConnId === prev.localConnId)
+      return;
+    syncFileWatchers();
+  });
 
   const unlistenPromise = onFileFsChange((c) => {
     const tab = useAppStore
@@ -87,6 +94,11 @@ export function initFileWatching(): () => void {
   let polling = false;
   const timer = window.setInterval(() => {
     if (polling) return;
+    // A HIDDEN window (minimized/covered) has no reader — skip the SSH
+    // chatter until it's visible again (≤1 tick of staleness on return).
+    // Visibility, not focus: a log tailed on the second monitor while you
+    // type elsewhere is unfocused but WATCHED, and keeps updating.
+    if (document.visibilityState === "hidden") return;
     polling = true;
     void (async () => {
       try {
@@ -99,14 +111,17 @@ export function initFileWatching(): () => void {
             !t.truncated &&
             t.connId !== s.localConnId,
         );
-        for (const t of tabs) {
-          try {
-            const st = await fsStat(t.connId, t.path);
-            if (st.modified !== t.modified) await reloadCleanTab(t.id);
-          } catch {
-            /* transient (reconnect etc.) — try again next tick */
-          }
-        }
+        // Concurrent stats: one slow host can't serialize the rest behind it.
+        await Promise.all(
+          tabs.map(async (t) => {
+            try {
+              const st = await fsStat(t.connId, t.path);
+              if (st.modified !== t.modified) await reloadCleanTab(t.id);
+            } catch {
+              /* transient (reconnect etc.) — try again next tick */
+            }
+          }),
+        );
       } finally {
         polling = false;
       }

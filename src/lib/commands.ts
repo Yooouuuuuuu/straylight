@@ -19,6 +19,7 @@ import {
 import { closeAllTabs, closeSavedTabs } from "./tabActions";
 import { keyLabelFor } from "./shortcuts";
 import { toggleFocusView } from "./focusMode";
+import { isSecondary } from "./windowRole";
 import { cycleTerminalPanelTab } from "./terminalTabs";
 import { pickTerminalTarget } from "./terminalTarget";
 import { focusExplorer } from "./treeNav";
@@ -92,16 +93,26 @@ export function allCommands(): Command[] {
     { id: "app.commandPalette", title: "App: Show All Commands", run: () => app().setPaletteOpen(true) },
     { id: "app.refreshAll", title: "App: Refresh Everything", run: () => refreshApp() },
     { id: "app.checkForUpdates", title: "App: Check for Updates", run: () => checkForUpdate() },
-    { id: "connection.connect", title: "Connection: Connect to Server", run: () => app().openDialog() },
-    {
-      id: "connection.reconnect",
-      title: "Connection: Reconnect Remote",
-      run: () => {
-        const r = app().remote;
-        if (r) void sshReconnect(r.connId);
-        else app().pushNotice("warn", "No remote connection to reconnect.");
-      },
-    },
+    // Pop-out windows never dial or repair connections — they mirror main's
+    // (docs/dev/multi-window.md), so the connection commands don't exist there.
+    ...(isSecondary
+      ? []
+      : [
+          {
+            id: "connection.connect",
+            title: "Connection: Connect to Server",
+            run: () => app().openDialog(),
+          },
+          {
+            id: "connection.reconnect",
+            title: "Connection: Reconnect Remote",
+            run: () => {
+              const r = app().remote;
+              if (r) void sshReconnect(r.connId);
+              else app().pushNotice("warn", "No remote connection to reconnect.");
+            },
+          },
+        ]),
     { id: "editor.closeAllTabs", title: "Editor: Close All Tabs", run: closeAllTabs },
     { id: "editor.closeSavedTabs", title: "Editor: Close Saved Tabs", run: closeSavedTabs },
     {

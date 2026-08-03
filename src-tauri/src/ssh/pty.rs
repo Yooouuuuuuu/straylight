@@ -20,7 +20,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::ssh::connection::Connection;
-use crate::AppState;
+use crate::{AppState, LockSafe};
 
 /// Output chunk emitted on the `pty-output` event. `data` is the raw bytes
 /// BASE64-encoded: a `Vec<u8>` field serializes as a JSON array of numbers
@@ -58,8 +58,7 @@ fn emit_pty_output(app: &AppHandle, pty_id: &str, data: Vec<u8>) {
     let owner = app
         .state::<AppState>()
         .pty_owners
-        .lock()
-        .unwrap()
+        .lock_safe()
         .get(pty_id)
         .cloned();
     match owner {
@@ -76,8 +75,7 @@ fn emit_pty_output(app: &AppHandle, pty_id: &str, data: Vec<u8>) {
 fn clear_pty_owner(app: &AppHandle, pty_id: &str) {
     app.state::<AppState>()
         .pty_owners
-        .lock()
-        .unwrap()
+        .lock_safe()
         .remove(pty_id);
 }
 

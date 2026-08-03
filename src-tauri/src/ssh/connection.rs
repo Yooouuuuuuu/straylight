@@ -15,7 +15,7 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tokio::sync::{watch, Mutex, OwnedSemaphorePermit, RwLock, Semaphore};
 use uuid::Uuid;
 
-use crate::AppState;
+use crate::{AppState, LockSafe};
 
 /// Client-side session-channel cap, held BELOW the server's `MaxSessions`
 /// (default 10) so our own accounting — not sshd's silent, permanent refusal —
@@ -396,7 +396,7 @@ impl Connection {
         if let Some(lane) = slot.as_ref() {
             return lane.clone();
         }
-        if let Some(failed_at) = *self.data_fail.lock().unwrap() {
+        if let Some(failed_at) = *self.data_fail.lock_safe() {
             if failed_at.elapsed() < Duration::from_secs(60) {
                 return self.clone(); // cooldown — share the main lane
             }
@@ -422,7 +422,7 @@ impl Connection {
                     ConnectionState::Disconnected,
                     Some(format!("data lane unavailable ({e}) — sharing the main connection")),
                 );
-                *self.data_fail.lock().unwrap() = Some(std::time::Instant::now());
+                *self.data_fail.lock_safe() = Some(std::time::Instant::now());
                 self.clone()
             }
         }
@@ -638,7 +638,7 @@ impl client::Handler for ClientHandler {
         &mut self,
         server_public_key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
-        let mut out = self.outcome.lock().unwrap();
+        let mut out = self.outcome.lock_safe();
         if !self.verify {
             *out = HostKeyOutcome::Trusted;
             return Ok(true);
@@ -1015,7 +1015,7 @@ pub async fn ssh_connect(
                 // host/port from the connect profile (avoids parsing them back
                 // out past an IPv6 host or the fingerprint's own colons).
                 let refusal = {
-                    match &*outcome.lock().unwrap() {
+                    match &*outcome.lock_safe() {
                         HostKeyOutcome::Unknown { fingerprint, key } => {
                             Some((format!("{HOST_KEY_UNKNOWN}{fingerprint}"), Some(key.clone())))
                         }
@@ -1318,6 +1318,11 @@ pub async fn window_boot(
     app: AppHandle,
 ) -> Result<(), String> {
     state.reg_clear_window(window.label());
+    // A fresh main page (launch / crash-recovery reload) can't re-attach to
+    // anything — replay stashes left by a previous page are orphans.
+    if window.label() == "main" {
+        state.session_replays.lock_safe().clear();
+    }
     sweep_dead(&state, &app).await;
     Ok(())
 }
@@ -1335,8 +1340,7 @@ pub fn window_set_refs(window: WebviewWindow, state: State<'_, crate::AppState>,
         conns.iter().map(|id| crate::conn_key(id)).collect();
     state
         .window_refs
-        .lock()
-        .unwrap()
+        .lock_safe()
         .insert(window.label().to_string(), set);
 }
 

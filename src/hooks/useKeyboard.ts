@@ -15,6 +15,7 @@ import { cycleTerminalPanelTab } from "../lib/terminalTabs";
 import { adjustTerminalFontSize } from "../lib/themes";
 import { focusTerminal } from "../lib/terminalFocus";
 import { focusExplorer } from "../lib/treeNav";
+import { isSessions, isWorkspace } from "../lib/windowRole";
 import { useAppStore } from "../store/appStore";
 import { useVcsStore } from "../store/vcsStore";
 
@@ -29,7 +30,7 @@ export function useKeyboard() {
       // switch to tab N). Handled before shortcut matching — digit combos
       // aren't in the shortcut table.
       if (
-        store.focusView &&
+        (store.focusView || isSessions) &&
         event.ctrlKey &&
         event.shiftKey !== event.altKey && // exactly one of them
         /^Digit[1-9]$/.test(event.code)
@@ -87,8 +88,10 @@ export function useKeyboard() {
       // the agents, Ctrl+Shift+` starts one on the shown agent's host, the
       // terminal font zoom keeps working, F11 exits (capture listener); every
       // other app shortcut is swallowed. Shell keys reach the terminal as
-      // ever — only OUR shortcuts are filtered here.
-      if (store.focusView) {
+      // ever — only OUR shortcuts are filtered here. The sessions pop-out IS
+      // this view (bound to its role with focusView false), so it joins the
+      // same keymap — without this it was command-less.
+      if (store.focusView || isSessions) {
         // VISUAL order — hosts as sectioned, then each host's agents.
         const residents = chatSections(
           store.terminals,
@@ -144,6 +147,21 @@ export function useKeyboard() {
             event.preventDefault();
             return;
         }
+      }
+
+      // The workspace pop-out has no terminal panel and no Sessions column —
+      // their shortcuts are inert there, and toggleChat would even persist the
+      // shared chat-visibility default that MAIN reads at next launch. (Tab
+      // cycling stays: nextTerminal/prevTerminal degrade to editor tabs.)
+      if (
+        isWorkspace &&
+        (action === "toggleTerminal" ||
+          action === "newTerminal" ||
+          action === "toggleChat" ||
+          action === "togglePanel")
+      ) {
+        event.preventDefault();
+        return;
       }
 
       switch (action) {

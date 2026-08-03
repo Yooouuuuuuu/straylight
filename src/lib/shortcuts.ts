@@ -4,6 +4,7 @@
  * overrides in settings.json). Defaults follow VS Code / OS conventions; users
  * remap by id via `"keybindings": { "search.inFiles": "ctrl+alt+f" }`.
  */
+import { isSessions } from "./windowRole";
 import { useAppStore } from "../store/appStore";
 
 export type ShortcutAction =
@@ -226,11 +227,15 @@ const TERMINAL_ACTIONS: ShortcutAction[] = [
 ];
 
 export function isPassthroughShortcut(event: KeyboardEvent): boolean {
-  // Focus view (F11): Ctrl+Shift+1..9 spawns an agent on the Nth host,
+  // The focus view is active in TWO shapes: F11 in main (the flag) and the
+  // sessions pop-out (bound to its role, flag always false) — both own the
+  // same keymap, so both must pull these keys out of the shell.
+  const focusShape = useAppStore.getState().focusView || isSessions;
+  // Focus view: Ctrl+Shift+1..9 spawns an agent on the Nth host,
   // Ctrl+Alt+1..9 jumps to the Nth agent — the window handler owns those
   // digits there.
   if (
-    useAppStore.getState().focusView &&
+    focusShape &&
     event.ctrlKey &&
     event.shiftKey !== event.altKey &&
     /^Digit[1-9]$/.test(event.code)
@@ -242,10 +247,7 @@ export function isPassthroughShortcut(event: KeyboardEvent): boolean {
   if (TERMINAL_ACTIONS.includes(s.action)) return true;
   // Focus view: agent cycling also rides Ctrl+Tab — the window handler owns
   // it there (its keymap swallows everything else anyway).
-  if (
-    (s.action === "nextTab" || s.action === "prevTab") &&
-    useAppStore.getState().focusView
-  ) {
+  if ((s.action === "nextTab" || s.action === "prevTab") && focusShape) {
     return true;
   }
   return false;

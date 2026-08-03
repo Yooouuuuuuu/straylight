@@ -1,6 +1,6 @@
 [package]
 name = "straylight"
-version = "0.12.2"
+version = "0.12.3"
 description = "Lightweight SSH file manager, terminal, and code viewer"
 authors = ["Straylight contributors"]
 edition = "2021"
@@ -69,6 +69,10 @@ base64 = "0.22"
 # break (docs/dev/russh-upgrade.md). Never enabled in product builds — no lane
 # offers compression, and leaving the flate2 code out makes that structural.
 zlib-diag = ["russh/flate2"]
+# Opt-in DevTools support in a RELEASE build (`ui_close_devtools` gates on it;
+# debug builds always have it via debug_assertions). Off in product builds —
+# declared so the cfg is a known value instead of a per-check warning.
+devtools = []
 
 [[example]]
 name = "rekeytest"

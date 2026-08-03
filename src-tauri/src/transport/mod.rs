@@ -22,7 +22,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, watch};
 
 use crate::ssh::connection::{Connection, ConnectionState};
-use crate::AppState;
+use crate::{AppState, LockSafe};
 
 /// Hard cap on how much of a single file we read into memory.
 pub const MAX_READ_BYTES: u64 = 50 * 1024 * 1024;
@@ -616,21 +616,20 @@ impl Progress {
     }
 
     fn mark_done(&self, src_path: &str) {
-        self.done_paths.lock().unwrap().insert(src_path.to_string());
+        self.done_paths.lock_safe().insert(src_path.to_string());
     }
 
     fn is_done(&self, src_path: &str) -> bool {
-        self.done_paths.lock().unwrap().contains(src_path)
+        self.done_paths.lock_safe().contains(src_path)
     }
 
     fn resolved_name(&self, src_path: &str) -> Option<String> {
-        self.resolved.lock().unwrap().get(src_path).cloned()
+        self.resolved.lock_safe().get(src_path).cloned()
     }
 
     fn remember_resolved(&self, src_path: &str, name: &str) {
         self.resolved
-            .lock()
-            .unwrap()
+            .lock_safe()
             .insert(src_path.to_string(), name.to_string());
     }
 
@@ -670,7 +669,7 @@ impl Progress {
             return None;
         }
         let rate = self.limit_bps as f64;
-        let mut b = self.pace.lock().unwrap();
+        let mut b = self.pace.lock_safe();
         let now = Instant::now();
         b.tokens = (b.tokens + now.duration_since(b.last).as_secs_f64() * rate)
             .min(TRANSFER_CHUNK as f64);
@@ -704,7 +703,7 @@ impl Progress {
     /// boundary, or the initial/final frame).
     fn emit(&self, current: &str, force: bool) {
         {
-            let mut last = self.last_emit.lock().unwrap();
+            let mut last = self.last_emit.lock_safe();
             let now = Instant::now();
             if !force && now.duration_since(*last) < Duration::from_millis(100) {
                 return;

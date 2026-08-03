@@ -15,6 +15,7 @@ import {
   type WslDistro,
 } from "../../lib/ipc";
 import { connectWslDistro } from "../../lib/wslSession";
+import { isSecondary } from "../../lib/windowRole";
 import {
   MAX_WSLS,
   useAppStore,
@@ -79,14 +80,18 @@ function WslHost({ ws, order }: { ws: RemoteWorkspace; order: number }) {
         <span className="host-bar__label">
           {conn.user ? `${conn.user}@${conn.name}` : conn.name}
         </span>
-        <Tip label="Disconnect">
-          <button
-            className="icon-btn icon-btn--danger sidebar__section-action"
-            onClick={() => void disconnect()}
-          >
-            <IconUnplug />
-          </button>
-        </Tip>
+        {/* Pop-outs are view-only on connections (docs/dev/multi-window.md):
+            disconnecting here would hang up the distro MAIN is using. */}
+        {!isSecondary && (
+          <Tip label="Disconnect">
+            <button
+              className="icon-btn icon-btn--danger sidebar__section-action"
+              onClick={() => void disconnect()}
+            >
+              <IconUnplug />
+            </button>
+          </Tip>
+        )}
       </div>
       <div
         className="host-tools"
@@ -257,30 +262,33 @@ export function WslSection() {
     <>
       <div className="sidebar__section-head sidebar__section-head--wsl">
         <span className="sidebar__section-label">WSL</span>
-        {anyConnected ? (
-          wsls.length < MAX_WSLS && (
-            <Tip label="Connect another distro">
+        {/* Pop-outs never dial — no connect picker, no refresh; connected
+            distros (adopted from main) still show below. */}
+        {!isSecondary &&
+          (anyConnected ? (
+            wsls.length < MAX_WSLS && (
+              <Tip label="Connect another distro">
+                <button
+                  className={`icon-btn sidebar__section-action ${listOpen ? "icon-btn--active" : ""}`}
+                  onClick={() => setListOpen((o) => !o)}
+                >
+                  <IconPlug size={13} />
+                </button>
+              </Tip>
+            )
+          ) : (
+            <Tip label="Refresh WSL distros">
               <button
-                className={`icon-btn sidebar__section-action ${listOpen ? "icon-btn--active" : ""}`}
-                onClick={() => setListOpen((o) => !o)}
+                className="icon-btn sidebar__section-action"
+                onClick={() => load()}
               >
-                <IconPlug size={13} />
+                <IconRefresh />
               </button>
             </Tip>
-          )
-        ) : (
-          <Tip label="Refresh WSL distros">
-            <button
-              className="icon-btn sidebar__section-action"
-              onClick={() => load()}
-            >
-              <IconRefresh />
-            </button>
-          </Tip>
-        )}
+          ))}
       </div>
 
-      {(!anyConnected || listOpen) && (
+      {!isSecondary && (!anyConnected || listOpen) && (
         <>
           {installFor && (
             <div className="wsl-install">

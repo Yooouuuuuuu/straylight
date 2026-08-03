@@ -14,6 +14,8 @@ use std::sync::{Mutex, OnceLock};
 
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::LockSafe;
+
 /// Ring capacity: ~2000 events ≈ hours of normal churn, a few hundred KB worst
 /// case. Old events fall off the front.
 const CAPACITY: usize = 2000;
@@ -47,7 +49,7 @@ pub fn init(app: AppHandle) {
 /// "reconnect", "recycle", "cpu"), `detail` the human line.
 pub fn event(category: &str, detail: impl AsRef<str>) {
     let buf = EVENTS.get_or_init(|| Mutex::new(VecDeque::with_capacity(CAPACITY)));
-    let mut buf = buf.lock().unwrap();
+    let mut buf = buf.lock_safe();
     if buf.len() >= CAPACITY {
         buf.pop_front();
     }
@@ -92,8 +94,7 @@ pub async fn diag_dump(app: AppHandle) -> Result<String, String> {
     {
         let buf = EVENTS
             .get_or_init(|| Mutex::new(VecDeque::with_capacity(CAPACITY)))
-            .lock()
-            .unwrap();
+            .lock_safe();
         out.push_str(&format!("{} events, oldest first, local time.\n\n", buf.len()));
         for e in buf.iter() {
             let ts = chrono::DateTime::from_timestamp_millis(e.at_millis as i64)

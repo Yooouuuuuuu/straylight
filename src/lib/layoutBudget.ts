@@ -117,10 +117,23 @@ export function useWindowSize(): { w: number; h: number } {
     h: window.innerHeight,
   });
   useEffect(() => {
-    const onResize = () =>
-      setSize({ w: window.innerWidth, h: window.innerHeight });
+    // rAF-coalesced: the raw event fires several times per frame during a
+    // drag-resize and each setState re-rendered the WHOLE app. One write per
+    // frame, size read at fire time so the final value always lands
+    // (docs/dev/code-scan-2026-08.md A6).
+    let raf = 0;
+    const onResize = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        setSize({ w: window.innerWidth, h: window.innerHeight });
+      });
+    };
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, []);
   return size;
 }

@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { tabHostColor, hostColorForConnKey } from "../lib/hostColors";
+import { isSessions } from "../lib/windowRole";
 import { matchShortcut } from "../lib/shortcuts";
 import { focusTerminal } from "../lib/terminalFocus";
 import {
@@ -128,8 +129,10 @@ function activate(c: Cand) {
     store.setActiveTab(c.id);
     store.requestEditorFocus();
   } else if (c.kind === "chat") {
-    // In the focus view the layout underneath must stay untouched.
-    if (!store.focusView) store.setChatVisible(true);
+    // In the focus view the layout underneath must stay untouched — and the
+    // sessions pop-out must not flip the SHARED chat-visibility default that
+    // main reads at next launch.
+    if (!store.focusView && !isSessions) store.setChatVisible(true);
     store.setChatActive(c.id);
     requestAnimationFrame(() => focusTerminal(c.id));
   } else {
@@ -167,9 +170,13 @@ export function TabSwitcher() {
       );
 
     const open = (dir: 1 | -1) => {
-      // The focus view (F11) is a CHAT workspace — Ctrl+Tab walks the agents
-      // there, regardless of what has DOM focus.
-      const focusMode = useAppStore.getState().focusView;
+      // The focus view is a CHAT workspace — Ctrl+Tab walks the agents there,
+      // regardless of what has DOM focus. It exists in TWO shapes: F11 in
+      // main (the flag) and the sessions pop-out (bound to its role, flag
+      // always false) — without the isSessions arm the pop-out built the
+      // EDITOR tab list, which is empty there, and Ctrl+Tab died at this
+      // capture handler before any other layer could see it.
+      const focusMode = useAppStore.getState().focusView || isSessions;
       const el = document.activeElement as HTMLElement | null;
       const inChat = focusMode || !!el?.closest(".chat-panel");
       const inTerminal = !inChat && !!el?.closest(".terminal-host");

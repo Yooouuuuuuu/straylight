@@ -961,8 +961,6 @@ interface AppState {
   cycleTerminal: (direction: 1 | -1) => void;
   /** Restart every terminal on a connection (its PTYs died — e.g. a reconnect). */
   restartConnTerminals: (connId: string) => void;
-  /** Close every terminal on a connection (e.g. an explicit disconnect). */
-  closeConnTerminals: (connId: string) => void;
 
   // Editor groups (splits, max MAX_EDITOR_GROUPS side by side) --------------
   /** Ordered group ids, left to right. Always at least one. */
@@ -2036,28 +2034,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
         affected(t) ? { ...t, epoch: t.epoch + 1, ptyId: null } : t,
       ),
     }));
-  },
-
-  closeConnTerminals: (connId) => {
-    // The view no longer closes PTYs on unmount, so hang up each removed
-    // terminal's shell here (usually already dead if the host dropped — this
-    // reclaims the backend handle either way).
-    for (const t of get().terminals) {
-      if (t.connId === connId && t.ptyId) void ptyClose(t.ptyId).catch(() => {});
-    }
-    set((s) => {
-      const terminals = s.terminals.filter((t) => t.connId !== connId);
-      const panel = terminals.filter((t) => !t.inChat);
-      const activeTerminalId = terminals.some((t) => t.id === s.activeTerminalId)
-        ? s.activeTerminalId
-        : (panel[panel.length - 1]?.id ?? null);
-      const chatActiveId = terminals.some(
-        (t) => t.id === s.chatActiveId && t.inChat,
-      )
-        ? s.chatActiveId
-        : (terminals.find((t) => t.inChat && !t.usageProbe)?.id ?? null);
-      return { terminals, activeTerminalId, chatActiveId };
-    });
   },
 
   openAppTab: (kind) =>

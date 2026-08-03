@@ -11,6 +11,43 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.12.3] - 2026-08-03
+
+### Changed
+
+- **Quieter in the background.** Several always-on loops now work only when
+  there's work to do: agents updating their titles no longer rewrite the
+  session registry each time, the file-watcher sync runs only when tabs
+  actually change, and a hidden (minimized/covered) window stops polling its
+  remote files until it's visible again — while a log tailed on a second
+  monitor keeps updating as before.
+- **Smoother resizing.** Window resizes apply once per frame instead of
+  several times per frame, and column drags save their width when you let go
+  instead of writing to disk on every mouse movement.
+
+### Fixed
+
+- Deleting an enormous multi-selection (tens of thousands of items) can no
+  longer exceed the server's command-line limit — the batch splits itself
+  automatically.
+- One internal backend error can no longer snowball into every later
+  operation failing until restart — internal locks now recover instead of
+  cascading.
+- **Pop-out windows no longer offer connection controls.** Connections follow
+  the main window; the Workspace and Sessions windows show the connected
+  hosts view-only (connecting from a pop-out could silently orphan the
+  connection, and disconnecting would have hung up the session the main
+  window was using).
+- **Dragging an editor tab across the middle of the window no longer offers a
+  split while you're still on the tab bar** — reordering tabs can't be
+  hijacked; the split zone appears only when the drag enters the editor body.
+- **The Sessions window has its keyboard back.** The focus-view shortcuts —
+  Ctrl+Tab / Ctrl+PageUp/Down to cycle agents, Ctrl+Shift+` for a new session
+  on the shown host, Ctrl+Shift/Alt+1-9 for hosts and agents by number — now
+  work in the popped-out Sessions window exactly as they do in F11. In the
+  Workspace window, shortcuts for panels it doesn't have (terminal, sessions)
+  are inert instead of silently flipping shared settings.
+
 ## [0.12.2] - 2026-08-03
 
 ### Changed

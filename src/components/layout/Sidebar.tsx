@@ -9,6 +9,7 @@ import { connStateTip, laneSummary, remoteColor } from "../../lib/hostColors";
 import { sshConfigPath } from "../../lib/ipc";
 import { openFileByPath } from "../../lib/openFile";
 import { uiConfig } from "../../lib/settings";
+import { isSecondary } from "../../lib/windowRole";
 import {
   handleExplorerKey,
   registerExplorerFocus,
@@ -311,7 +312,7 @@ export function Sidebar() {
             <IconExternal size={13} />
           </button>
           </Tip>
-          {remotes.length > 0 && remotes.length < 3 && (
+          {!isSecondary && remotes.length > 0 && remotes.length < 3 && (
             <Tip label="Connect to a server">
               <button
                 className={`icon-btn ${connectOpen ? "icon-btn--active" : ""}`}
@@ -322,7 +323,16 @@ export function Sidebar() {
             </Tip>
           )}
         </div>
-        {(remotes.length === 0 || connectOpen) && <ConnectionManager />}
+        {/* Pop-out windows never dial or hang up — they mirror main's
+            connections (docs/dev/multi-window.md): a connection made here
+            would be declared by no window and stomped by the next snapshot.
+            So no connect form; a quiet note stands in when nothing's adopted. */}
+        {!isSecondary && (remotes.length === 0 || connectOpen) && (
+          <ConnectionManager />
+        )}
+        {isSecondary && remotes.length === 0 && (
+          <div className="conn-empty">Connections follow the main window.</div>
+        )}
         {remotes.map((r, rIdx) => {
           const conn = r.conn;
           const key = remoteHostKey(conn);
@@ -374,7 +384,7 @@ export function Sidebar() {
                   {conn.user}@{conn.host}
                 </span>
               </Tip>
-              {(r.state === "disconnected" || r.state === "failed") && (
+              {!isSecondary && (r.state === "disconnected" || r.state === "failed") && (
                 <Tip label="Reconnect">
                   <button
                     className="icon-btn"
@@ -384,14 +394,18 @@ export function Sidebar() {
                   </button>
                 </Tip>
               )}
-              <Tip label="Disconnect">
-                <button
-                  className="icon-btn icon-btn--danger sidebar__section-action"
-                  onClick={() => void disconnect(conn.connId)}
-                >
-                  <IconUnplug />
-                </button>
-              </Tip>
+              {/* Pop-outs are view-only on connections: a disconnect here
+                  would hang up the session MAIN is using. */}
+              {!isSecondary && (
+                <Tip label="Disconnect">
+                  <button
+                    className="icon-btn icon-btn--danger sidebar__section-action"
+                    onClick={() => void disconnect(conn.connId)}
+                  >
+                    <IconUnplug />
+                  </button>
+                </Tip>
+              )}
             </div>
             <div
               className="host-tools"

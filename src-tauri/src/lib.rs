@@ -68,7 +68,7 @@ fn resolve_open_target(argv: &[String]) -> Option<OpenTarget> {
 /// exactly once.
 #[tauri::command]
 fn take_open_path(state: tauri::State<AppState>) -> Option<OpenTarget> {
-    state.pending_open.lock().unwrap().take()
+    state.pending_open.lock_safe().take()
 }
 
 /// The main window publishes its connection list here (JSON authored by the
@@ -78,7 +78,7 @@ fn take_open_path(state: tauri::State<AppState>) -> Option<OpenTarget> {
 #[tauri::command]
 fn set_conns_snapshot(app: tauri::AppHandle, state: tauri::State<AppState>, snapshot: String) {
     use tauri::Emitter;
-    *state.conns_snapshot.lock().unwrap() = Some(snapshot.clone());
+    *state.conns_snapshot.lock_safe() = Some(snapshot.clone());
     let _ = app.emit("conns-snapshot", snapshot);
 }
 
@@ -86,7 +86,7 @@ fn set_conns_snapshot(app: tauri::AppHandle, state: tauri::State<AppState>, snap
 /// `conns-snapshot` event carries every later change.
 #[tauri::command]
 fn get_conns_snapshot(state: tauri::State<AppState>) -> Option<String> {
-    state.conns_snapshot.lock().unwrap().clone()
+    state.conns_snapshot.lock_safe().clone()
 }
 
 /// The main window publishes its CHAT-session list here so the sessions pop-out
@@ -95,7 +95,7 @@ fn get_conns_snapshot(state: tauri::State<AppState>) -> Option<String> {
 #[tauri::command]
 fn set_sessions_snapshot(app: tauri::AppHandle, state: tauri::State<AppState>, snapshot: String) {
     use tauri::Emitter;
-    *state.sessions_snapshot.lock().unwrap() = Some(snapshot.clone());
+    *state.sessions_snapshot.lock_safe() = Some(snapshot.clone());
     let _ = app.emit("sessions-snapshot", snapshot);
 }
 
@@ -103,7 +103,7 @@ fn set_sessions_snapshot(app: tauri::AppHandle, state: tauri::State<AppState>, s
 /// arrive via the `sessions-snapshot` event.
 #[tauri::command]
 fn get_sessions_snapshot(state: tauri::State<AppState>) -> Option<String> {
-    state.sessions_snapshot.lock().unwrap().clone()
+    state.sessions_snapshot.lock_safe().clone()
 }
 
 /// The sessions pop-out sets this true on boot and (via the window-destroy
@@ -112,7 +112,7 @@ fn get_sessions_snapshot(state: tauri::State<AppState>) -> Option<String> {
 #[tauri::command]
 fn set_sessions_popped(app: tauri::AppHandle, state: tauri::State<AppState>, on: bool) {
     use tauri::Emitter;
-    *state.sessions_popped.lock().unwrap() = on;
+    *state.sessions_popped.lock_safe() = on;
     let _ = app.emit("sessions-popped", on);
 }
 
@@ -120,7 +120,7 @@ fn set_sessions_popped(app: tauri::AppHandle, state: tauri::State<AppState>, on:
 /// window was open) to restore its lock state.
 #[tauri::command]
 fn get_sessions_popped(state: tauri::State<AppState>) -> bool {
-    *state.sessions_popped.lock().unwrap()
+    *state.sessions_popped.lock_safe()
 }
 
 /// The workspace window sets this true on boot / false on close so main can lock
@@ -128,14 +128,14 @@ fn get_sessions_popped(state: tauri::State<AppState>) -> bool {
 #[tauri::command]
 fn set_workspace_popped(app: tauri::AppHandle, state: tauri::State<AppState>, on: bool) {
     use tauri::Emitter;
-    *state.workspace_popped.lock().unwrap() = on;
+    *state.workspace_popped.lock_safe() = on;
     let _ = app.emit("workspace-popped", on);
 }
 
 /// Main reads this on boot to restore its workspace-button lock.
 #[tauri::command]
 fn get_workspace_popped(state: tauri::State<AppState>) -> bool {
-    *state.workspace_popped.lock().unwrap()
+    *state.workspace_popped.lock_safe()
 }
 
 /// Stash a session's serialized terminal state for the window that will re-attach
@@ -143,14 +143,14 @@ fn get_workspace_popped(state: tauri::State<AppState>) -> bool {
 /// window on close).
 #[tauri::command]
 fn set_session_replay(state: tauri::State<AppState>, id: String, data: String) {
-    state.session_replays.lock().unwrap().insert(id, data);
+    state.session_replays.lock_safe().insert(id, data);
 }
 
 /// Take (once) a session's stashed replay state — the attaching view writes it
 /// into its fresh xterm to reconstruct a TUI's modes/cursor/screen.
 #[tauri::command]
 fn take_session_replay(state: tauri::State<AppState>, id: String) -> Option<String> {
-    state.session_replays.lock().unwrap().remove(&id)
+    state.session_replays.lock_safe().remove(&id)
 }
 
 /// The calling window claims a PTY's rendering, so its output is emitted only to
@@ -160,8 +160,7 @@ fn take_session_replay(state: tauri::State<AppState>, id: String) -> Option<Stri
 fn set_pty_owner(window: tauri::WebviewWindow, state: tauri::State<AppState>, pty_id: String) {
     state
         .pty_owners
-        .lock()
-        .unwrap()
+        .lock_safe()
         .insert(pty_id, window.label().to_string());
 }
 
@@ -175,6 +174,22 @@ pub fn conn_key(root_id: &str) -> String {
 /// or session lane shares its parent connection's fate in the sweep.
 pub fn root_conn_id(id: &str) -> &str {
     id.split("::").next().unwrap_or(id)
+}
+
+/// Poison-proof std-mutex lock. A panic while a lock is held POISONS it, and
+/// every later plain `.lock().unwrap()` then cascade-panics — a dead backend
+/// inside a living process, the worst failure shape for a long-running app. Our
+/// std-mutex state is simple maps/flags/strings with self-healing consumers
+/// (e.g. a stale pty_owners entry just falls back to broadcast), so recovering
+/// the inner value is strictly better; the original panic still reports itself.
+pub(crate) trait LockSafe<T> {
+    fn lock_safe(&self) -> std::sync::MutexGuard<'_, T>;
+}
+
+impl<T> LockSafe<T> for std::sync::Mutex<T> {
+    fn lock_safe(&self) -> std::sync::MutexGuard<'_, T> {
+        self.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 /// Global application state, shared across all Tauri commands.
@@ -285,7 +300,7 @@ impl AppState {
     /// Forget a window's whole set — its boot clears it (then re-declares as it
     /// re-attaches), its close removes it for good.
     pub fn reg_clear_window(&self, label: &str) {
-        self.window_refs.lock().unwrap().remove(label);
+        self.window_refs.lock_safe().remove(label);
     }
 
     /// The survive-set: the union of the ref-sets of the windows named in `live`.
@@ -293,7 +308,7 @@ impl AppState {
         &self,
         live: &std::collections::HashSet<String>,
     ) -> std::collections::HashSet<String> {
-        let refs = self.window_refs.lock().unwrap();
+        let refs = self.window_refs.lock_safe();
         let mut union = std::collections::HashSet::new();
         for (label, set) in refs.iter() {
             if live.contains(label) {
@@ -548,7 +563,7 @@ pub fn run() {
             // A first-launch "Open with Straylight" path (the running-instance
             // case comes through the single-instance callback instead). Stashed
             // for the frontend to pick up via `take_open_path` once it's booted.
-            *state.pending_open.lock().unwrap() =
+            *state.pending_open.lock_safe() =
                 resolve_open_target(&std::env::args().collect::<Vec<_>>());
             Ok(())
         })
@@ -577,12 +592,26 @@ pub fn run() {
                 // The sessions pop-out closed → clear the popped flag so main
                 // unlocks its CHAT panel (the lock model).
                 if label == "sessions" {
-                    *app.state::<AppState>().sessions_popped.lock().unwrap() = false;
+                    *app.state::<AppState>().sessions_popped.lock_safe() = false;
                     let _ = app.emit("sessions-popped", false);
+                    // Unconsumed replay stashes (sessions closed while popped,
+                    // failed re-attaches) are dead weight — 100s of KB each.
+                    // Main's re-attach takes ITS replays within ~a second of
+                    // the popped=false merge, so a delayed sweep collects only
+                    // garbage; skip if a NEW pop started meanwhile (its fresh
+                    // stash belongs to the opening window).
+                    let app2 = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                        let state = app2.state::<AppState>();
+                        if !*state.sessions_popped.lock_safe() {
+                            state.session_replays.lock_safe().clear();
+                        }
+                    });
                 }
                 // The workspace window closed → unlock main's workspace button.
                 if label == "workspace" {
-                    *app.state::<AppState>().workspace_popped.lock().unwrap() = false;
+                    *app.state::<AppState>().workspace_popped.lock_safe() = false;
                     let _ = app.emit("workspace-popped", false);
                 }
                 app.state::<AppState>().reg_clear_window(&label);
@@ -592,8 +621,7 @@ pub fn run() {
                 // until a live window re-claims them (docs/dev/multi-window.md).
                 app.state::<AppState>()
                     .pty_owners
-                    .lock()
-                    .unwrap()
+                    .lock_safe()
                     .retain(|_, owner| *owner != label);
                 tauri::async_runtime::spawn(async move {
                     let state = app.state::<AppState>();

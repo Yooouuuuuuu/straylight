@@ -199,7 +199,21 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null;
 /** Subscribe to the store and persist a debounced snapshot on change. Returns
  *  the unsubscribe function. Writes are suppressed while a restore is running. */
 export function initSessionPersistence(): () => void {
-  return useAppStore.subscribe(() => {
+  return useAppStore.subscribe((state, prev) => {
+    // Snapshot INPUTS only (docs/dev/code-scan-2026-08.md E2): the hot store
+    // churn — terminal busy flips, titles, selections — never touches these,
+    // so it no longer schedules rewrites of an identical snapshot.
+    if (
+      state.tabs === prev.tabs &&
+      state.remotes === prev.remotes &&
+      state.wsls === prev.wsls &&
+      state.activeTabId === prev.activeTabId &&
+      state.editorGroups === prev.editorGroups &&
+      state.sidebarVisible === prev.sidebarVisible &&
+      state.terminalVisible === prev.terminalVisible &&
+      state.localConnId === prev.localConnId
+    )
+      return;
     if (saveTimer != null) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       saveTimer = null;

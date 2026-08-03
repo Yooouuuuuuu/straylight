@@ -349,19 +349,41 @@ impl FileTransport for SftpTransport {
     }
 
     async fn remove_many(&self, paths: &[String]) -> Result<(), String> {
-        // One server-side `rm -rf` takes every path at once — a multi-select
-        // delete is one round trip, not one per item.
+        // Server-side `rm -rf` in BYTE-budgeted chunks: one round trip per
+        // ~100 KiB of quoted command line, comfortably under any ARG_MAX (the
+        // limit is bytes, not path count — long paths are the variable), and
+        // a 50k-item delete still collapses to a handful of execs. Any chunk
+        // refusing falls through to the per-path pass below, which is
+        // idempotent (already-gone counts as success).
+        const CHUNK_BYTES: usize = 100 * 1024;
+        const PREFIX: &str = "rm -rf --";
         if paths.len() > 1 {
-            let mut cmd = String::from("rm -rf --");
+            let mut chunks: Vec<String> = Vec::new();
+            let mut cmd = String::from(PREFIX);
             for p in paths {
-                cmd.push(' ');
-                cmd.push_str(&crate::exec::shell_quote(p));
-            }
-            if let Ok(out) = crate::exec::exec_ssh(&self.0, &cmd).await {
-                if out.code == 0 {
-                    self.0.touch_activity();
-                    return Ok(());
+                let q = crate::exec::shell_quote(p);
+                if cmd.len() + q.len() + 1 > CHUNK_BYTES && cmd.len() > PREFIX.len() {
+                    chunks.push(std::mem::replace(&mut cmd, String::from(PREFIX)));
                 }
+                cmd.push(' ');
+                cmd.push_str(&q);
+            }
+            if cmd.len() > PREFIX.len() {
+                chunks.push(cmd);
+            }
+            let mut all_ok = true;
+            for c in &chunks {
+                match crate::exec::exec_ssh(&self.0, c).await {
+                    Ok(out) if out.code == 0 => {}
+                    _ => {
+                        all_ok = false;
+                        break;
+                    }
+                }
+            }
+            if all_ok {
+                self.0.touch_activity();
+                return Ok(());
             }
         }
         // Single path, or the batch refused — per path (each retries rm →

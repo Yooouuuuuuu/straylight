@@ -3871,7 +3871,10 @@ select option {
  * block clicks. */
 .editor-split-drop {
   position: absolute;
-  top: 0;
+  /* Below the tab bar, never over it: at tab-strip height a drag always
+     means reorder/move — only entering the editor BODY offers the split
+     (crossing the midline while reordering used to hijack the drop). */
+  top: var(--panel-header-height);
   right: 0;
   bottom: 0;
   width: 50%;

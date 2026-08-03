@@ -201,25 +201,26 @@ export default function App() {
   // and absorbs everything else, so hiding a column gives its space to the
   // editor — never to the other column, and each column keeps its own width.
   const [hw, setHw] = useState(loadHWidths);
-  const setColWidth = (key: keyof HWidths, w: number) => {
-    const next = { ...hw, [key]: w };
-    setHw(next);
-    saveHWidths(next);
-  };
   const dragWidth =
     (key: keyof HWidths, dir: 1 | -1, min: number, max: number) =>
     (e: React.MouseEvent) => {
       e.preventDefault();
       const startX = e.clientX;
       const start = hw[key];
+      // Live width per mousemove, but PERSIST only on mouseup — the per-move
+      // localStorage write was a synchronous disk hit per mouse event
+      // (docs/dev/code-scan-2026-08.md A7).
+      let last = start;
       const onMove = (ev: MouseEvent) => {
         const w = Math.min(max, Math.max(min, start + dir * (ev.clientX - startX)));
-        setColWidth(key, w);
+        last = w;
+        setHw((cur) => ({ ...cur, [key]: w }));
       };
       const onUp = () => {
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp);
         document.body.style.cursor = "";
+        saveHWidths({ ...hw, [key]: last });
       };
       window.addEventListener("mousemove", onMove);
       window.addEventListener("mouseup", onUp);
@@ -342,16 +343,37 @@ export default function App() {
   // while popped (docs/dev/multi-window.md). The owner republishes on every
   // change so the registry is always current for the next hand-off; the other
   // window never writes, so nothing can stomp sessions started elsewhere.
-  // Republish triggers: the sessions themselves and the F11 layout state
-  // (purpose groups, host order — so drags survive the hop). The status maps
-  // ride along on those writes plus the close-time final write.
+  //
+  // Republish only on HAND-OFF-RELEVANT changes (the fingerprint below: ids,
+  // ptyIds, epochs, names, membership order, groups). oscTitle churns
+  // constantly while agents work — it's still CARRIED by the registry, just
+  // never a trigger; without this, every title update was a full registry
+  // serialize + IPC write (docs/dev/code-scan-2026-08.md A3). The hand-off
+  // paths never lean on this passive writer: pop (popOutSessions) and the
+  // pop-out's close handler both write the registry explicitly.
   const terminals = useAppStore((s) => s.terminals);
   const chatPurposes = useAppStore((s) => s.chatPurposes);
   const chatHostOrder = useAppStore((s) => s.chatHostOrder);
+  const regFingerprint = useRef("");
   useEffect(() => {
     if (isWorkspace) return; // never owns sessions
     if (!sessionsSyncReady.current) return; // ownership not established yet
     if (!isSessions && useAppStore.getState().sessionsPoppedOut) return; // popped: pop-out owns
+    const fp = [
+      terminals
+        .filter((t) => t.inChat)
+        .map(
+          (t) =>
+            `${t.id}\u0000${t.ptyId ?? ""}\u0000${t.epoch}\u0000${t.customName ?? ""}\u0000${t.connId}`,
+        )
+        .join("\u0001"),
+      chatPurposes
+        .map((p) => `${p.id}\u0000${p.name}\u0000${p.termIds.join(",")}`)
+        .join("\u0001"),
+      chatHostOrder.join(","),
+    ].join("\u0002");
+    if (fp === regFingerprint.current) return;
+    regFingerprint.current = fp;
     void setSessionsSnapshot(
       JSON.stringify(buildSessionRegistry(useAppStore.getState())),
     );
@@ -964,7 +986,9 @@ export default function App() {
       {/* In the focus view the status bar is replaced by a slim full-width
           bar (same footprint, just the notification bell). */}
       {focusView || isSessions ? <FocusBar /> : <StatusBar />}
-      {dialogOpen && <ConnectionDialog />}
+      {/* Belt to the pop-out connection lock: even if some path opens the
+          dialog in a secondary window, it never renders there. */}
+      {dialogOpen && !isSecondary && <ConnectionDialog />}
       <PassphraseDialog />
       <HostKeyDialog />
       <CloseConfirmDialog />
