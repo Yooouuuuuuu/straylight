@@ -16,6 +16,7 @@ import appIcon from "../assets/icon.png";
 import { confirmEnabled } from "../lib/settings";
 import { hostColorForConnKey } from "../lib/hostColors";
 import {
+  fitTerminal,
   focusTerminal,
   readTerminalText,
   sendTerminalInput,
@@ -370,6 +371,10 @@ export function FocusView() {
   useEffect(() => {
     if (!activeId || !paneRef.current) return;
     mountTerminalIn(activeId, paneRef.current);
+    // Deterministic refit to THIS pane right after the reparent — the xterm
+    // and its PTY take the new width now, not when (and if) the debounced
+    // ResizeObserver gets around to it.
+    fitTerminal(activeId);
     focusTerminal(activeId);
     return () => parkTerminal(activeId);
   }, [activeId]);

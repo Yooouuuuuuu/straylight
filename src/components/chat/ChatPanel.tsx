@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { hostColorForConnKey } from "../../lib/hostColors";
-import { focusTerminal } from "../../lib/terminalFocus";
+import { fitTerminal, focusTerminal } from "../../lib/terminalFocus";
 import { mountTerminalIn, parkTerminal } from "../../lib/terminalSlots";
 import {
   chatSections,
@@ -80,6 +80,9 @@ export function ChatPanel() {
   useEffect(() => {
     if (focusView || !activeId || !hostRef.current) return;
     mountTerminalIn(activeId, hostRef.current);
+    // Deterministic refit after the reparent (see FocusView) — the column's
+    // width applies immediately instead of via the debounced observer.
+    fitTerminal(activeId);
     focusTerminal(activeId);
     return () => parkTerminal(activeId);
   }, [activeId, focusView]);

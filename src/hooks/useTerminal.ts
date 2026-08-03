@@ -23,11 +23,14 @@ import {
   windowsBuildNumber,
 } from "../lib/ipc";
 import { isPassthroughShortcut } from "../lib/shortcuts";
+import { terminalScrollback } from "../lib/settings";
 import {
+  registerTerminalFit,
   registerTerminalFocus,
   registerTerminalInput,
   registerTerminalSerialize,
   registerTerminalText,
+  unregisterTerminalFit,
   unregisterTerminalFocus,
   unregisterTerminalInput,
   unregisterTerminalSerialize,
@@ -45,6 +48,15 @@ import {
   unregisterTerminal,
 } from "../lib/themes";
 import { useAppStore } from "../store/appStore";
+
+/** Decode a pty-output payload: base64 → bytes (see PtyOutput in ipc.ts —
+ *  the number-array envelope cost 3-4x on both serialize and parse). */
+function b64Bytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
 
 // The real Windows build, for xterm's ConPTY heuristics — modern Win11 ConPTY
 // reflows natively on resize; older builds need xterm's compensation. Fetched
@@ -145,7 +157,10 @@ export function useTerminal(
       // One scheme for every shell; the host's identity colors the cursor +
       // selection (terminalHostColor).
       theme: currentTermTheme(connId),
-      scrollback: 5000,
+      // Lines kept per terminal (settings `terminalScrollback`, default 5000)
+      // — the main RAM knob for many-terminal sessions; applied live to open
+      // terminals by the theme layer when settings change.
+      scrollback: terminalScrollback,
       windowsPty,
     });
 
@@ -192,32 +207,75 @@ export function useTerminal(
       return true;
     });
 
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
-      term.loadAddon(webgl);
-    } catch {
-      // No WebGL in this webview — the canvas/DOM renderer is used instead.
-    }
+    // WebGL renderer only while VISIBLE (docs/dev/code-scan-2026-08.md B1):
+    // each WebglAddon is its own WebGL context + glyph atlas, and the webview
+    // caps ~16 contexts per page — past that the OLDEST context is lost and
+    // that terminal silently drops to the slower DOM renderer forever.
+    // Attaching the addon only while the host is on screen keeps 1-3 contexts
+    // live no matter how many terminals exist, every visible terminal always
+    // gets the fast renderer, and a lost context self-heals on the next show.
+    // The linger avoids atlas churn while flipping between tabs.
+    let webgl: WebglAddon | null = null;
+    let webglLinger: ReturnType<typeof setTimeout> | undefined;
+    const attachWebgl = () => {
+      if (webgl || disposed) return;
+      try {
+        const addon = new WebglAddon();
+        addon.onContextLoss(() => {
+          addon.dispose();
+          if (webgl === addon) webgl = null; // re-acquired on the next show
+        });
+        term.loadAddon(addon);
+        webgl = addon;
+      } catch {
+        // No WebGL in this webview — the canvas/DOM renderer is used instead.
+      }
+    };
+    const detachWebgl = () => {
+      webgl?.dispose();
+      webgl = null;
+    };
+    // The host is watched, not app flags: intersection goes false for every
+    // hide route (inactive tab, collapsed panel, hidden column, popped away)
+    // and survives the FocusView/ChatPanel reparenting.
+    const vis = new IntersectionObserver((entries) => {
+      const shown = entries.some((e) => e.isIntersecting);
+      clearTimeout(webglLinger);
+      if (shown) attachWebgl();
+      else webglLinger = setTimeout(detachWebgl, 5000);
+    });
+    vis.observe(host);
+    // Seed synchronously so the active terminal never paints its first frames
+    // on the DOM renderer waiting for the observer's initial callback.
+    if (host.clientWidth > 0) attachWebgl();
 
     const safeFit = () => {
-      // Never fit while the panel is hidden. A collapsed panel still leaves the
-      // terminal a few px tall (its padding), so a plain 0-height check isn't
-      // enough — fit() would resize the PTY to ~1 row and ConPTY would reflow
-      // the whole buffer into it, wiping the scrollback. (An editor-hosted
-      // terminal ignores the panel's visibility — it lives elsewhere.)
-      const state = useAppStore.getState();
-      const inChat = !!state.terminals.find((t) => t.id === id)?.inChat;
-      // A resident's visibility is the chat column's, not the panel's.
-      if (inChat ? !state.chatVisible : !state.terminalVisible) return;
-      if (!host.clientWidth || !host.clientHeight) return;
+      // GEOMETRY gate, not app flags. (The old chatVisible/terminalVisible
+      // checks mis-modeled F11 and the sessions pop-out — an agent fits into
+      // the focus pane with the chat COLUMN hidden — leaving terminals at a
+      // stale width, docs/dev/code-scan-2026-08.md.) A hidden host measures
+      // 0×0 and a collapsed panel leaves only its padding, so a minimum-size
+      // check reads the truth off the element in every layout: fitting under
+      // it would resize the PTY to ~1 row and ConPTY would reflow the whole
+      // buffer into it, wiping the scrollback.
+      if (host.clientWidth < 40 || host.clientHeight < 40) return;
+      // Preserve bottom-follow: a fit whose row count changes can unpin the
+      // viewport a few lines; over an always-on day those drifts accumulate
+      // into "my terminal is scrolled up". If the user was at the bottom
+      // before the fit, keep them there.
+      const buf = term.buffer.active;
+      const atBottom = buf.viewportY >= buf.baseY;
       try {
         fit.fit();
       } catch {
-        /* container not measured yet */
+        return; /* container not measured yet */
       }
+      if (atBottom) term.scrollToBottom();
     };
     safeFit();
+    // Reparent sites (FocusView / ChatPanel) refit deterministically right
+    // after moving the host — no ResizeObserver-debounce roulette.
+    if (id) registerTerminalFit(id, safeFit);
 
     // "Running" indicator: a shell producing output is busy (Claude Code
     // updating its status counts). Cleared after a short idle so the dot goes
@@ -268,8 +326,9 @@ export function useTerminal(
     void onPtyOutput((output) => {
       if (disposed || output.ptyId !== ptyId) return;
       if (output.data.length > 0) {
-        term.write(new Uint8Array(output.data));
-        scanCursorMode(output.data);
+        const bytes = b64Bytes(output.data);
+        term.write(bytes);
+        scanCursorMode(bytes);
         markBusy();
       } else if (id) {
         clearTimeout(busyTimer);
@@ -302,7 +361,13 @@ export function useTerminal(
       if (id) {
         void takeSessionReplay(id).then((data) => {
           if (!data || disposed) return;
-          term.write(data);
+          // Land the replay at the FINAL size: by the time this IPC round
+          // trip resolves the reparent (FocusView) has run, so fit first —
+          // PTY and xterm at this pane's cols BEFORE old-width content
+          // writes — then pin to the bottom (a fresh attach shows the
+          // latest, and replayed content never leaves the view scrolled up).
+          safeFit();
+          term.write(data, () => term.scrollToBottom());
           // Seed cursor tracking from the replay — it arrives via this direct
           // write, not the live stream scanned above — so a later re-stash on
           // pop-back keeps the right cursor state.
@@ -439,6 +504,8 @@ export function useTerminal(
       disposed = true;
       clearTimeout(fitTimer);
       clearTimeout(busyTimer);
+      clearTimeout(webglLinger);
+      vis.disconnect();
       for (const t of scriptTimers) clearTimeout(t);
       if (id) useAppStore.getState().setBusy(id, false);
       observer.disconnect();
@@ -454,6 +521,7 @@ export function useTerminal(
       // `closeTerminal` and `restartConnTerminals` own the close; this teardown
       // only disposes the xterm and its listeners.
       if (id) unregisterTerminalFocus(id);
+      if (id) unregisterTerminalFit(id);
       if (id) unregisterTerminalInput(id);
       if (id) unregisterTerminalText(id);
       if (id) unregisterTerminalSerialize(id);

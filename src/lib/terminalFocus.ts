@@ -18,6 +18,25 @@ export function focusTerminal(id: string | null): void {
   if (focus) requestAnimationFrame(focus);
 }
 
+/** Sibling registry: refit a terminal to its CURRENT container, synchronously.
+ *  The reparent sites (FocusView / ChatPanel moving an agent's xterm into
+ *  their pane) call this right after `mountTerminalIn`, so the xterm AND its
+ *  PTY take the new pane's size deterministically — instead of hoping the
+ *  ResizeObserver's debounced fit fires (and isn't gated) after the move. */
+const fits = new Map<string, () => void>();
+
+export function registerTerminalFit(id: string, fit: () => void): void {
+  fits.set(id, fit);
+}
+
+export function unregisterTerminalFit(id: string): void {
+  fits.delete(id);
+}
+
+export function fitTerminal(id: string | null): void {
+  if (id) fits.get(id)?.();
+}
+
 /** Sibling registry: write raw bytes into an already-open PTY by terminal id
  *  (the usage probe's refresh sends Esc + /usage to the live claude). Backed
  *  by useTerminal once its PTY is up; a no-op before then. */

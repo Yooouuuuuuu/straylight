@@ -29,6 +29,10 @@ export interface Settings {
   zoom?: number;
   keybindings?: Record<string, string>;
   terminalFont?: { family?: string; size?: number };
+  /** Scrollback lines kept per terminal (default 5000). The main RAM knob for
+   *  many-terminal sessions — lower it if you run lots of busy agents.
+   *  Applies live to open terminals. */
+  terminalScrollback?: number;
   /** Per-dialog "ask again?" flags: `false` silences that confirmation. All
    *  don't-ask-again checkboxes write here (visible + hand-restorable). */
   confirms?: Record<string, boolean>;
@@ -137,6 +141,7 @@ function settingsTemplate(): Settings {
     zoom: 1,
     keybindings: {},
     terminalFont: { family: "Fira Code", size: 13 },
+    terminalScrollback: 5000,
     confirms: Object.fromEntries(CONFIRM_IDS.map((id) => [id, true])),
     autoConnect: [],
     drafts: { enabled: true },
@@ -214,6 +219,8 @@ export let savedThemes: Record<string, ThemeData> = {};
 export let keybindingOverrides: Record<string, string> = {};
 /** The live zoom value from settings (for the settings UI). */
 export let settingsZoom = 1;
+/** Scrollback lines per terminal (settings `terminalScrollback`). */
+export let terminalScrollback = 5000;
 /** Effective bottom-panel config (visibility + poll intervals, seconds). */
 export let panelsConfig = { ...PANEL_DEFAULTS };
 /** Host keys that reconnect on launch without asking (settings `autoConnect`). */
@@ -354,6 +361,20 @@ async function loadAndApply(): Promise<void> {
   issues.push(...applyKeybindingOverrides(s.keybindings ?? {}));
   settingsZoom =
     typeof s.zoom === "number" && s.zoom >= 0.5 && s.zoom <= 3 ? s.zoom : 1;
+
+  // Terminal scrollback (lines, 100–100000; invalid entries report + default).
+  if (s.terminalScrollback === undefined) {
+    terminalScrollback = 5000;
+  } else if (
+    typeof s.terminalScrollback === "number" &&
+    s.terminalScrollback >= 100 &&
+    s.terminalScrollback <= 100_000
+  ) {
+    terminalScrollback = Math.floor(s.terminalScrollback);
+  } else {
+    issues.push("terminalScrollback: must be a number of lines (100–100000)");
+    terminalScrollback = 5000;
+  }
 
   // Terminal font (family string, size 6–40; invalid entries report + default)
   terminalFontConfig = {};

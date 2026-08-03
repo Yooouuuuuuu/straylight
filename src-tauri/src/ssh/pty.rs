@@ -22,15 +22,26 @@ use uuid::Uuid;
 use crate::ssh::connection::Connection;
 use crate::AppState;
 
-/// Output chunk emitted on the `pty-output` event. `data` is raw bytes (a JSON
-/// number array over IPC) so partial UTF-8 sequences survive — xterm.js
-/// reassembles them. An empty chunk signals the PTY closed.
+/// Output chunk emitted on the `pty-output` event. `data` is the raw bytes
+/// BASE64-encoded: a `Vec<u8>` field serializes as a JSON array of numbers
+/// (~3-4x the bytes, and the webview parses every number as its own token);
+/// base64 is one string token at ~1.33x. Byte-exact, so partial UTF-8
+/// sequences still survive — the frontend decodes back to bytes and xterm.js
+/// reassembles them. An EMPTY string signals the PTY closed.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PtyOutput {
     pub pty_id: String,
-    pub data: Vec<u8>,
+    pub data: String,
 }
+
+/// Output coalescing (docs/dev/code-scan-2026-08.md A2): a fast producer
+/// delivers hundreds of small packets per second, and every emit is an IPC
+/// hop + JSON parse + xterm write. Batch until 32 KiB or 8 ms after the first
+/// unflushed byte, whichever comes first — 8 ms is far below echo perception
+/// (network RTT dominates), and cuts the event rate ~10x under load.
+const FLUSH_BYTES: usize = 32 * 1024;
+const FLUSH_MS: u64 = 8;
 
 /// Emit a PTY-output chunk to the ONE window that renders this terminal — the
 /// lock model guarantees exactly one — instead of broadcasting to every window.
@@ -39,9 +50,10 @@ pub struct PtyOutput {
 /// (docs/dev/multi-window.md). Until a window claims the PTY (`set_pty_owner`, on
 /// view mount) we broadcast, so the very first chunks are never lost.
 fn emit_pty_output(app: &AppHandle, pty_id: &str, data: Vec<u8>) {
+    use base64::Engine as _;
     let payload = PtyOutput {
         pty_id: pty_id.to_string(),
-        data,
+        data: base64::engine::general_purpose::STANDARD.encode(&data),
     };
     let owner = app
         .state::<AppState>()
@@ -154,25 +166,38 @@ async fn open_ssh_pty(
 
     tokio::spawn(async move {
         let conn = keepalive;
+        // Coalescing buffer (FLUSH_BYTES / FLUSH_MS above): output accumulates
+        // here and flushes as ONE event on size or deadline.
+        let mut out_buf: Vec<u8> = Vec::new();
+        let mut flush_at: Option<tokio::time::Instant> = None;
         loop {
             tokio::select! {
                 msg = channel.wait() => {
-                    match msg {
-                        Some(russh::ChannelMsg::Data { data }) => {
-                            // Server output = proof of life; an active terminal
-                            // spares the supervisor its probe.
-                            conn.touch_activity();
-                            emit_pty_output(&task_app, &task_id, data.to_vec());
-                        }
-                        Some(russh::ChannelMsg::ExtendedData { data, .. }) => {
-                            conn.touch_activity();
-                            emit_pty_output(&task_app, &task_id, data.to_vec());
-                        }
+                    let bytes = match msg {
+                        // Server output = proof of life; an active terminal
+                        // spares the supervisor its probe.
+                        Some(russh::ChannelMsg::Data { data }) => data,
+                        Some(russh::ChannelMsg::ExtendedData { data, .. }) => data,
                         Some(russh::ChannelMsg::Eof)
                         | Some(russh::ChannelMsg::Close)
                         | None => break,
-                        _ => {}
+                        _ => continue,
+                    };
+                    conn.touch_activity();
+                    out_buf.extend_from_slice(&bytes);
+                    if out_buf.len() >= FLUSH_BYTES {
+                        emit_pty_output(&task_app, &task_id, std::mem::take(&mut out_buf));
+                        flush_at = None;
+                    } else if flush_at.is_none() {
+                        flush_at = Some(
+                            tokio::time::Instant::now()
+                                + std::time::Duration::from_millis(FLUSH_MS),
+                        );
                     }
+                }
+                _ = async { tokio::time::sleep_until(flush_at.unwrap()).await }, if flush_at.is_some() => {
+                    emit_pty_output(&task_app, &task_id, std::mem::take(&mut out_buf));
+                    flush_at = None;
                 }
                 command = rx.recv() => {
                     match command {
@@ -191,6 +216,11 @@ async fn open_ssh_pty(
                     }
                 }
             }
+        }
+        // Flush whatever the break left buffered BEFORE the close signal, so
+        // the last screenful is never lost behind the "PTY closed" empty chunk.
+        if !out_buf.is_empty() {
+            emit_pty_output(&task_app, &task_id, out_buf);
         }
         // Deterministic hang-up (the guard bounds the close internally). EOF
         // alone leaves the shell running server-side and holds the slot; only
@@ -279,16 +309,55 @@ fn open_local_pty(
         .map_err(|e| format!("terminal writer: {e}"))?;
     let master = pair.master;
 
-    // Blocking reader thread → stream output to the frontend.
-    let reader_app = app.clone();
-    let reader_id = pty_id.clone();
+    // Blocking reader thread → chunks into a channel; the coalescer task below
+    // batches them (FLUSH_BYTES / FLUSH_MS) so a fast producer doesn't emit an
+    // IPC event per 8 KiB read. Dropping the sender at EOF is the close signal.
+    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Vec<u8>>();
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
             match reader.read(&mut buf) {
                 Ok(0) | Err(_) => break,
-                Ok(n) => emit_pty_output(&reader_app, &reader_id, buf[..n].to_vec()),
+                Ok(n) => {
+                    if out_tx.send(buf[..n].to_vec()).is_err() {
+                        break;
+                    }
+                }
             }
+        }
+    });
+    let reader_app = app.clone();
+    let reader_id = pty_id.clone();
+    tokio::spawn(async move {
+        let mut out_buf: Vec<u8> = Vec::new();
+        let mut flush_at: Option<tokio::time::Instant> = None;
+        loop {
+            tokio::select! {
+                chunk = out_rx.recv() => {
+                    match chunk {
+                        Some(bytes) => {
+                            out_buf.extend_from_slice(&bytes);
+                            if out_buf.len() >= FLUSH_BYTES {
+                                emit_pty_output(&reader_app, &reader_id, std::mem::take(&mut out_buf));
+                                flush_at = None;
+                            } else if flush_at.is_none() {
+                                flush_at = Some(
+                                    tokio::time::Instant::now()
+                                        + std::time::Duration::from_millis(FLUSH_MS),
+                                );
+                            }
+                        }
+                        None => break, // reader hit EOF/error — the shell exited
+                    }
+                }
+                _ = async { tokio::time::sleep_until(flush_at.unwrap()).await }, if flush_at.is_some() => {
+                    emit_pty_output(&reader_app, &reader_id, std::mem::take(&mut out_buf));
+                    flush_at = None;
+                }
+            }
+        }
+        if !out_buf.is_empty() {
+            emit_pty_output(&reader_app, &reader_id, out_buf);
         }
         emit_pty_output(&reader_app, &reader_id, Vec::new());
         clear_pty_owner(&reader_app, &reader_id);

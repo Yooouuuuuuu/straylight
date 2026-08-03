@@ -17,6 +17,7 @@ import {
   terminalColors,
   terminalFontConfig,
   terminalHostColorConfig,
+  terminalScrollback,
   UI_COLOR_DEFAULTS,
   uiColors,
   updateSettings,
@@ -264,6 +265,10 @@ function applyThemeLayers(): void {
   );
   applyTerminalThemes();
   for (const [term, meta] of liveTerminals) {
+    // Scrollback follows settings live (shrinking trims the oldest lines).
+    if (term.options.scrollback !== terminalScrollback) {
+      term.options.scrollback = terminalScrollback;
+    }
     const fontChanged =
       term.options.fontFamily !== font.family || term.options.fontSize !== font.size;
     if (fontChanged) {

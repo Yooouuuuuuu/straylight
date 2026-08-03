@@ -11,6 +11,39 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-08-03
+
+### Changed
+
+- **Terminals cost much less under load.** Terminal output now crosses from
+  the backend in batched, lightly-encoded chunks instead of one heavyweight
+  message per packet — heavy output (builds, streaming agents, `cat` on a big
+  file) uses far less CPU and no longer makes the rest of the app stutter.
+- **Every visible terminal renders fast, however many exist.** The GPU
+  renderer now attaches only to terminals actually on screen. Previously each
+  terminal held its own GPU context forever and past ~a dozen the browser
+  silently downgraded the extras to slow rendering — that ceiling is gone,
+  and GPU memory now tracks what's visible instead of how many terminals are
+  open.
+
+### Added
+
+- **`terminalScrollback` setting** — scrollback lines kept per terminal
+  (default 5000, unchanged). The main memory knob for many-agent sessions;
+  applies live to open terminals.
+
+### Fixed
+
+- Terminals shown in Session focus (F11) or the Sessions pop-out no longer
+  keep their old width until the window is resized — they take the pane's
+  size the moment they appear, and restored content lands at that size.
+- The view no longer creeps away from the bottom over a long-running session:
+  layout changes keep you pinned to the latest output if you were there, and
+  never yank you back if you scrolled up on purpose.
+- F11 no longer does strange things in the pop-out windows (it belongs to the
+  main window; in the sessions window it could silently close usage checks),
+  and while sessions are popped out the key is locked like its button.
+
 ## [0.12.1] - 2026-08-02
 
 ### Added

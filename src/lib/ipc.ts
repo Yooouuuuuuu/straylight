@@ -87,8 +87,10 @@ export interface DirListing {
 
 export interface PtyOutput {
   ptyId: string;
-  /** Raw bytes as a number array. */
-  data: number[];
+  /** Raw bytes, base64-encoded — one string token through IPC instead of a
+   *  JSON number array (~3-4x lighter to serialize AND parse). An empty
+   *  string means the PTY closed. Decode with `b64Bytes` (useTerminal). */
+  data: string;
 }
 
 // ---------------------------------------------------------------------------
