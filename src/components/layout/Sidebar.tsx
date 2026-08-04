@@ -146,12 +146,12 @@ export function Sidebar() {
 
   return (
     <>
-    <div className="sidebar">
+    <div className="sidebar" data-tour="explorer">
       <div className="sidebar__header">
         <span className="sidebar__title">Explorer</span>
         <div className="sidebar__actions">
           {!localOnly && (
-            <div className="sidebar__lwr">
+            <div className="sidebar__lwr" data-tour="sections">
               {(
                 [
                   ["local", "L", "var(--section-local)"],
@@ -215,6 +215,7 @@ export function Sidebar() {
           <Tip label="Pin a folder">
             <button
               className="icon-btn"
+              data-tour="pin"
               disabled={!localConnId}
               onClick={openLocalFolder}
             >

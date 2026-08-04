@@ -1,6 +1,6 @@
 [package]
 name = "straylight"
-version = "0.12.4"
+version = "0.13.0"
 description = "Lightweight SSH file manager, terminal, and code viewer"
 authors = ["Straylight contributors"]
 edition = "2021"

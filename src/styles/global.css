@@ -293,6 +293,13 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* Layout-neutral wrapper around the four tool chips (the tour anchors it). */
+.termgroup__tools {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 /* Chips share one size and only grow for long names. */
 .termgroup__chip {
   display: inline-flex;
@@ -811,6 +818,83 @@
   color: var(--fg-secondary);
   text-align: center;
   padding: var(--space-5) !important;
+}
+
+/* ------------------------------------------------------------- Guided tour */
+/* Above panels and menus, BELOW the title-bar drag + min/max (z 2000, the
+   house rule) — the window can always be moved or minimized mid-tour. */
+.tour {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+}
+.tour__dim {
+  position: fixed;
+  background: var(--overlay);
+}
+.tour__ring {
+  position: fixed;
+  /* The tour travels in the theme's GREEN — distinct from the accent, so the
+     spotlight never reads as an error/danger state. */
+  border: 2px solid var(--green);
+  border-radius: var(--radius-md);
+  pointer-events: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--green) 35%, transparent);
+}
+.tour__card {
+  position: fixed;
+  width: 400px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.tour__card--center {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+.tour__title {
+  font-weight: 600;
+  font-size: var(--font-size-lg);
+}
+.tour__body {
+  line-height: 1.55;
+}
+.tour__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  /* 15 dots + three buttons: never push Next out of the card — wrap instead. */
+  flex-wrap: wrap;
+}
+.tour__dots {
+  display: inline-flex;
+  gap: 4px;
+  flex: 1 1 auto;
+}
+.tour__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--fg-secondary) 40%, transparent);
+}
+.tour__dot--on {
+  background: var(--green);
+}
+.tour__actions {
+  display: inline-flex;
+  gap: var(--space-3);
+}
+/* Next/Finish rides the theme's PINK (scoped like .conn-list's primary): the
+   tour's own palette — green spotlight, pink forward — never the accent. */
+.tour .btn--primary {
+  background: var(--pink);
+  border-color: var(--pink);
 }
 
 /* Containers table: the whole row is the "open a shell inside" action. */
@@ -2821,10 +2905,18 @@
 }
 
 /* Appearance menu under the title-bar ⚙ */
+/* Anchors the ⚙ menu to the BUTTON, not the window corner — the old fixed
+   right-offset only lined up with one historical button order. */
+.titlebar__menuwrap {
+  position: relative;
+  display: flex;
+  height: 100%;
+}
+
 .titlebar__menu {
-  position: fixed;
-  top: 34px;
-  right: 8px;
+  position: absolute;
+  top: 100%;
+  left: 0;
   z-index: 300;
   min-width: 200px;
   display: flex;

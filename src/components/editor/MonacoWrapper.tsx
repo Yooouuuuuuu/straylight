@@ -12,6 +12,7 @@ import {
   recomputeDirty,
   registerGroupEditor,
 } from "../../lib/editorModels";
+import { attachWheelZoom, registerZoomable } from "../../lib/editorZoom";
 import {
   conflictDecorations,
   setupMergeConflictActions,
@@ -45,17 +46,20 @@ export function MonacoWrapper({ groupId }: { groupId: number }) {
       fontLigatures: true,
       fontSize: 13,
       lineHeight: 20,
-      minimap: { enabled: true },
+      // The bar is a FIXTURE, like the explorer: `fit` maps the whole file
+      // onto its height (never scrolls or rescales), and `maxColumn: 40`
+      // makes Monaco's fixed cap — not its font-coupled term — decide the
+      // WIDTH (editorOptions.js:1023 shrinks the bar as the font zooms
+      // otherwise; VS Code upstream has no fixed-width option). Paired with
+      // the zoom clamp in lib/editorZoom, the bar holds a constant ~40px at
+      // realistic pane widths; only the viewport slider follows the zoom.
+      minimap: { enabled: true, size: "fit", maxColumn: 40 },
       largeFileOptimizations: true,
       scrollBeyondLastLine: false,
       smoothScrolling: true,
       renderWhitespace: "selection",
       cursorBlinking: "smooth",
       guides: { indentation: true },
-      // Ctrl+wheel zooms the EDITOR FONT, only while the cursor is over an
-      // editor (Monaco-native — VS Code's editor.mouseWheelZoom). App zoom
-      // (Ctrl+=/−) and terminal font sizing are untouched.
-      mouseWheelZoom: true,
       // VS Code's pinned block/function headers at the top while scrolling.
       // Falls back to folding/indentation where no symbol provider exists.
       stickyScroll: { enabled: true },
@@ -64,6 +68,10 @@ export function MonacoWrapper({ groupId }: { groupId: number }) {
       contextmenu: false,
     });
     editorRef.current = editor;
+    // Ctrl+wheel editor-font zoom (lib/editorZoom): our own gesture — bigger,
+    // smoother steps than Monaco's, and the minimap stays untouched.
+    const unzoom = registerZoomable(editor);
+    const unwheel = attachWheelZoom(host);
     const unregister = registerGroupEditor(editor);
 
     // Highlight the two sides of any merge-conflict region in the shown model
@@ -107,6 +115,8 @@ export function MonacoWrapper({ groupId }: { groupId: number }) {
       cursorSub.dispose();
       changeSub.dispose();
       modelSub.dispose();
+      unzoom();
+      unwheel();
       unregister();
       editor.dispose();
       editorRef.current = null;

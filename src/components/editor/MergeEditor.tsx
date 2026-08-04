@@ -12,6 +12,7 @@ import {
   findConflicts,
   resolveConflictsInText,
 } from "../../lib/mergeConflicts";
+import { attachWheelZoom, registerZoomable } from "../../lib/editorZoom";
 import { monaco, setupMonaco } from "../../lib/monaco";
 import { fsWriteFile, vcsStage } from "../../lib/ipc";
 import { useAppStore, type EditorTab } from "../../store/appStore";
@@ -43,8 +44,6 @@ export function MergeEditor({ tab }: { tab: EditorTab }) {
       lineHeight: 20,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
-      // Ctrl+wheel font zoom, same as the file editor (shared zoom level).
-      mouseWheelZoom: true,
     } as const;
 
     const oursModel = monaco.editor.createModel(
@@ -73,6 +72,15 @@ export function MergeEditor({ tab }: { tab: EditorTab }) {
       model: resultModel,
     });
     editorsRef.current = [ours, theirs, result];
+    // Ctrl+wheel font zoom, shared level with the file editor (lib/editorZoom).
+    const zoomCleanups = [
+      registerZoomable(ours),
+      registerZoomable(theirs),
+      registerZoomable(result),
+      attachWheelZoom(oursRef.current!),
+      attachWheelZoom(theirsRef.current!),
+      attachWheelZoom(resultRef.current!),
+    ];
 
     const decos = result.createDecorationsCollection();
     const update = () => {
@@ -84,6 +92,7 @@ export function MergeEditor({ tab }: { tab: EditorTab }) {
 
     return () => {
       sub.dispose();
+      for (const c of zoomCleanups) c();
       for (const e of editorsRef.current) e.dispose();
       editorsRef.current = [];
       oursModel.dispose();

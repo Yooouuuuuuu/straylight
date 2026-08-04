@@ -14,6 +14,7 @@ import {
   settingsFilePath,
 } from "../../lib/settings";
 import { toggleFocusView } from "../../lib/focusMode";
+import { startTour } from "../../lib/tour";
 import { isSecondary, isSessions, isWorkspace } from "../../lib/windowRole";
 import { popOutSessions } from "../../lib/sessionReplay";
 import { openWorkspaceWindow } from "../../lib/workspaceWindow";
@@ -170,6 +171,7 @@ export function TitleBar() {
           >
             <button
               className={`titlebar__btn ${settingsIssues.length > 0 ? "titlebar__btn--warn" : ""}`}
+              data-tour="palette"
               disabled={focusView}
               title={lockedTitle}
               onClick={() => useAppStore.getState().setPaletteOpen(true)}
@@ -178,18 +180,146 @@ export function TitleBar() {
             </button>
           </Tip>
         )}
-        {/* Settings — main only. */}
+        {/* Settings — main only. The wrapper anchors the dropdown DIRECTLY
+            under the gear, wherever the button order puts it. */}
         {!isSecondary && (
-          <Tip label="Settings">
-            <button
-              className="titlebar__btn"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((v) => !v)}
-            >
-              ⚙
-            </button>
-          </Tip>
+          <div className="titlebar__menuwrap">
+            <Tip label="Settings">
+              <button
+                className="titlebar__btn"
+                data-tour="settings"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                onClick={() => setMenuOpen((v) => !v)}
+              >
+                ⚙
+              </button>
+            </Tip>
+            {menuOpen && (
+              <>
+                <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />
+                <div className="titlebar__menu" role="menu">
+                  <div className="titlebar__menu-label">Settings</div>
+                  <button
+                    className="terminal-menu__item"
+                    disabled={focusView}
+                    title={lockedTitle}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      useAppStore.getState().openAppTab("settings");
+                    }}
+                  >
+                    Preferences
+                  </button>
+                  <button
+                    className="terminal-menu__item"
+                    disabled={focusView}
+                    title={lockedTitle}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      useAppStore.getState().openAppTab("themes");
+                    }}
+                  >
+                    Theme
+                  </button>
+                  <button
+                    className="terminal-menu__item"
+                    disabled={focusView}
+                    title={lockedTitle}
+                    onClick={() => openPrefFile(settingsFilePath(), "settings.json")}
+                  >
+                    Open settings.json
+                  </button>
+                  <button
+                    className="terminal-menu__item"
+                    disabled={focusView}
+                    title={
+                      lockedTitle ??
+                      (updateAvailable
+                        ? `v${updateAvailable} is ready to install`
+                        : undefined)
+                    }
+                    onClick={() => {
+                      setMenuOpen(false);
+                      checkForUpdate();
+                    }}
+                  >
+                    Check for updates
+                    <span className="menu-right">
+                      {updateAvailable && <span className="menu-dot" aria-hidden />}
+                      {appVersion && (
+                        <span className="menu-hint">v{appVersion}</span>
+                      )}
+                    </span>
+                  </button>
+                  <button
+                    className="terminal-menu__item"
+                    disabled={focusView}
+                    title={lockedTitle}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      startTour();
+                    }}
+                  >
+                    Walkthrough
+                  </button>
+                  <div className="terminal-menu__sep" />
+                  {/* Inventories the app keeps for you — audit and prune, not knobs. */}
+                  <div className="titlebar__menu-label">Storage</div>
+                  <button
+                    className="terminal-menu__item"
+                    disabled={focusView}
+                    title={lockedTitle}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      useAppStore.getState().openAppTab("drafts");
+                    }}
+                  >
+                    Drafts
+                  </button>
+                  <button
+                    className="terminal-menu__item"
+                    disabled={focusView}
+                    title={lockedTitle}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      useAppStore.getState().openAppTab("pins");
+                    }}
+                  >
+                    Pinned files
+                  </button>
+                  <button
+                    className="terminal-menu__item"
+                    disabled={focusView}
+                    title={lockedTitle}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      useAppStore.getState().openAppTab("autoconnect");
+                    }}
+                  >
+                    Auto-connect
+                  </button>
+                  <div className="terminal-menu__sep" />
+                  <div className="titlebar__menu-label">Quick theme</div>
+                  {savedThemeNames().map((name) => (
+                    <button
+                      key={name}
+                      className="terminal-menu__item"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        void applyTheme(name);
+                      }}
+                    >
+                      {name}
+                      {name === DEFAULT_THEME_NAME && (
+                        <span className="theme-badge">default</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         )}
         {/* Multi-window group — main only: workspace · sessions · focus, spaced
             off from the app actions and the window controls. */}
@@ -199,6 +329,7 @@ export function TitleBar() {
             <Tip label="Workspace window">
               <button
                 className="titlebar__btn"
+                data-tour="workspace"
                 disabled={focusView || workspaceOpen}
                 title={workspaceOpen ? "Workspace window is open" : lockedTitle}
                 onClick={() => void openWorkspaceWindow()}
@@ -209,6 +340,7 @@ export function TitleBar() {
             <Tip label="Pop out sessions">
               <button
                 className="titlebar__btn"
+                data-tour="popout"
                 disabled={focusView || sessionsPoppedOut}
                 title={sessionsPoppedOut ? "Sessions are popped out" : lockedTitle}
                 onClick={() => void popOutSessions()}
@@ -219,6 +351,7 @@ export function TitleBar() {
             <Tip label="Session focus mode (F11)">
               <button
                 className="titlebar__btn"
+                data-tour="focus"
                 disabled={sessionsPoppedOut}
                 title={sessionsPoppedOut ? "Sessions are popped out" : undefined}
                 onClick={() => toggleFocusView()}
@@ -228,119 +361,6 @@ export function TitleBar() {
             </Tip>
             {/* Trailing side of the group is spaced by the window controls'
                 own --winctl margin — no spacer needed here. */}
-          </>
-        )}
-        {menuOpen && (
-          <>
-            <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />
-            <div className="titlebar__menu" role="menu">
-              <div className="titlebar__menu-label">Settings</div>
-              <button
-                className="terminal-menu__item"
-                disabled={focusView}
-                title={lockedTitle}
-                onClick={() => {
-                  setMenuOpen(false);
-                  useAppStore.getState().openAppTab("settings");
-                }}
-              >
-                Preferences
-              </button>
-              <button
-                className="terminal-menu__item"
-                disabled={focusView}
-                title={lockedTitle}
-                onClick={() => {
-                  setMenuOpen(false);
-                  useAppStore.getState().openAppTab("themes");
-                }}
-              >
-                Theme
-              </button>
-              <button
-                className="terminal-menu__item"
-                disabled={focusView}
-                title={lockedTitle}
-                onClick={() => openPrefFile(settingsFilePath(), "settings.json")}
-              >
-                Open settings.json
-              </button>
-              <button
-                className="terminal-menu__item"
-                disabled={focusView}
-                title={
-                  lockedTitle ??
-                  (updateAvailable
-                    ? `v${updateAvailable} is ready to install`
-                    : undefined)
-                }
-                onClick={() => {
-                  setMenuOpen(false);
-                  checkForUpdate();
-                }}
-              >
-                Check for updates
-                <span className="menu-right">
-                  {updateAvailable && <span className="menu-dot" aria-hidden />}
-                  {appVersion && (
-                    <span className="menu-hint">v{appVersion}</span>
-                  )}
-                </span>
-              </button>
-              <div className="terminal-menu__sep" />
-              {/* Inventories the app keeps for you — audit and prune, not knobs. */}
-              <div className="titlebar__menu-label">Storage</div>
-              <button
-                className="terminal-menu__item"
-                disabled={focusView}
-                title={lockedTitle}
-                onClick={() => {
-                  setMenuOpen(false);
-                  useAppStore.getState().openAppTab("drafts");
-                }}
-              >
-                Drafts
-              </button>
-              <button
-                className="terminal-menu__item"
-                disabled={focusView}
-                title={lockedTitle}
-                onClick={() => {
-                  setMenuOpen(false);
-                  useAppStore.getState().openAppTab("pins");
-                }}
-              >
-                Pinned files
-              </button>
-              <button
-                className="terminal-menu__item"
-                disabled={focusView}
-                title={lockedTitle}
-                onClick={() => {
-                  setMenuOpen(false);
-                  useAppStore.getState().openAppTab("autoconnect");
-                }}
-              >
-                Auto-connect
-              </button>
-              <div className="terminal-menu__sep" />
-              <div className="titlebar__menu-label">Quick theme</div>
-              {savedThemeNames().map((name) => (
-                <button
-                  key={name}
-                  className="terminal-menu__item"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    void applyTheme(name);
-                  }}
-                >
-                  {name}
-                  {name === DEFAULT_THEME_NAME && (
-                    <span className="theme-badge">default</span>
-                  )}
-                </button>
-              ))}
-            </div>
           </>
         )}
         <Tip label="Minimize">

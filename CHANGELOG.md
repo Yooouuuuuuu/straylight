@@ -11,6 +11,29 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-04
+
+### Added
+
+- **A guided walkthrough.** First launch opens a one-minute spotlight tour of
+  the real interface — the app starts from a cleared stage and each surface
+  appears as it's introduced: connecting a server, the explorer (sections and
+  pinned folders), Source Control, terminals and their tool tabs, Sessions,
+  the focus view, the pop-out windows, the command palette, and settings. It
+  ends with the explorer and terminal open, ready to use. Take it again
+  anytime from ⚙ → Walkthrough; Esc leaves, and your layout is restored
+  exactly.
+- **Editor wheel-zoom, rebuilt.** Ctrl + mouse wheel now zooms in smooth
+  VS Code-style steps, the level persists across restarts (shared by every
+  window), and the minimap finally holds still — a fixed-width file map whose
+  only moving part is the viewport slider. Replaces the first cut shipped in
+  0.12.4.
+
+### Fixed
+
+- The ⚙ settings menu opens directly under its button again — it had stayed
+  anchored to where the button lived before the title-bar reorder.
+
 ## [0.12.4] - 2026-08-04
 
 ### Added

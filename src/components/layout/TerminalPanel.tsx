@@ -243,6 +243,7 @@ export function TerminalPanel() {
   return (
     <div
       className={`terminal-panel terminal-panel--grouped${terminalView !== "terminals" ? " terminal-panel--toolmode" : ""}`}
+      data-tour="terminal"
       // Focusable so the panel-tab cycle (Ctrl+PageDown/Up) can park the
       // keyboard here after switching to a tool view (no xterm to focus).
       tabIndex={-1}
@@ -294,19 +295,23 @@ export function TerminalPanel() {
           </button>
         ))}
         <span className="termgroup__spacer" />
-        {panelsConfig.ports &&
-          tool("ports", <IconEthernet size={13} />, "Ports", digitsFor(portCounts, true))}
-        {panelsConfig.containers &&
-          tool("containers", <IconCube size={13} />, "Containers", digitsFor(containerCounts, false))}
-        {panelsConfig.forwarding &&
-          tool(
-            "forwarding",
-            <IconTunnel size={13} />,
-            "Forwarding",
-            forwardCount > 0 ? String(forwardCount) : null,
-          )}
-        {panelsConfig.transfers &&
-          tool("transfers", <IconTransfer size={13} />, "Transfers", null)}
+        {/* The tour's anchor for the tool group — matches the bar's own gap,
+            so the wrapper is layout-neutral. */}
+        <span className="termgroup__tools" data-tour="tools">
+          {panelsConfig.ports &&
+            tool("ports", <IconEthernet size={13} />, "Ports", digitsFor(portCounts, true))}
+          {panelsConfig.containers &&
+            tool("containers", <IconCube size={13} />, "Containers", digitsFor(containerCounts, false))}
+          {panelsConfig.forwarding &&
+            tool(
+              "forwarding",
+              <IconTunnel size={13} />,
+              "Forwarding",
+              forwardCount > 0 ? String(forwardCount) : null,
+            )}
+          {panelsConfig.transfers &&
+            tool("transfers", <IconTransfer size={13} />, "Transfers", null)}
+        </span>
         <Tip label="Hide TERMINAL (Ctrl+`)">
           <button
             className="icon-btn termgroup__collapse panel-head__hide"

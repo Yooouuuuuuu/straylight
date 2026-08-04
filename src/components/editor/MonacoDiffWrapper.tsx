@@ -4,6 +4,7 @@
  *  stored content when the active diff tab changes. */
 import { useEffect, useRef } from "react";
 
+import { attachWheelZoom, registerZoomable } from "../../lib/editorZoom";
 import { monaco, setupMonaco } from "../../lib/monaco";
 import type { EditorTab } from "../../store/appStore";
 
@@ -31,11 +32,15 @@ export function MonacoDiffWrapper({ tab }: { tab: EditorTab }) {
       lineHeight: 20,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
-      // Ctrl+wheel font zoom, same as the file editor (shared zoom level).
-      mouseWheelZoom: true,
     });
     editorRef.current = editor;
+    // Ctrl+wheel font zoom, shared level with the file editor (lib/editorZoom;
+    // a diff editor's updateOptions reaches both panes).
+    const unzoom = registerZoomable(editor);
+    const unwheel = attachWheelZoom(host);
     return () => {
+      unzoom();
+      unwheel();
       const model = editor.getModel();
       model?.original.dispose();
       model?.modified.dispose();

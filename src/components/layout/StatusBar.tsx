@@ -177,7 +177,11 @@ export function StatusBar() {
   const transferShrink = Math.max(0, level - 7); // 0…4
 
   return (
-    <footer ref={barRef} className={`statusbar${iconOnly ? " statusbar--slim" : ""}`}>
+    <footer
+      ref={barRef}
+      className={`statusbar${iconOnly ? " statusbar--slim" : ""}`}
+      data-tour="panels"
+    >
       {/* The four panel blocks label themselves — no tooltip. */}
       <span
         className="statusbar__item statusbar__item--button statusbar__panel-btn"

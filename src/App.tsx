@@ -37,6 +37,7 @@ import {
 } from "./lib/ipc";
 import { openLocalTarget } from "./lib/openFile";
 import { stashSessionReplays } from "./lib/sessionReplay";
+import { startTour, tourPending } from "./lib/tour";
 import { isSecondary, isSessions, isWorkspace } from "./lib/windowRole";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -91,6 +92,7 @@ import { StartupAskDialog } from "./components/StartupAskDialog";
 import { TextContextMenu } from "./components/TextContextMenu";
 import { FocusView } from "./components/FocusView";
 import { FocusBar } from "./components/FocusBar";
+import { Tour } from "./components/Tour";
 import { Finder } from "./components/Finder";
 import { SearchInFiles } from "./components/SearchInFiles";
 import { ToastStack } from "./components/Toast";
@@ -487,6 +489,19 @@ export default function App() {
   useEffect(() => {
     if (!isSecondary) checkForUpdateOnLaunch();
   }, []);
+
+  // First-run guided tour (0.13.0): starts once the local session is up and
+  // the UI has settled, unless a dialog is in the way (then it simply tries
+  // again next launch — the pending flag only clears when the tour actually
+  // ran or was skipped). Re-run anytime: Settings → Preferences, or the
+  // palette's "Help: Take the Tour".
+  useEffect(() => {
+    if (isSecondary || !localConnId || !tourPending()) return;
+    const t = window.setTimeout(() => {
+      if (!document.querySelector(".modal-overlay")) startTour();
+    }, 1200);
+    return () => window.clearTimeout(t);
+  }, [localConnId]);
   useEffect(() => {
     if (localConnId)
       void initSettings(localConnId).finally(() => void initDrafts(localConnId));
@@ -857,7 +872,7 @@ export default function App() {
   const renderElement = (t: FullToken) => {
     if (t === "editor") {
       return (
-        <div className="hcol hcol--editor" key="editor">
+        <div className="hcol hcol--editor" key="editor" data-tour="editor">
           <PanelGroup
             key={localConnId && !isWorkspace ? "with-terminal" : "no-terminal"}
             autoSaveId="straylight.layout.v"
@@ -1006,6 +1021,9 @@ export default function App() {
       <ContextMenu />
       <TabContextMenu />
       <ToastStack />
+      {/* Guided tour (0.13.0): first run + Settings/palette re-runs. Main
+          window only — the pop-outs are subsets it already explains. */}
+      {!isSecondary && <Tour />}
     </div>
   );
 }

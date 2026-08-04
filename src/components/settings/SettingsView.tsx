@@ -146,7 +146,6 @@ export function SettingsView() {
           }}
         />
       </div>
-
       <h3 className="app-tab__section">Transfers</h3>
       <div className="app-tab__hint">
         Full uses everything your network gives; Background stays under the

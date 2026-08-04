@@ -19,6 +19,7 @@ import {
 import { closeAllTabs, closeSavedTabs } from "./tabActions";
 import { keyLabelFor } from "./shortcuts";
 import { toggleFocusView } from "./focusMode";
+import { startTour } from "./tour";
 import { isSecondary } from "./windowRole";
 import { cycleTerminalPanelTab } from "./terminalTabs";
 import { pickTerminalTarget } from "./terminalTarget";
@@ -93,6 +94,10 @@ export function allCommands(): Command[] {
     { id: "app.commandPalette", title: "App: Show All Commands", run: () => app().setPaletteOpen(true) },
     { id: "app.refreshAll", title: "App: Refresh Everything", run: () => refreshApp() },
     { id: "app.checkForUpdates", title: "App: Check for Updates", run: () => checkForUpdate() },
+    // The guided tour lives in the MAIN window (the pop-outs are subsets).
+    ...(isSecondary
+      ? []
+      : [{ id: "help.tour", title: "Help: Walkthrough", run: () => startTour() }]),
     // Pop-out windows never dial or repair connections — they mirror main's
     // (docs/dev/multi-window.md), so the connection commands don't exist there.
     ...(isSecondary

@@ -89,7 +89,7 @@ export function ConnectionManager() {
   }
 
   return (
-    <div className="conn-list">
+    <div className="conn-list" data-tour="connect">
       <button
         className="btn btn--primary btn--block"
         onClick={() => openDialog()}

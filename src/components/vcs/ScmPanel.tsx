@@ -89,7 +89,7 @@ export function ScmPanel() {
   };
 
   return (
-    <div className="scm">
+    <div className="scm" data-tour="sc">
       <div className="scm__head">
         <span className="scm__title">Source Control</span>
         <Tip label="Open a repository">

@@ -103,7 +103,7 @@ export function ChatPanel() {
   ];
 
   return (
-    <div className="chat-panel">
+    <div className="chat-panel" data-tour="sessions">
       <div className="chat-panel__head">
         {/* Line 1: the controls. */}
         <div className="chat-panel__bar">
