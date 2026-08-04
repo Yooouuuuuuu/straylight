@@ -11,6 +11,15 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.12.4] - 2026-08-04
+
+### Added
+
+- **Ctrl + mouse wheel zooms the editor font** — only while the cursor is
+  over an editor (file, diff, and merge views share one zoom level), exactly
+  like VS Code. App zoom (Ctrl+=/−) and terminal font sizing are unchanged;
+  the level resets to your configured font size on restart.
+
 ## [0.12.3] - 2026-08-03
 
 ### Changed

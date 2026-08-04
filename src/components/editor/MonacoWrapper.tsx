@@ -52,6 +52,10 @@ export function MonacoWrapper({ groupId }: { groupId: number }) {
       renderWhitespace: "selection",
       cursorBlinking: "smooth",
       guides: { indentation: true },
+      // Ctrl+wheel zooms the EDITOR FONT, only while the cursor is over an
+      // editor (Monaco-native — VS Code's editor.mouseWheelZoom). App zoom
+      // (Ctrl+=/−) and terminal font sizing are untouched.
+      mouseWheelZoom: true,
       // VS Code's pinned block/function headers at the top while scrolling.
       // Falls back to folding/indentation where no symbol provider exists.
       stickyScroll: { enabled: true },

@@ -43,6 +43,8 @@ export function MergeEditor({ tab }: { tab: EditorTab }) {
       lineHeight: 20,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
+      // Ctrl+wheel font zoom, same as the file editor (shared zoom level).
+      mouseWheelZoom: true,
     } as const;
 
     const oursModel = monaco.editor.createModel(
