@@ -11,6 +11,20 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.14.3] - 2026-09-18
+
+### Added
+
+- **`.strayignore` — exclude files from transfers.** Drop a `.strayignore`
+  file in a folder (gitignore syntax: globs, `dir/` forms, `!` re-includes,
+  nested files stacking with the deepest winning) and transferring that
+  folder skips the matches — `node_modules/`, `target/`, `*.log` never cross
+  the wire. Applies to the folder walk only: a file you select explicitly
+  always transfers, and same-host copy/move (one server-side `cp`) is
+  untouched. The confirm sheet's size/ETA use the same rules, and the
+  completion toast reports "N ignored by .strayignore" so a filtered transfer
+  never reads as a complete one.
+
 ## [0.14.2] - 2026-09-18
 
 ### Changed

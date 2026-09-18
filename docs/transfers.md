@@ -66,6 +66,19 @@ file size, and there is **no size cap**.
   path — is skipped and counted (reported next to skipped links) instead of
   aborting the batch. Both the measure and copy walks tolerate it, so one bad
   entry no longer takes the rest of the selection down with it.
+- **`.strayignore` filters folder transfers** (0.14.3). Gitignore syntax in a
+  separate file — globs, `dir/` dir-only forms, `!` re-includes, nested files
+  stacking with the deepest verdict winning — matched by ripgrep's gitignore
+  engine (the `ignore` crate) against paths relative to the file's own
+  directory. Scope rules: it applies only while **walking a transferred
+  folder** — an explicitly selected item always transfers, directories above
+  the transfer root are never consulted (there's no repo root to walk up to),
+  and same-connection copy/move (one server-side `cp`/rename, no walk) is
+  untouched. Ignored directories are never descended or measured. The count
+  of ignored entries (a directory counts once) is reported in the completion
+  toast — a filtered transfer must never read as a complete one — and the
+  measure walk applies the same filter, so the confirm sheet's size and the
+  progress bar's total match what actually copies.
 - **Files copy concurrently — 32 fungible slots, at most one big.** A file's
   cost is bytes plus per-file round trips (open, write, commit-rename,
   close); under ~4 MiB the round trips dominate, which is why a folder of

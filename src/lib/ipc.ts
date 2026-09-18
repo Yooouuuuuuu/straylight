@@ -430,6 +430,9 @@ export interface TransferOutcome {
   /** Entries skipped because the source couldn't be read (dangling link,
    *  broken submodule gitlink) — one bad entry no longer fails the batch. */
   skippedErrors: number;
+  /** Entries excluded by a `.strayignore` during the folder walk (a directory
+   *  counts once, however much it contains). */
+  skippedIgnored: number;
 }
 
 /** Stream a batch of entries from one connection into a directory on another

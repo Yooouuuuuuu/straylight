@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use ignore::gitignore::GitignoreBuilder;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -468,6 +469,10 @@ pub struct TransferOutcome {
     /// dangling symlink, a broken submodule gitlink, a vanished path). One bad
     /// entry no longer aborts the whole batch — it's skipped and reported here.
     skipped_errors: usize,
+    /// Entries excluded by a `.strayignore` during the walk (a directory
+    /// counts once, however much it contains) — surfaced in the toast so a
+    /// filtered transfer never reads as a complete one.
+    skipped_ignored: usize,
 }
 
 /// Interrupt plumbing for one transfer. Two signals share one watch channel
@@ -575,6 +580,8 @@ struct Progress {
     skipped_links: AtomicUsize,
     /// Entries skipped because the source stat/list failed (reported too).
     skipped_errors: AtomicUsize,
+    /// Entries excluded by a `.strayignore` (reported too; a dir counts once).
+    skipped_ignored: AtomicUsize,
     /// The copy is parked waiting for a lane to reconnect (shown in the bar).
     waiting: AtomicBool,
     /// Source paths fully copied this transfer — retry rounds skip them (their
@@ -613,6 +620,10 @@ impl Progress {
 
     fn skip_error(&self) {
         self.skipped_errors.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn skip_ignored(&self) {
+        self.skipped_ignored.fetch_add(1, Ordering::Relaxed);
     }
 
     fn mark_done(&self, src_path: &str) {
@@ -725,13 +736,64 @@ impl Progress {
     }
 }
 
+/// `.strayignore` (gitignore syntax, separate filename): filters what a
+/// transferred FOLDER carries. Applied only during the walk — an explicitly
+/// selected top-level item always transfers — and only from the transfer root
+/// down (no repo concept, so parent directories are never consulted). One
+/// matcher per directory that has the file; a deeper file stacks over its
+/// parents and its verdict wins, exactly like git's nested .gitignore.
+const STRAYIGNORE: &str = ".strayignore";
+
+/// The matchers in force for a directory, outermost first. Each entry is the
+/// directory the `.strayignore` lives in plus its compiled matcher (Arc so a
+/// child's extended copy shares the parents' compiled globs).
+type IgnoreStack = Vec<(String, Arc<ignore::gitignore::Gitignore>)>;
+
+/// Stack `dir`'s `.strayignore` content over `parent`. Bad glob lines are
+/// dropped (as git does); a wholly uncompilable file yields None (unfiltered).
+fn extend_stack(parent: &IgnoreStack, dir: &str, content: &str) -> Option<IgnoreStack> {
+    // Root "" + manually-relativized paths in `is_ignored`: the crate's own
+    // root-stripping assumes host-native paths, ours may be remote strings.
+    let mut b = GitignoreBuilder::new("");
+    for line in content.lines() {
+        let _ = b.add_line(None, line);
+    }
+    let gi = b.build().ok()?;
+    let mut stack = parent.clone();
+    stack.push((dir.to_string(), Arc::new(gi)));
+    Some(stack)
+}
+
+/// Is `path` ignored under `stack`? Matched relative to each matcher's own
+/// directory; the LAST definitive verdict wins (the stack is outermost-first,
+/// so a deeper `.strayignore` — including a `!` re-include — overrides).
+fn is_ignored(stack: &IgnoreStack, path: &str, is_dir: bool) -> bool {
+    let mut ignored = false;
+    for (root, gi) in stack {
+        // Prefix-match the root as a PATH (a matcher at `/a` must not claim
+        // `/ab/…`): the remainder must start at a separator.
+        let rel = match path.strip_prefix(root.as_str()) {
+            Some(r) if r.starts_with(['/', '\\']) => &r[1..],
+            _ => continue,
+        };
+        match gi.matched(rel, is_dir) {
+            ignore::Match::None => {}
+            ignore::Match::Ignore(_) => ignored = true,
+            ignore::Match::Whitelist(_) => ignored = false,
+        }
+    }
+    ignored
+}
+
 /// Recursively total the bytes and file count under `path`, for the progress bar.
 /// Mirrors the copy walk (`walk_top`/`collect_dir`) exactly — symlinked
 /// directories are never descended (a link cycle like `ln -s . self` would
-/// recurse forever), so the totals match what actually gets copied.
+/// recurse forever) and `.strayignore` filters apply the same way, so the
+/// totals match what actually gets copied.
 fn measure<'a>(
     src: &'a dyn FileTransport,
     path: &'a str,
+    ignores: &'a IgnoreStack,
 ) -> Pin<Box<dyn Future<Output = Result<(u64, usize), String>> + Send + 'a>> {
     Box::pin(async move {
         // Tolerant: an unreadable path (dangling link, broken gitlink) counts
@@ -748,14 +810,27 @@ fn measure<'a>(
             Ok(listing) => listing.entries,
             Err(_) => return Ok((0, 0)),
         };
+        // Pick up this directory's `.strayignore` — same rule as collect_dir,
+        // or the confirm sheet's total wouldn't match what actually copies.
+        let extended = match entries.iter().find(|e| e.name == STRAYIGNORE && !e.is_dir) {
+            Some(f) => match src.read_file(&f.path).await {
+                Ok(c) => extend_stack(ignores, path, &c.content),
+                Err(_) => None,
+            },
+            None => None,
+        };
+        let ignores = extended.as_ref().unwrap_or(ignores);
         let mut bytes = 0u64;
         let mut files = 0usize;
         for entry in entries {
             if entry.is_symlink && entry.is_dir {
                 continue; // skipped by the copy walk too
             }
+            if is_ignored(ignores, &entry.path, entry.is_dir) {
+                continue; // skipped by the copy walk too (.strayignore)
+            }
             if entry.is_dir {
-                let (b, f) = measure(src, &entry.path).await?;
+                let (b, f) = measure(src, &entry.path, ignores).await?;
                 bytes += b;
                 files += f;
             } else {
@@ -898,6 +973,7 @@ async fn run_transfer(
         done_files: AtomicUsize::new(0),
         skipped_links: AtomicUsize::new(0),
         skipped_errors: AtomicUsize::new(0),
+        skipped_ignored: AtomicUsize::new(0),
         waiting: AtomicBool::new(false),
         done_paths: std::sync::Mutex::new(HashSet::new()),
         resolved: std::sync::Mutex::new(HashMap::new()),
@@ -1054,6 +1130,7 @@ async fn run_transfer(
         cancelled,
         skipped_links: prog.skipped_links.load(Ordering::Relaxed),
         skipped_errors: prog.skipped_errors.load(Ordering::Relaxed),
+        skipped_ignored: prog.skipped_ignored.load(Ordering::Relaxed),
     })
 }
 
@@ -1197,7 +1274,7 @@ async fn run_round(
                 let mut total_bytes = 0u64;
                 let mut total_files = 0usize;
                 for p in src_paths {
-                    let (b, f) = measure(src.as_ref(), p).await?;
+                    let (b, f) = measure(src.as_ref(), p, &IgnoreStack::new()).await?;
                     total_bytes += b;
                     total_files += f;
                 }
@@ -1278,7 +1355,7 @@ pub async fn fs_transfer_measure(
     let src = state.transport(&conn_id).await?;
     let (mut bytes, mut files) = (0u64, 0usize);
     for p in &paths {
-        let (b, f) = measure(src.as_ref(), p).await?;
+        let (b, f) = measure(src.as_ref(), p, &IgnoreStack::new()).await?;
         bytes += b;
         files += f;
     }
@@ -1520,7 +1597,12 @@ async fn walk_top(
             Raced::Interrupted => return Ok(()),
             Raced::Done(_) => {} // exists-already errors are fine (merge)
         }
-        collect_dir(src, src_path, dest, &dest_path, prog, abort, small_tx, big_tx).await
+        // The transfer root starts with an empty ignore stack: an explicitly
+        // selected item always transfers; `.strayignore` files apply from
+        // this directory down (collect_dir picks them up per listing).
+        let ignores = IgnoreStack::new();
+        collect_dir(src, src_path, dest, &dest_path, prog, abort, small_tx, big_tx, &ignores)
+            .await
     } else {
         push_job(
             small_tx,
@@ -1553,6 +1635,7 @@ fn collect_dir<'a>(
     abort: &'a AtomicBool,
     small_tx: &'a mpsc::Sender<FileJob>,
     big_tx: &'a mpsc::Sender<FileJob>,
+    ignores: &'a IgnoreStack,
 ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
     Box::pin(async move {
         if prog.interrupted() || abort.load(Ordering::Relaxed) {
@@ -1567,9 +1650,29 @@ fn collect_dir<'a>(
                 return Ok(());
             }
         };
+        // This directory's `.strayignore`, stacked over the parents' (deepest
+        // verdict wins, like git). The read races the interrupt like every
+        // other wire op; an unreadable file warns and walks on unfiltered.
+        let extended = match entries.iter().find(|e| e.name == STRAYIGNORE && !e.is_dir) {
+            Some(f) => match race(&prog.intr, src.read_file(&f.path)).await {
+                Raced::Interrupted => return Ok(()),
+                Raced::Done(Ok(c)) => extend_stack(ignores, src_dir, &c.content),
+                Raced::Done(Err(e)) => {
+                    log::warn!("transfer: could not read {}: {e}", f.path);
+                    None
+                }
+            },
+            None => None,
+        };
+        let ignores = extended.as_ref().unwrap_or(ignores);
         for entry in entries {
             if prog.interrupted() || abort.load(Ordering::Relaxed) {
                 break;
+            }
+            if is_ignored(ignores, &entry.path, entry.is_dir) {
+                log::info!("transfer: ignoring {} (.strayignore)", entry.path);
+                prog.skip_ignored();
+                continue;
             }
             // Never descend a symlinked directory — a link cycle
             // (`ln -s . self`) would recurse forever. Symlinks to files still
@@ -1585,8 +1688,10 @@ fn collect_dir<'a>(
                     Raced::Interrupted => return Ok(()),
                     Raced::Done(_) => {}
                 }
-                collect_dir(src, &entry.path, dest, &child_dest, prog, abort, small_tx, big_tx)
-                    .await?;
+                collect_dir(
+                    src, &entry.path, dest, &child_dest, prog, abort, small_tx, big_tx, ignores,
+                )
+                .await?;
             } else {
                 // Symlinked files copy as their TARGET, but the listing only
                 // carries the link's own metadata — stat through the link for
@@ -2111,6 +2216,51 @@ async fn search_remote(
         }
     }
     Ok(matches)
+}
+
+#[cfg(test)]
+mod strayignore_tests {
+    use super::*;
+
+    fn stack_of(dir: &str, content: &str) -> IgnoreStack {
+        extend_stack(&IgnoreStack::new(), dir, content).expect("compiles")
+    }
+
+    #[test]
+    fn globs_dir_only_and_anchored_patterns() {
+        let s = stack_of("/proj", "*.log\nnode_modules/\n/build\n");
+        assert!(is_ignored(&s, "/proj/a.log", false));
+        assert!(is_ignored(&s, "/proj/sub/b.log", false)); // unanchored: any depth
+        assert!(is_ignored(&s, "/proj/node_modules", true));
+        assert!(!is_ignored(&s, "/proj/node_modules", false)); // dir-only pattern
+        assert!(is_ignored(&s, "/proj/build", true));
+        assert!(!is_ignored(&s, "/proj/sub/build", true)); // anchored to its dir
+        assert!(!is_ignored(&s, "/proj/keep.txt", false));
+    }
+
+    #[test]
+    fn deeper_file_overrides_parent() {
+        let s = stack_of("/proj", "*.log\n");
+        assert!(is_ignored(&s, "/proj/sub/x.log", false));
+        let s = extend_stack(&s, "/proj/sub", "!keep.log\n").expect("compiles");
+        assert!(!is_ignored(&s, "/proj/sub/keep.log", false)); // re-included
+        assert!(is_ignored(&s, "/proj/sub/other.log", false)); // parent still holds
+    }
+
+    #[test]
+    fn root_prefix_matches_path_wise() {
+        let s = stack_of("/a", "*.tmp\n");
+        assert!(is_ignored(&s, "/a/x.tmp", false));
+        assert!(!is_ignored(&s, "/ab/x.tmp", false)); // `/a` must not claim `/ab`
+    }
+
+    #[test]
+    fn windows_separators_match_too() {
+        let s = stack_of("C:\\proj", "*.log\ntarget/\n");
+        assert!(is_ignored(&s, "C:\\proj\\a.log", false));
+        assert!(is_ignored(&s, "C:\\proj\\target", true));
+        assert!(!is_ignored(&s, "C:\\proj\\src", true));
+    }
 }
 
 #[cfg(test)]

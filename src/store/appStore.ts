@@ -2682,13 +2682,20 @@ export const useAppStore = create<AppState>()((set, get) => ({
             `${outcome.skippedErrors} unreadable item${outcome.skippedErrors === 1 ? "" : "s"}`,
           );
         const skipped = parts.length ? ` (${parts.join(", ")} skipped)` : "";
+        // Named separately from the skips: an ignore is the user's own rule
+        // doing its job, not a problem — but a filtered transfer must never
+        // read as a complete one.
+        const ignored = outcome.skippedIgnored
+          ? ` (${outcome.skippedIgnored} ignored by .strayignore)`
+          : "";
         const to = kind === "download" && destLabel ? ` to ${destLabel}` : "";
         get().pushNotice(
           "info",
           (outcome.files === 1
             ? `${kind === "download" ? "Downloaded" : "Copied"} ${firstName}${to}`
             : `${kind === "download" ? "Downloaded" : "Copied"} ${outcome.files} files${to}`) +
-            skipped,
+            skipped +
+            ignored,
         );
       }
     } catch (e) {

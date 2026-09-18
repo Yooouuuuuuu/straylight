@@ -1,6 +1,6 @@
 [package]
 name = "straylight"
-version = "0.14.2"
+version = "0.14.3"
 description = "Lightweight SSH file manager, terminal, and code viewer"
 authors = ["Straylight contributors"]
 edition = "2021"
@@ -28,6 +28,9 @@ tauri-plugin-process = "2"
 # Native OS clipboard read/write — avoids the WebView2 "allow clipboard" prompt
 # that navigator.clipboard.readText() triggers on first paste.
 tauri-plugin-clipboard-manager = "2"
+# `.strayignore` matching in transfer walks — ripgrep's gitignore engine, used
+# standalone (our walk runs over the transport layer, not the filesystem).
+ignore = "0.4"
 # One running app: a "Open with Straylight" launch (or a second exe start)
 # forwards its argv to the running window instead of opening a duplicate.
 tauri-plugin-single-instance = "2"
