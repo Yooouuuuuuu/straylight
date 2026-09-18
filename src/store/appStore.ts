@@ -110,6 +110,11 @@ export interface EditorTab {
   diffBase?: string;
   /** Whether the file exists in the base (false = added/untracked). */
   diffBaseExists?: boolean;
+  /** A diff side exceeded the 20 MB cap — both contents withheld, the tab
+   *  renders a "too large to diff" card instead of the editor. */
+  diffTooLarge?: boolean;
+  /** The biggest side's byte size, for that card's message. */
+  diffSize?: number;
   /** Backend ("git" | "jj") for a log tab (path holds the repo root). */
   vcsBackend?: string;
 }
@@ -1055,6 +1060,8 @@ interface AppState {
     content: string;
     language: string;
     isBinary: boolean;
+    tooLarge?: boolean;
+    sizeBytes?: number;
   }) => void;
   /** Open (or focus) a rendered Markdown preview for a file. */
   openPreviewTab: (d: {
@@ -2368,6 +2375,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
         kind: "diff",
         diffBase: d.base,
         diffBaseExists: d.baseExists,
+        diffTooLarge: d.tooLarge,
+        diffSize: d.sizeBytes,
         groupId: s.activeGroupId,
       };
       return groupsPatch(s, [...s.tabs, tab], id);

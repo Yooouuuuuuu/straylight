@@ -565,6 +565,10 @@ export interface VcsFileBase {
   content: string;
   exists: boolean;
   isBinary: boolean;
+  /** Over the backend's 20 MB/side diff cap — content withheld. */
+  tooLarge: boolean;
+  /** The side's real byte size (for the too-large message). */
+  size: number;
 }
 
 export function vcsFileBase(

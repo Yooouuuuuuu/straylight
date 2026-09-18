@@ -893,14 +893,11 @@ pub async fn vcs_file_at(
             content: String::new(),
             exists: false,
             is_binary: false,
+            too_large: false,
+            size: 0,
         });
     }
-    let is_binary = looks_binary(out.stdout.as_bytes());
-    Ok(VcsFileBase {
-        content: if is_binary { String::new() } else { out.stdout },
-        exists: true,
-        is_binary,
-    })
+    Ok(diff_side(out.stdout))
 }
 
 /// Discard working-tree changes for paths (git: restore to HEAD + unstage; jj:
@@ -934,6 +931,41 @@ pub struct VcsFileBase {
     pub content: String,
     pub exists: bool,
     pub is_binary: bool,
+    /// Over `DIFF_SIDE_MAX` — content withheld, the diff tab shows a card.
+    pub too_large: bool,
+    /// The side's real byte size (for the too-large card's message).
+    pub size: u64,
+}
+
+/// 20 MB per diff side (JetBrains' content-load cap; VS Code stops computing
+/// diffs at 50 MB/side). Bigger text diffs aren't human-readable, and an
+/// uncapped side ships a whole revision through IPC as one JSON string plus
+/// two Monaco models — a renderer-memory spike from ONE oversized generated
+/// file. Regular file-open truncates at 50 MB instead; a diff must refuse
+/// rather than truncate, or it would silently lie about what changed.
+const DIFF_SIDE_MAX: usize = 20 * 1024 * 1024;
+
+/// Classify a revision's content into a diff side (binary / too-large sides
+/// withhold the content).
+fn diff_side(stdout: String) -> VcsFileBase {
+    let size = stdout.len() as u64;
+    if stdout.len() > DIFF_SIDE_MAX {
+        return VcsFileBase {
+            content: String::new(),
+            exists: true,
+            is_binary: false,
+            too_large: true,
+            size,
+        };
+    }
+    let is_binary = looks_binary(stdout.as_bytes());
+    VcsFileBase {
+        content: if is_binary { String::new() } else { stdout },
+        exists: true,
+        is_binary,
+        too_large: false,
+        size,
+    }
 }
 
 #[tauri::command]
@@ -962,14 +994,11 @@ pub async fn vcs_file_base(
             content: String::new(),
             exists: false,
             is_binary: false,
+            too_large: false,
+            size: 0,
         });
     }
-    let is_binary = looks_binary(out.stdout.as_bytes());
-    Ok(VcsFileBase {
-        content: if is_binary { String::new() } else { out.stdout },
-        exists: true,
-        is_binary,
-    })
+    Ok(diff_side(out.stdout))
 }
 
 /// Return the normalized status for a repo, dispatching on its backend.

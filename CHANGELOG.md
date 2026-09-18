@@ -11,6 +11,18 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-09-18
+
+### Changed
+
+- **Diffs cap at 20 MB per side.** Opening a git/jj diff on an oversized file
+  (a lockfile, a bundle, generated data) used to ship the entire revision
+  into the window — the prime suspect for a whole-app crash under many open
+  tabs. Past 20 MB a diff tab now shows "File too large to diff" with the
+  real size instead of loading the content. Matches what other editors do
+  (VS Code stops computing diffs at 50 MB/side, JetBrains won't load files
+  past 20 MB at all); regular file-open keeps its existing 50 MB truncation.
+
 ## [0.14.1] - 2026-09-18
 
 ### Fixed

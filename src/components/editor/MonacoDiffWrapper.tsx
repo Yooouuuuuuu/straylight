@@ -5,6 +5,7 @@
 import { useEffect, useRef } from "react";
 
 import { attachWheelZoom, registerZoomable } from "../../lib/editorZoom";
+import { formatSize } from "../../lib/format";
 import { monaco, setupMonaco } from "../../lib/monaco";
 import type { EditorTab } from "../../store/appStore";
 
@@ -52,7 +53,7 @@ export function MonacoDiffWrapper({ tab }: { tab: EditorTab }) {
   // (Re)build the two models whenever the active diff tab or its content changes.
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor || tab.isBinary) return;
+    if (!editor || tab.isBinary || tab.diffTooLarge) return;
     const prev = editor.getModel();
     const original = monaco.editor.createModel(tab.diffBase ?? "", tab.language);
     const modified = monaco.editor.createModel(tab.content, tab.language);
@@ -61,6 +62,18 @@ export function MonacoDiffWrapper({ tab }: { tab: EditorTab }) {
     prev?.modified.dispose();
   }, [tab.id, tab.diffBase, tab.content, tab.language, tab.isBinary]);
 
+  if (tab.diffTooLarge) {
+    // Contents were withheld at the 20 MB/side cap (vcs.rs DIFF_SIDE_MAX) —
+    // a diff that size isn't readable, and holding both sides as strings +
+    // Monaco models is exactly the renderer-memory spike the cap prevents.
+    return (
+      <div className="diff-binary">
+        File too large to diff
+        {tab.diffSize ? ` (${formatSize(tab.diffSize)})` : ""} — view it on
+        the host, in the terminal.
+      </div>
+    );
+  }
   if (tab.isBinary) {
     return (
       <div className="diff-binary">Binary file — diff not shown.</div>

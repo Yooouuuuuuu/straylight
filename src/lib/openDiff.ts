@@ -7,6 +7,12 @@ import { languageForFile } from "./language";
 import { useAppStore } from "../store/appStore";
 import type { TrackedRepo } from "../store/vcsStore";
 
+/** Mirrors the backend's DIFF_SIDE_MAX (vcs.rs): revision sides are capped
+ *  there; the working side arrives via fsReadFile (which truncates at 50 MB)
+ *  and is re-checked here against the same rule, so both sides refuse
+ *  identically instead of one silently truncating. */
+const DIFF_SIDE_MAX = 20 * 1024 * 1024;
+
 export async function openDiff(repo: TrackedRepo, change: VcsChange): Promise<void> {
   const connId = repo.connId;
   if (!connId) return;
@@ -20,11 +26,15 @@ export async function openDiff(repo: TrackedRepo, change: VcsChange): Promise<vo
     let base = "";
     let baseExists = false;
     let baseBinary = false;
+    let tooLarge = false;
+    let sizeBytes = 0;
     try {
       const b = await vcsFileBase(connId, root, repo.backend, basePath);
       base = b.content;
       baseExists = b.exists;
       baseBinary = b.isBinary;
+      tooLarge = b.tooLarge;
+      sizeBytes = b.size;
     } catch {
       /* no base side */
     }
@@ -34,11 +44,20 @@ export async function openDiff(repo: TrackedRepo, change: VcsChange): Promise<vo
     if (change.kind !== "deleted") {
       try {
         const f = await fsReadFile(connId, workingPath);
-        content = f.content;
-        workingBinary = f.isBinary;
+        if (f.size > DIFF_SIDE_MAX || f.truncated) {
+          tooLarge = true;
+          sizeBytes = Math.max(sizeBytes, f.size);
+        } else {
+          content = f.content;
+          workingBinary = f.isBinary;
+        }
       } catch {
         /* unreadable / already gone → empty new side */
       }
+    }
+    if (tooLarge) {
+      base = ""; // neither side renders — don't hold the strings
+      content = "";
     }
 
     store.openDiffTab({
@@ -51,6 +70,8 @@ export async function openDiff(repo: TrackedRepo, change: VcsChange): Promise<vo
       content,
       language: languageForFile(basename(change.path)),
       isBinary: baseBinary || workingBinary,
+      tooLarge,
+      sizeBytes,
     });
   } finally {
     store.setBusyPath(null);
@@ -104,10 +125,14 @@ export async function openCommitDiff(
   try {
     let base = "";
     let baseBinary = false;
+    let tooLarge = false;
+    let sizeBytes = 0;
     try {
       const b = await vcsFileAt(conn.connId, root, conn.backend, parentRev, oldPath);
       base = b.content;
       baseBinary = b.isBinary;
+      tooLarge = b.tooLarge;
+      sizeBytes = b.size;
     } catch {
       /* no parent side */
     }
@@ -117,8 +142,14 @@ export async function openCommitDiff(
       const f = await vcsFileAt(conn.connId, root, conn.backend, commitId, newPath);
       content = f.content;
       newBinary = f.isBinary;
+      tooLarge = tooLarge || f.tooLarge;
+      sizeBytes = Math.max(sizeBytes, f.size);
     } catch {
       /* deleted in this commit */
+    }
+    if (tooLarge) {
+      base = "";
+      content = "";
     }
     store.openDiffTab({
       connId: conn.connId,
@@ -130,6 +161,8 @@ export async function openCommitDiff(
       content,
       language: languageForFile(basename(newPath)),
       isBinary: baseBinary || newBinary,
+      tooLarge,
+      sizeBytes,
     });
   } finally {
     store.setBusyPath(null);
