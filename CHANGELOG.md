@@ -11,6 +11,17 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-09-18
+
+### Fixed
+
+- **Markdown preview right-click works.** It now opens a Copy · Select All
+  menu — before, the app-wide menu suppression left the preview with no menu
+  at all.
+- **Markdown preview keeps your place.** Switching to another tab and back
+  returns to where you were, not the top — and the position holds while
+  images and mermaid diagrams finish loading beneath it.
+
 ## [0.14.0] - 2026-09-18
 
 ### Fixed

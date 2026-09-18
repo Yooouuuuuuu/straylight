@@ -6,7 +6,9 @@
  *  window listener runs; everything else is suppressed here, menu or not.
  *
  *  Password fields get the reduced set (Paste · Select All) like native menus;
- *  read-only surfaces keep only Copy · Select All enabled. */
+ *  read-only surfaces keep only Copy · Select All enabled. Selectable static
+ *  text (the Markdown preview) gets Copy · Select All too — it has no field
+ *  or editor, so without its own case it got the suppression and no menu. */
 import { useEffect, useState } from "react";
 
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
@@ -22,7 +24,9 @@ type Field = HTMLInputElement | HTMLTextAreaElement;
 
 type MenuState =
   | { kind: "field"; x: number; y: number; field: Field }
-  | { kind: "editor"; x: number; y: number; editor: monaco.editor.IStandaloneCodeEditor };
+  | { kind: "editor"; x: number; y: number; editor: monaco.editor.IStandaloneCodeEditor }
+  // Selectable-but-read-only surfaces (the Markdown preview): Copy · Select All.
+  | { kind: "static"; x: number; y: number; container: HTMLElement };
 
 export function TextContextMenu() {
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -48,6 +52,13 @@ export function TextContextMenu() {
       const editor = editorAtNode(target);
       if (editor && editor.getModel()) {
         setMenu({ kind: "editor", x: e.clientX, y: e.clientY, editor });
+        return;
+      }
+      // The Markdown preview is selectable text with no menu of its own —
+      // without this it got the suppression (line above) and nothing else.
+      const staticText = target.closest(".md-preview") as HTMLElement | null;
+      if (staticText) {
+        setMenu({ kind: "static", x: e.clientX, y: e.clientY, container: staticText });
       }
     };
     window.addEventListener("contextmenu", onContextMenu);
@@ -79,16 +90,35 @@ export function TextContextMenu() {
   const writable =
     menu.kind === "field"
       ? !menu.field.readOnly && !menu.field.disabled
-      : mo
-        ? !menu.editor.getOption(mo.editor.EditorOption.readOnly)
-        : true;
+      : menu.kind === "editor"
+        ? mo
+          ? !menu.editor.getOption(mo.editor.EditorOption.readOnly)
+          : true
+        : false;
   const hasSelection =
     menu.kind === "field"
       ? menu.field.selectionStart !== menu.field.selectionEnd
-      : !(menu.editor.getSelection()?.isEmpty() ?? true);
+      : menu.kind === "editor"
+        ? !(menu.editor.getSelection()?.isEmpty() ?? true)
+        : !(window.getSelection()?.isCollapsed ?? true);
 
   const run = (act: "undo" | "redo" | "cut" | "copy" | "paste" | "selectAll") => {
     setMenu(null);
+    if (menu.kind === "static") {
+      if (act === "copy") {
+        const text = window.getSelection()?.toString() ?? "";
+        if (text) void navigator.clipboard.writeText(text).catch(() => {});
+      } else if (act === "selectAll") {
+        const body =
+          menu.container.querySelector(".md-preview__body") ?? menu.container;
+        const range = document.createRange();
+        range.selectNodeContents(body);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+      return;
+    }
     if (menu.kind === "field") {
       const f = menu.field;
       f.focus();
@@ -171,7 +201,12 @@ export function TextContextMenu() {
     hint: string;
     enabled: boolean;
     sepBefore?: boolean;
-  }[] = isPassword
+  }[] = menu.kind === "static"
+    ? [
+        { act: "copy", label: "Copy", hint: "Ctrl+C", enabled: hasSelection },
+        { act: "selectAll", label: "Select All", hint: "Ctrl+A", enabled: true },
+      ]
+    : isPassword
     ? [
         { act: "paste", label: "Paste", hint: "Ctrl+V", enabled: writable },
         { act: "selectAll", label: "Select All", hint: "Ctrl+A", enabled: true },

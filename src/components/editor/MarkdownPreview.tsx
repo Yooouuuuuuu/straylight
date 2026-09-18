@@ -6,7 +6,7 @@
  *  file's directory and embedded as `data:` URLs (they can't resolve to the
  *  packaged webview root otherwise); ```mermaid blocks render to SVG with
  *  mermaid, which is lazy-loaded only when a diagram is actually present. */
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 
@@ -32,6 +32,11 @@ function imageMime(path: string): string {
   return IMAGE_MIME[ext] ?? "application/octet-stream";
 }
 
+/** Scroll position per preview tab, module-lived: only the active tab's view
+ *  mounts (EditorArea), so switching away unmounts the preview — without this
+ *  every return landed back at the top. */
+const scrollTops = new Map<string, number>();
+
 /** Resolve a markdown image `src` against the source file's directory. Returns
  *  null for things we shouldn't touch (absolute URLs, data URLs). */
 function resolveImagePath(baseDir: string, src: string): string | null {
@@ -49,6 +54,38 @@ export function MarkdownPreview({ tab }: { tab: EditorTab }) {
     ),
   );
   const bodyRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  /** Restore target still being enforced (null once the user takes over). */
+  const pendingScrollRef = useRef<number | null>(null);
+
+  // Restore the saved position on mount. Async content (data-URL images,
+  // mermaid SVGs) lands AFTER this and grows the page — a position past the
+  // not-yet-grown height gets clamped by the browser — so the target is kept
+  // in pendingScrollRef and re-applied on each late load (reapplyScroll)
+  // until the user actually interacts, which makes their position the truth.
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const saved = scrollTops.get(tab.id) ?? 0;
+    pendingScrollRef.current = saved > 0 ? saved : null;
+    el.scrollTop = saved;
+    const takeOver = () => {
+      pendingScrollRef.current = null;
+    };
+    el.addEventListener("wheel", takeOver, { passive: true });
+    el.addEventListener("pointerdown", takeOver);
+    return () => {
+      el.removeEventListener("wheel", takeOver);
+      el.removeEventListener("pointerdown", takeOver);
+    };
+  }, [tab.id]);
+
+  const reapplyScroll = () => {
+    const el = rootRef.current;
+    if (el && pendingScrollRef.current !== null) {
+      el.scrollTop = pendingScrollRef.current;
+    }
+  };
 
   const html = useMemo(() => {
     const markdown =
@@ -70,7 +107,10 @@ export function MarkdownPreview({ tab }: { tab: EditorTab }) {
       if (!abs) return;
       void fsReadBase64(tab.connId, abs)
         .then((b64) => {
-          if (!cancelled) img.src = `data:${imageMime(abs)};base64,${b64}`;
+          if (cancelled) return;
+          // The decoded image grows the page — hold the restored scroll spot.
+          img.addEventListener("load", reapplyScroll, { once: true });
+          img.src = `data:${imageMime(abs)};base64,${b64}`;
         })
         .catch(() => {}); // a missing image just stays broken
     });
@@ -110,6 +150,7 @@ export function MarkdownPreview({ tab }: { tab: EditorTab }) {
             wrap.className = "md-preview__mermaid";
             wrap.innerHTML = svg;
             (code.closest("pre") ?? code).replaceWith(wrap);
+            reapplyScroll(); // the SVG resized the page — hold the spot
           } catch {
             // leave the raw code block in place on a render error
           }
@@ -126,6 +167,8 @@ export function MarkdownPreview({ tab }: { tab: EditorTab }) {
   return (
     <div
       className="md-preview"
+      ref={rootRef}
+      onScroll={(e) => scrollTops.set(tab.id, e.currentTarget.scrollTop)}
       onClick={(e) => {
         // Never let a link navigate the app's WebView away.
         const a = (e.target as HTMLElement).closest("a");
