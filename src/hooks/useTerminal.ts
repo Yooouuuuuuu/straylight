@@ -92,7 +92,7 @@ export function useTerminal(
 ) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
-  const fitRef = useRef<FitAddon | null>(null);
+  const safeFitRef = useRef<((source: string) => void) | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -173,9 +173,39 @@ export function useTerminal(
     term.loadAddon(serializeAddon);
     term.open(host);
     termRef.current = term;
+
+    // Every fit names its trigger; the PTY resize it causes carries that name
+    // into the diag ring buffer ("resize" events). Squeezed-history forensics:
+    // a narrow resize in a saved report says WHICH path sent it (mount /
+    // observer / reparent / active / attach / font) instead of us guessing.
+    let fitSource = "open";
+    const safeFit = (source: string) => {
+      // GEOMETRY gate, not app flags. (The old chatVisible/terminalVisible
+      // checks mis-modeled F11 and the sessions pop-out — an agent fits into
+      // the focus pane with the chat COLUMN hidden — leaving terminals at a
+      // stale width, docs/dev/code-scan-2026-08.md.) A hidden host measures
+      // 0×0 and a collapsed panel leaves only its padding, so a minimum-size
+      // check reads the truth off the element in every layout: fitting under
+      // it would resize the PTY to ~1 row and ConPTY would reflow the whole
+      // buffer into it, wiping the scrollback.
+      if (host.clientWidth < 40 || host.clientHeight < 40) return;
+      // Preserve bottom-follow: a fit whose row count changes can unpin the
+      // viewport a few lines; over an always-on day those drifts accumulate
+      // into "my terminal is scrolled up". If the user was at the bottom
+      // before the fit, keep them there.
+      const buf = term.buffer.active;
+      const atBottom = buf.viewportY >= buf.baseY;
+      fitSource = source;
+      try {
+        fit.fit();
+      } catch {
+        return; /* container not measured yet */
+      }
+      if (atBottom) term.scrollToBottom();
+    };
+    safeFitRef.current = safeFit;
     // Re-themed (and refit on font changes) live when settings.json changes.
-    registerTerminal(term, { connId, refit: () => fit.fit() });
-    fitRef.current = fit;
+    registerTerminal(term, { connId, refit: () => safeFit("font") });
     if (id) registerTerminalFocus(id, () => term.focus());
     if (id)
       registerTerminalSerialize(
@@ -249,33 +279,10 @@ export function useTerminal(
     // on the DOM renderer waiting for the observer's initial callback.
     if (host.clientWidth > 0) attachWebgl();
 
-    const safeFit = () => {
-      // GEOMETRY gate, not app flags. (The old chatVisible/terminalVisible
-      // checks mis-modeled F11 and the sessions pop-out — an agent fits into
-      // the focus pane with the chat COLUMN hidden — leaving terminals at a
-      // stale width, docs/dev/code-scan-2026-08.md.) A hidden host measures
-      // 0×0 and a collapsed panel leaves only its padding, so a minimum-size
-      // check reads the truth off the element in every layout: fitting under
-      // it would resize the PTY to ~1 row and ConPTY would reflow the whole
-      // buffer into it, wiping the scrollback.
-      if (host.clientWidth < 40 || host.clientHeight < 40) return;
-      // Preserve bottom-follow: a fit whose row count changes can unpin the
-      // viewport a few lines; over an always-on day those drifts accumulate
-      // into "my terminal is scrolled up". If the user was at the bottom
-      // before the fit, keep them there.
-      const buf = term.buffer.active;
-      const atBottom = buf.viewportY >= buf.baseY;
-      try {
-        fit.fit();
-      } catch {
-        return; /* container not measured yet */
-      }
-      if (atBottom) term.scrollToBottom();
-    };
-    safeFit();
+    safeFit("mount");
     // Reparent sites (FocusView / ChatPanel) refit deterministically right
     // after moving the host — no ResizeObserver-debounce roulette.
-    if (id) registerTerminalFit(id, safeFit);
+    if (id) registerTerminalFit(id, () => safeFit("reparent"));
 
     // "Running" indicator: a shell producing output is busy (Claude Code
     // updating its status counts). Cleared after a short idle so the dot goes
@@ -366,7 +373,7 @@ export function useTerminal(
           // PTY and xterm at this pane's cols BEFORE old-width content
           // writes — then pin to the bottom (a fresh attach shows the
           // latest, and replayed content never leaves the view scrolled up).
-          safeFit();
+          safeFit("attach");
           term.write(data, () => term.scrollToBottom());
           // Seed cursor tracking from the replay — it arrives via this direct
           // write, not the live stream scanned above — so a later re-stash on
@@ -383,8 +390,34 @@ export function useTerminal(
 
     // Open the PTY sized to the current terminal (on the session lane when this
     // agent has one). Skipped in attach mode — the shell already exists.
+    let openTimer: ReturnType<typeof setTimeout> | undefined;
     if (!attachPtyId) {
-      void ptyOpen(ptyConnId ?? connId, term.cols, term.rows, command)
+      // Never a PTY born at xterm's 80×24 default: if the host isn't
+      // measurable yet (mounted mid-layout, or into a pane that hasn't
+      // settled), the shell's first output hard-wraps at 80 cols — and a TUI
+      // transcript (Claude Code) keeps those breaks in scrollback forever; no
+      // reflow can merge hard-wrapped lines. Wait for a real measurement
+      // before opening; past the cap a terminal that stays hidden opens at
+      // the default anyway (opening late beats opening wrong — and beats
+      // never opening at all).
+      const waitMeasured = () =>
+        new Promise<void>((resolve) => {
+          const deadline = performance.now() + 1500;
+          const tick = () => {
+            if (disposed) return; // torn down before opening — never resolves
+            if (host.clientWidth >= 40 && host.clientHeight >= 40) {
+              safeFit("mount");
+              resolve();
+            } else if (performance.now() > deadline) {
+              resolve();
+            } else {
+              openTimer = setTimeout(tick, 50);
+            }
+          };
+          tick();
+        });
+      void waitMeasured()
+        .then(() => ptyOpen(ptyConnId ?? connId, term.cols, term.rows, command))
         .then((openedId) => {
           if (disposed) {
             void ptyClose(openedId);
@@ -448,7 +481,7 @@ export function useTerminal(
       if (ptyId) void ptyWrite(ptyId, encoder.encode(data));
     });
     const resizeSub = term.onResize(({ cols, rows }) => {
-      if (ptyId) void ptyResize(ptyId, cols, rows);
+      if (ptyId) void ptyResize(ptyId, cols, rows, fitSource);
     });
     // OSC 0/2 titles (pwsh's cwd, claude's status, vim's file…) feed the
     // terminal's auto name; a user rename (customName) keeps winning over it.
@@ -495,7 +528,7 @@ export function useTerminal(
     let fitTimer: ReturnType<typeof setTimeout> | undefined;
     const observer = new ResizeObserver(() => {
       clearTimeout(fitTimer);
-      fitTimer = setTimeout(safeFit, 100);
+      fitTimer = setTimeout(() => safeFit("observer"), 100);
     });
     // Observe the host (it moves with the terminal), not the panel wrapper.
     observer.observe(host);
@@ -505,6 +538,7 @@ export function useTerminal(
       clearTimeout(fitTimer);
       clearTimeout(busyTimer);
       clearTimeout(webglLinger);
+      clearTimeout(openTimer);
       vis.disconnect();
       for (const t of scriptTimers) clearTimeout(t);
       if (id) useAppStore.getState().setBusy(id, false);
@@ -527,7 +561,7 @@ export function useTerminal(
       if (id) unregisterTerminalSerialize(id);
       unregisterTerminal(term);
       termRef.current = null;
-      fitRef.current = null;
+      safeFitRef.current = null;
       term.dispose();
       if (id) unregisterTerminalSlot(id, host);
       host.remove();
@@ -541,23 +575,15 @@ export function useTerminal(
 
   // A terminal that was hidden (display:none) couldn't measure itself. Refit it
   // the moment it becomes the active tab — synchronously, after React has
-  // committed display:block but *before* paint, so `fit()` measures the real
+  // committed display:block but *before* paint, so the fit measures the real
   // size (no 0x0 flicker) and the resulting onResize syncs the PTY dimensions.
+  // Through safeFit — the old raw fit() gated only on >0×0, so a transitional
+  // mid-layout width could reach the PTY, and a TUI (Claude Code) would
+  // hard-wrap its transcript at it (the squeezed-history bug); safeFit's
+  // minimum-size gate plus bottom-follow apply here like everywhere else.
   useLayoutEffect(() => {
     if (!active) return;
-    const el = containerRef.current;
-    if (
-      useAppStore.getState().terminalVisible &&
-      el &&
-      el.clientWidth > 0 &&
-      el.clientHeight > 0
-    ) {
-      try {
-        fitRef.current?.fit();
-      } catch {
-        /* not measured yet — the ResizeObserver will catch up */
-      }
-    }
+    safeFitRef.current?.("active");
     termRef.current?.focus();
   }, [active]);
 

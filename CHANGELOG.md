@@ -11,6 +11,31 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-18
+
+### Fixed
+
+- **Terminal history no longer gets squeezed narrow by a mis-timed resize.**
+  A TUI transcript (Claude Code) hard-wraps at whatever width the PTY reports,
+  and scrollback keeps those breaks forever — so a single wrong-width resize
+  permanently narrowed the history. Two paths could send one: a terminal
+  created before its pane was measurable opened the shell at xterm's 80×24
+  default, and the become-active-tab refit bypassed the minimum-size gate and
+  could push a transitional mid-layout width. A PTY now opens only after its
+  host measures a real size (with a capped fallback for terminals created
+  hidden), and every fit path runs through the same geometry gate.
+  Width changes from actually re-docking a session (chat column ↔ focus view)
+  still re-wrap — that's the terminal following its pane, and the un-reflowed
+  history is an upstream TUI limitation (anthropics/claude-code#55762).
+
+### Added
+
+- **Resize forensics in the diagnostics report.** Every PTY open logs its
+  birth size and every resize logs its size plus the UI path that triggered
+  it (mount / observer / reparent / active / attach / font) into the diag
+  ring buffer — palette → "Diagnostics: Save report" now shows exactly which
+  path sent a bad width, should one still slip through.
+
 ## [0.13.0] - 2026-08-04
 
 ### Added

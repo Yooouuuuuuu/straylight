@@ -1006,12 +1006,16 @@ export function ptyWrite(
   return invoke("pty_write", { ptyId, data: Array.from(data) });
 }
 
+/** `source` names the frontend path that triggered the fit (mount / observer /
+ *  reparent / active / attach / font) — logged into the diag ring buffer so a
+ *  bad width in a saved report is attributable. */
 export function ptyResize(
   ptyId: string,
   cols: number,
   rows: number,
+  source?: string,
 ): Promise<void> {
-  return invoke("pty_resize", { ptyId, cols, rows });
+  return invoke("pty_resize", { ptyId, cols, rows, source: source ?? null });
 }
 
 export function ptyClose(ptyId: string): Promise<void> {

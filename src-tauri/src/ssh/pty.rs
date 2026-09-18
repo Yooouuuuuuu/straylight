@@ -124,6 +124,11 @@ pub async fn pty_open(
     let pty_id = Uuid::new_v4().to_string();
     let (tx, rx) = mpsc::unbounded_channel::<PtyCommand>();
 
+    // Birth size in the diag ring: an 80×24 here is a PTY opened before its
+    // host could be measured — the prime suspect when a TUI's history shows
+    // up wrapped far narrower than its pane.
+    crate::diag::event("pty", format!("open {} at {cols}x{rows}", &pty_id[..8]));
+
     match target {
         PtyTarget::Local => open_local_pty(app, pty_id.clone(), cols, rows, command, rx)?,
         PtyTarget::Ssh(conn) => open_ssh_pty(app, conn, pty_id.clone(), cols, rows, rx).await?,
@@ -410,14 +415,26 @@ pub async fn pty_write(
         .map_err(|_| "terminal has closed".to_string())
 }
 
-/// Resize a PTY (sent on xterm.js `onResize`).
+/// Resize a PTY (sent on xterm.js `onResize`). `source` names the frontend
+/// fit path that caused it (mount / observer / reparent / active / attach /
+/// font) — with the width, the squeezed-history forensics: a narrow resize in
+/// a saved diag report says which path sent it.
 #[tauri::command]
 pub async fn pty_resize(
     state: State<'_, AppState>,
     pty_id: String,
     cols: u32,
     rows: u32,
+    source: Option<String>,
 ) -> Result<(), String> {
+    crate::diag::event(
+        "resize",
+        format!(
+            "{} -> {cols}x{rows} ({})",
+            &pty_id[..8.min(pty_id.len())],
+            source.as_deref().unwrap_or("?")
+        ),
+    );
     let ptys = state.ptys.lock().await;
     let handle = ptys
         .get(&pty_id)
