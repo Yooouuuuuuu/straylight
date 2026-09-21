@@ -11,6 +11,17 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-09-21
+
+### Fixed
+
+- **Multi-board D2 files preview now.** A `.d2` using `layers` / `scenarios`
+  / `steps` failed with "multiboard output cannot be written to stdout" —
+  d2 refuses to write board sets to stdout. They now render as **one
+  animated SVG cycling through the boards**, via a throwaway file in the
+  host's temp directory (written, read, deleted in one shot — never inside
+  your directories). Single-board files keep the pure stdin→stdout pipe.
+
 ## [0.15.0] - 2026-09-21
 
 ### Added

@@ -61,6 +61,18 @@ fn tool_spec(tool: &str) -> Option<(&'static str, &'static [&'static str])> {
     }
 }
 
+/// Multi-board fallback (d2): a file with `layers`/`scenarios`/`steps`
+/// refuses single-SVG stdout ("multiboard output cannot be written to
+/// stdout"). d2 WILL render the whole set as ONE animated SVG — but only to
+/// a real `.svg` path — so the retry goes through a throwaway file in the
+/// HOST's temp dir (never a user directory — the no-repo-pollution promise
+/// is about their trees), written, read back, and removed.
+const ANIMATE_INTERVAL_MS: &str = "1200";
+
+fn is_multiboard_refusal(out: &CmdOutput) -> bool {
+    out.code != 0 && out.stderr.contains("multiboard")
+}
+
 /// Locate `d2` on an SSH host, same shape as the jj probe: default PATH,
 /// then the official installer's default (`~/.local/bin`) and the other
 /// standard homes, then a login shell whose profile may extend PATH — the
@@ -151,6 +163,21 @@ pub async fn render_diagram(
                 quoted.join(" ")
             );
             let out = exec_ssh_stdin(&conn, &command, source.as_bytes()).await?;
+            if tool == "d2" && is_multiboard_refusal(&out) {
+                // One-shot temp-file round trip (see ANIMATE_INTERVAL_MS):
+                // mktemp's template can't carry an extension, and d2 infers
+                // the format from one — hence the `$t.svg` sibling.
+                let animate = format!(
+                    "cd {dir} && t=$(mktemp) && s=\"$t.svg\" && \
+                     LC_ALL=C {d2} --animate-interval {ms} - \"$s\"; c=$?; \
+                     [ -s \"$s\" ] && cat \"$s\"; rm -f -- \"$t\" \"$s\"; exit $c",
+                    dir = shell_quote(&dir),
+                    d2 = shell_quote(&path),
+                    ms = ANIMATE_INTERVAL_MS,
+                );
+                let out = exec_ssh_stdin(&conn, &animate, source.as_bytes()).await?;
+                return Ok(outcome(out));
+            }
             Ok(outcome(out))
         }
         Target::Local => {
@@ -159,7 +186,12 @@ pub async fn render_diagram(
             let mut argv: Vec<&str> = vec![tool.as_str()];
             argv.extend_from_slice(args);
             match run_local_stdin(&dir, &argv, source.as_bytes()).await {
-                Ok(out) => Ok(outcome(out)),
+                Ok(out) => {
+                    if tool == "d2" && is_multiboard_refusal(&out) {
+                        return render_local_animated(&tool, &dir, &source).await;
+                    }
+                    Ok(outcome(out))
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(missing()),
                 Err(e) => Err(format!("could not run {tool}: {e}")),
             }
@@ -216,6 +248,42 @@ async fn exec_ssh_stdin(
         stderr: String::from_utf8_lossy(&stderr).into_owned(),
         code: code.unwrap_or(-1),
     })
+}
+
+/// Local half of the multi-board fallback: render the animated SVG into a
+/// temp-dir throwaway, read it back, delete it.
+async fn render_local_animated(
+    tool: &str,
+    dir: &str,
+    source: &str,
+) -> Result<DiagramRender, String> {
+    let tmp = std::env::temp_dir().join(format!("stray-d2-{}.svg", uuid::Uuid::new_v4()));
+    let tmp_str = tmp.to_string_lossy().into_owned();
+    let argv: Vec<&str> = vec![
+        tool,
+        "--animate-interval",
+        ANIMATE_INTERVAL_MS,
+        "-",
+        tmp_str.as_str(),
+    ];
+    let render = match run_local_stdin(dir, &argv, source.as_bytes()).await {
+        Ok(out) if out.code == 0 => match tokio::fs::read_to_string(&tmp).await {
+            Ok(svg) => DiagramRender { svg: Some(svg), error: None, missing: false },
+            Err(e) => DiagramRender {
+                svg: None,
+                error: Some(format!("could not read the render output: {e}")),
+                missing: false,
+            },
+        },
+        Ok(out) => outcome(out),
+        Err(e) => DiagramRender {
+            svg: None,
+            error: Some(format!("could not run {tool}: {e}")),
+            missing: false,
+        },
+    };
+    let _ = tokio::fs::remove_file(&tmp).await;
+    Ok(render)
 }
 
 /// Local process with piped stdin. `NotFound` from spawn = tool not
