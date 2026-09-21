@@ -11,6 +11,21 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.14.4] - 2026-09-21
+
+### Fixed
+
+- **The squeezed + duplicated terminal history in the Sessions window.** The
+  0.14.0 diagnostics caught it in the field: in the sessions pop-out, every
+  agent switch first mounted the terminal into the hidden chat column
+  (~45 cols wide) and resized the shell to it, then re-fit to the real pane
+  6 ms later. A repaint landing in that window left the transcript
+  hard-wrapped at 1/5 width, with the mismatched redraw duplicating lines
+  above it. The chat column's ownership gate checked the F11 toggle but not
+  the window's role — the pop-out shows the focus view by role with the
+  toggle off. Fourth and last instance of this gate class (three were fixed
+  in 0.12.3); a sweep confirms no others remain.
+
 ## [0.14.3] - 2026-09-18
 
 ### Added

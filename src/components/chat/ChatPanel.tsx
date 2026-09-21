@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { hostColorForConnKey } from "../../lib/hostColors";
 import { fitTerminal, focusTerminal } from "../../lib/terminalFocus";
 import { mountTerminalIn, parkTerminal } from "../../lib/terminalSlots";
+import { isSessions } from "../../lib/windowRole";
 import {
   chatSections,
   cleanOscTitle,
@@ -74,11 +75,18 @@ export function ChatPanel() {
   const activeId = active?.id ?? null;
 
   // Reparent the active resident's live xterm into the column — unless the
-  // focus view is open, which owns it then (they'd fight over the one DOM
-  // node otherwise). Re-runs on the focusView flip so ownership hands back
-  // cleanly on exit.
+  // focus view owns it: the F11 toggle in main, or ALWAYS in the sessions
+  // pop-out window, which renders the focus view by ROLE with the focusView
+  // flag still false (the fourth `focusView`-without-`isSessions` gate —
+  // three were fixed in 0.12.3). Without the role check, every agent switch
+  // in the pop-out mounted the terminal into this column's invisible width-0
+  // host first (its content overflows at ~45 cols), resized the PTY to it,
+  // and the focus pane re-fit 6 ms later — Claude Code repaints landing in
+  // that window hard-wrapped the transcript at 45 cols (the squeezed +
+  // duplicated history bug; see the 2026-09-21 diag capture).
+  // Re-runs on the focusView flip so ownership hands back cleanly on exit.
   useEffect(() => {
-    if (focusView || !activeId || !hostRef.current) return;
+    if (focusView || isSessions || !activeId || !hostRef.current) return;
     mountTerminalIn(activeId, hostRef.current);
     // Deterministic refit after the reparent (see FocusView) — the column's
     // width applies immediately instead of via the debounced observer.
