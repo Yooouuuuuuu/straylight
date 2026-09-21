@@ -17,6 +17,7 @@ import {
   updateSettings,
 } from "./settings";
 import { closeAllTabs, closeSavedTabs } from "./tabActions";
+import { diagramForFile } from "./diagrams";
 import { keyLabelFor } from "./shortcuts";
 import { toggleFocusView } from "./focusMode";
 import { startTour } from "./tour";
@@ -76,15 +77,31 @@ async function setZoomAndPersist(factor: number | null): Promise<void> {
 function openMarkdownPreview(): void {
   const s = app();
   const active = s.tabs.find((t) => t.id === s.activeTabId);
-  if (active && (!active.kind || active.kind === "file") && /\.(md|markdown)$/i.test(active.name)) {
+  if (!active || (active.kind && active.kind !== "file")) {
+    s.pushNotice("warn", "Preview needs an open .md or diagram file.");
+    return;
+  }
+  if (/\.(md|markdown)$/i.test(active.name)) {
     s.openPreviewTab({
       connId: active.connId,
       path: active.path,
       name: `${active.name} (preview)`,
       content: active.content,
     });
+    return;
+  }
+  // One preview command for every renderable language (D2, …).
+  const diagram = diagramForFile(active.name);
+  if (diagram) {
+    s.openDiagramTab({
+      connId: active.connId,
+      path: active.path,
+      name: `${active.name} (preview)`,
+      content: active.content,
+      tool: diagram.tool,
+    });
   } else {
-    s.pushNotice("warn", "Markdown preview needs an open .md file.");
+    s.pushNotice("warn", "Preview needs an open .md or diagram file.");
   }
 }
 

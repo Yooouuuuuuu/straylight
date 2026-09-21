@@ -6,6 +6,7 @@
 
 pub mod containers;
 pub mod diag;
+pub mod diagram;
 pub mod ports;
 pub mod exec;
 pub mod forward;
@@ -224,6 +225,11 @@ pub struct AppState {
     /// Probed absolute path of `jj` per SSH connection (None = not installed).
     /// SSH exec shells are non-login, so jj in `~/.cargo/bin` is off the PATH.
     pub jj_paths: Mutex<HashMap<String, Option<String>>>,
+    /// Probed absolute paths of diagram renderers (d2, …) per SSH connection,
+    /// keyed `connId:tool`. Only FOUND paths are cached — a miss re-probes on
+    /// the next render, so installing the tool mid-session just works
+    /// (diagram.rs).
+    pub tool_paths: Mutex<HashMap<String, String>>,
     /// Cancel handle for the repo's single in-flight remote VCS op, keyed by
     /// `connId::root`. The string is a per-op token so an op only ever clears
     /// its own slot (see `vcs::run_cancellable`).
@@ -284,6 +290,7 @@ impl AppState {
             dir_watchers: Mutex::new(HashMap::new()),
             file_watchers: Mutex::new(HashMap::new()),
             jj_paths: Mutex::new(HashMap::new()),
+            tool_paths: Mutex::new(HashMap::new()),
             vcs_ops: Mutex::new(HashMap::new()),
             pending_host_keys: Mutex::new(HashMap::new()),
             pending_open: std::sync::Mutex::new(None),
@@ -687,6 +694,7 @@ pub fn run() {
             vcs::vcs_commit,
             vcs::vcs_log,
             diag::diag_dump,
+            diagram::render_diagram,
             take_open_path,
             set_conns_snapshot,
             get_conns_snapshot,

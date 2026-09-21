@@ -333,6 +333,27 @@ export function fsReadBase64(connId: string, path: string): Promise<string> {
   return invoke("fs_read_base64", { connId, path });
 }
 
+/** One diagram render (diagram.rs). When the tool ran, exactly one of
+ *  `svg`/`error` is set; `missing` = not installed on that host (the UI
+ *  shows the install hint, never an error). */
+export interface DiagramRender {
+  svg: string | null;
+  error: string | null;
+  missing: boolean;
+}
+
+/** Render diagram `source` with `tool` (backend allowlist: "d2") on the
+ *  host behind `connId`, cwd `dir` (the file's directory — relative imports
+ *  resolve against it). The live buffer goes over stdin; SVG comes back. */
+export function renderDiagram(
+  connId: string,
+  tool: string,
+  dir: string,
+  source: string,
+): Promise<DiagramRender> {
+  return invoke("render_diagram", { connId, tool, dir, source });
+}
+
 export function fsStat(connId: string, path: string): Promise<FileStat> {
   return invoke("fs_stat", { connId, path });
 }

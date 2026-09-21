@@ -94,6 +94,7 @@ export interface EditorTab {
     | "log"
     | "merge"
     | "preview"
+    | "diagram"
     | "settings"
     | "themes"
     | "pins"
@@ -110,6 +111,8 @@ export interface EditorTab {
   diffBase?: string;
   /** Whether the file exists in the base (false = added/untracked). */
   diffBaseExists?: boolean;
+  /** Renderer for a "diagram" preview tab (lib/diagrams registry: "d2"). */
+  diagramTool?: string;
   /** A diff side exceeded the 20 MB cap — both contents withheld, the tab
    *  renders a "too large to diff" card instead of the editor. */
   diffTooLarge?: boolean;
@@ -1062,6 +1065,14 @@ interface AppState {
     isBinary: boolean;
     tooLarge?: boolean;
     sizeBytes?: number;
+  }) => void;
+  /** Open (or focus) a rendered diagram preview (D2, …) for a file. */
+  openDiagramTab: (d: {
+    connId: string;
+    path: string;
+    name: string;
+    content: string;
+    tool: string;
   }) => void;
   /** Open (or focus) a rendered Markdown preview for a file. */
   openPreviewTab: (d: {
@@ -2377,6 +2388,32 @@ export const useAppStore = create<AppState>()((set, get) => ({
         diffBaseExists: d.baseExists,
         diffTooLarge: d.tooLarge,
         diffSize: d.sizeBytes,
+        groupId: s.activeGroupId,
+      };
+      return groupsPatch(s, [...s.tabs, tab], id);
+    }),
+
+  openDiagramTab: (d) =>
+    set((s) => {
+      const id = `diagram::${d.connId}::${d.path}`;
+      if (s.tabs.some((t) => t.id === id)) return groupsPatch(s, s.tabs, id);
+      const tab: EditorTab = {
+        id,
+        connId: d.connId,
+        path: d.path,
+        name: d.name,
+        content: d.content,
+        language: "plaintext",
+        isBinary: false,
+        encoding: "utf-8",
+        size: 0,
+        modified: 0,
+        truncated: false,
+        lineEnding: "LF",
+        dirty: false,
+        cursor: { line: 1, column: 1 },
+        kind: "diagram",
+        diagramTool: d.tool,
         groupId: s.activeGroupId,
       };
       return groupsPatch(s, [...s.tabs, tab], id);

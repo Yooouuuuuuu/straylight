@@ -11,8 +11,9 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 
 import { getTabContent } from "../../lib/activeEditor";
+import { DIAGRAM_LANGS } from "../../lib/diagrams";
 import { dirname } from "../../lib/format";
-import { fsReadBase64 } from "../../lib/ipc";
+import { fsReadBase64, renderDiagram } from "../../lib/ipc";
 import { useAppStore, type EditorTab } from "../../store/appStore";
 
 const IMAGE_MIME: Record<string, string> = {
@@ -163,6 +164,39 @@ export function MarkdownPreview({ tab }: { tab: EditorTab }) {
       cancelled = true;
     };
   }, [html]);
+
+  // Render ```d2 (and future diagram-language) fences through the HOST's own
+  // renderer — the same one-shot stdin→SVG engine as the diagram preview tab
+  // (diagram.rs). A failed or missing render just leaves the code block as
+  // code, exactly like a mermaid error.
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    let cancelled = false;
+    const dir = dirname(srcPath);
+    for (const lang of DIAGRAM_LANGS) {
+      const blocks = Array.from(
+        el.querySelectorAll<HTMLElement>(`code.language-${lang.fence}`),
+      );
+      for (const code of blocks) {
+        void renderDiagram(tab.connId, lang.tool, dir, code.textContent ?? "")
+          .then((r) => {
+            if (cancelled || r.svg === null) return;
+            const wrap = document.createElement("div");
+            wrap.className = "md-preview__mermaid";
+            wrap.innerHTML = DOMPurify.sanitize(r.svg, {
+              USE_PROFILES: { svg: true, svgFilters: true },
+            });
+            (code.closest("pre") ?? code).replaceWith(wrap);
+            reapplyScroll(); // the SVG resized the page — hold the spot
+          })
+          .catch(() => {});
+      }
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [html, srcPath, tab.connId]);
 
   return (
     <div

@@ -48,6 +48,7 @@ const EXTENSION_LANGUAGES: Record<string, string> = {
   bat: "bat",
   cmd: "bat",
   sql: "sql",
+  d2: "d2",
   yaml: "yaml",
   yml: "yaml",
   toml: "ini",

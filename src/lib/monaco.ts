@@ -13,6 +13,7 @@ import CssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
 import HtmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
 import TsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 
+import { registerDiagramLanguages } from "./diagrams";
 import { openExternal } from "./ipc";
 import { bindMonaco } from "./monacoRef";
 import { buildMonacoTheme } from "./themes";
@@ -91,6 +92,9 @@ export function setupMonaco(): typeof monaco {
   // built from settings.json. Editors must NOT pass `theme:` at create time —
   // that would reset the global theme every time one mounts.
   monaco.editor.setTheme(FALLBACK_THEME);
+  // Diagram languages (D2, …): syntax highlighting only — semantics stay
+  // with the host's real compiler (lib/diagrams).
+  registerDiagramLanguages(monaco);
   initialized = true;
   return monaco;
 }

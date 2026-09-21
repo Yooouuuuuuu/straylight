@@ -32,6 +32,8 @@ import { MonacoWrapper } from "../editor/MonacoWrapper";
 import { MonacoDiffWrapper } from "../editor/MonacoDiffWrapper";
 import { MergeEditor } from "../editor/MergeEditor";
 import { MarkdownPreview } from "../editor/MarkdownPreview";
+import { DiagramPreview } from "../editor/DiagramPreview";
+import { diagramForFile } from "../../lib/diagrams";
 import { VcsLogTabHead, VcsLogView } from "../vcs/VcsLogView";
 import { Tip } from "../Tooltip";
 
@@ -97,6 +99,7 @@ const MD_RE = /\.(md|markdown)$/i;
 
 function EditorBreadcrumbs({ tab }: { tab: EditorTab }) {
   const openPreviewTab = useAppStore((s) => s.openPreviewTab);
+  const openDiagramTab = useAppStore((s) => s.openDiagramTab);
   const { connId, path } = tab;
   const pins = useAppStore((s) => {
     if (connId === s.localConnId) return s.pinnedFolders;
@@ -133,6 +136,8 @@ function EditorBreadcrumbs({ tab }: { tab: EditorTab }) {
 
   const canPreview =
     (!tab.kind || tab.kind === "file") && MD_RE.test(tab.name);
+  const diagram =
+    !tab.kind || tab.kind === "file" ? diagramForFile(tab.name) : null;
 
   return (
     <div className="editor-crumbs">
@@ -181,6 +186,24 @@ function EditorBreadcrumbs({ tab }: { tab: EditorTab }) {
                 path: tab.path,
                 name: `${tab.name} (preview)`,
                 content: tab.content,
+              })
+            }
+          >
+            ¶ Preview
+          </button>
+        </Tip>
+      )}
+      {diagram && (
+        <Tip label={`${diagram.label} preview (Ctrl+Shift+V) — renders with the host's ${diagram.tool}`}>
+          <button
+            className="editor-crumbs__action"
+            onClick={() =>
+              openDiagramTab({
+                connId: tab.connId,
+                path: tab.path,
+                name: `${tab.name} (preview)`,
+                content: tab.content,
+                tool: diagram.tool,
               })
             }
           >
@@ -361,6 +384,8 @@ function GroupPane({ gid, splitDrop }: { gid: number; splitDrop: boolean }) {
             <MergeEditor key={active.id} tab={active} />
           ) : active?.kind === "preview" ? (
             <MarkdownPreview key={active.id} tab={active} />
+          ) : active?.kind === "diagram" ? (
+            <DiagramPreview key={active.id} tab={active} />
           ) : active?.kind === "log" ? (
             <div className="vcs-logtab">
               <VcsLogTabHead

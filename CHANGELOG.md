@@ -11,6 +11,24 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-21
+
+### Added
+
+- **D2 diagram preview.** Open a `.d2` file and hit ¶ Preview (or
+  Ctrl+Shift+V): the diagram renders beside the source, live from the unsaved
+  buffer, updating on a typing pause. Rendering runs the **host's own `d2`
+  binary** in one-shot stdin→SVG calls — nothing bundled (D2's WASM alone
+  outweighs this whole app several times over), nothing resident, and a
+  remote file renders on its remote over the same channel git uses. Any
+  standard install location is found automatically (anything your login
+  shell's PATH reaches works); a host without d2 shows an install card, not
+  an error. Compile errors appear over the last good render, with d2's own
+  line numbers.
+- **` ```d2 ` fences in the Markdown preview** render through the same
+  engine, next to the existing mermaid support.
+- **`.d2` syntax highlighting** in the editor.
+
 ## [0.14.5] - 2026-09-21
 
 ### Fixed

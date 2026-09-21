@@ -10,6 +10,7 @@ import { toggleFocusView } from "../lib/focusMode";
 import { closeDevtools } from "../lib/ipc";
 import { chatSections, connectedChatHosts } from "../store/appStore";
 import { saveActiveFile } from "../lib/saveFile";
+import { diagramForFile } from "../lib/diagrams";
 import { matchShortcut } from "../lib/shortcuts";
 import { cycleTerminalPanelTab } from "../lib/terminalTabs";
 import { adjustTerminalFontSize } from "../lib/themes";
@@ -234,19 +235,29 @@ export function useKeyboard() {
           break;
         case "markdownPreview": {
           const active = store.tabs.find((t) => t.id === store.activeTabId);
-          if (
-            !inTerminal &&
-            active &&
-            (!active.kind || active.kind === "file") &&
-            /\.(md|markdown)$/i.test(active.name)
-          ) {
-            store.openPreviewTab({
-              connId: active.connId,
-              path: active.path,
-              name: `${active.name} (preview)`,
-              content: active.content,
-            });
-            event.preventDefault();
+          if (!inTerminal && active && (!active.kind || active.kind === "file")) {
+            if (/\.(md|markdown)$/i.test(active.name)) {
+              store.openPreviewTab({
+                connId: active.connId,
+                path: active.path,
+                name: `${active.name} (preview)`,
+                content: active.content,
+              });
+              event.preventDefault();
+            } else {
+              // One preview key for every renderable language (D2, …).
+              const diagram = diagramForFile(active.name);
+              if (diagram) {
+                store.openDiagramTab({
+                  connId: active.connId,
+                  path: active.path,
+                  name: `${active.name} (preview)`,
+                  content: active.content,
+                  tool: diagram.tool,
+                });
+                event.preventDefault();
+              }
+            }
           }
           break;
         }

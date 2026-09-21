@@ -1678,6 +1678,72 @@
   background: var(--bg-primary);
 }
 
+/* Diagram preview (D2, …): SVG rendered by the HOST's own binary
+   (diagram.rs). Natural size, centered; big diagrams scroll, never squash. */
+.diagram-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: auto;
+  background: var(--bg-primary);
+}
+
+.diagram-preview__body {
+  padding: var(--space-6);
+  min-width: fit-content;
+}
+
+.diagram-preview__body svg {
+  display: block;
+  margin: 0 auto;
+}
+
+/* Compile-error strip: pinned over the last GOOD render, which stays up. */
+.diagram-preview__error {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-secondary);
+  color: var(--warning);
+  border-bottom: 1px solid var(--border);
+  font-family: "Fira Code", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+/* Missing-tool / empty-state card. */
+.diagram-preview__card {
+  max-width: 560px;
+  margin: 48px auto;
+  padding: var(--space-6);
+  color: var(--fg-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.diagram-preview__cardtitle {
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+.diagram-preview__card pre {
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  overflow-x: auto;
+  font-family: "Fira Code", monospace;
+  font-size: 12px;
+}
+
+.diagram-preview__card code {
+  font-family: "Fira Code", monospace;
+}
+
 .md-preview__body {
   max-width: 860px;
   margin: 0 auto;

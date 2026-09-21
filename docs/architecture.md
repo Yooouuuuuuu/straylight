@@ -68,6 +68,7 @@ sizes persist. Every UI color comes from CSS custom properties fed by
 | `ssh/sftp.rs` | SFTP as a `FileTransport`. One SFTP subsystem channel per connection, serialized by a mutex. |
 | `ssh/pty.rs` | PTY shells: an SSH session channel per remote terminal, ConPTY via portable-pty locally. Output streams as `pty-output` events; input/resize/close come back via `pty_*` commands. |
 | `exec.rs` | **The host command-runner** (`run_command(state, connId, cwd, argv)`): SSH exec channel or local process, argv-quoted (`shell_quote`), no shell interpolation. Probes and caches an absolute `jj` path per SSH connection. Shared by vcs, save-commit, containers, ports, find/search. |
+| `diagram.rs` | Diagram-language rendering (D2): pipes a source buffer into the HOST's own renderer binary (`d2 - -`, one-shot, stdin→SVG) — the git/jj doctrine applied to diagram languages. Per-host tool probe (jj-style, cached; misses re-probe), allowlisted argv, rides the data lane. |
 | `vcs.rs` | All `vcs_*` commands + the git/jj parsers. See [version-control.md](version-control.md). |
 | `watch.rs` | `notify` watchers: recursive per-repo (`vcs-fs-change`, 300 ms debounce) and per-file (`file-fs-change`, parent-dir watch, **refcounted per owner** — settings live-reload and an open tab can share one file). |
 | `wsl.rs` | WSL distro discovery + one-time `sshd` provisioning inside a distro (consent-gated; key carried out base64-encoded), then attached as a localhost SSH host. See [wsl-connection.md](wsl-connection.md). |
