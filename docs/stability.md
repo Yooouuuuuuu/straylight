@@ -36,6 +36,15 @@ anything below are breaking changes.
     OS Downloads folder).
   - `terminalHostColor` — `true` — each terminal's cursor + selection take
     its host's identity color (the section slots) instead of the scheme's.
+  - `terminalScrollback` — lines kept per terminal (number 100–100000,
+    default 5000) — the main RAM knob for many-terminal sessions; applied
+    live to open terminals.
+  - `sessionConnections` — `{ "max": 10 }` (0–30) — cap on dedicated SSH
+    connections for agent sessions (one lane per agent); 0 = always share
+    the main connection.
+  - `transfers` — `{ "default": "background", "backgroundLimitMBps": 10 }` —
+    which mode a transfer starts in, and Background's bandwidth cap
+    (0 = uncapped).
   Live theme sections at the bottom (a quick-theme pick copies a library
   entry over them — pure data):
   - `colors` / `editor` — the full UI and Monaco color token sections. Key
@@ -72,6 +81,9 @@ anything below are breaking changes.
 - **Editor behavior.** The editor is Monaco — VS Code's editor component —
   so indentation, multi-cursor, word boundaries, and find behavior are that
   component's, stable by construction.
+- **In-app updates.** The quiet launch check and ⚙ → Check for updates flow
+  against GitHub Releases stay; every update package is signature-verified
+  against the key baked into the app before it installs.
 
 ## Internal (may change between any versions)
 
@@ -92,4 +104,3 @@ anything below are breaking changes.
 - **No CLI flags** beyond launching the executable.
 - **No LSP, no DAP** — language intelligence may arrive post-1.0 (LSP, opt-in,
   running on the host); debugging stays in the terminal.
-- **No auto-update** until installers are distributed.

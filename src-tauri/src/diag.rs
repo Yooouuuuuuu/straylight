@@ -3,7 +3,9 @@
 //! Both defects in that incident were only visible from the *server's* journal —
 //! which is backwards. This module keeps a small in-memory ring buffer of the
 //! events that matter for connection forensics (channel opens/closes/leaks,
-//! probe outcomes, reconnect attempts, recycles, CPU alarms), dumpable to a file
+//! probe outcomes, reconnect attempts, recycles, CPU alarms — and, since
+//! 0.14.0, terminal geometry: PTY birth sizes and every resize with the UI
+//! path that sent it, the squeezed-history forensics), dumpable to a file
 //! on demand, plus a CPU self-monitor that detects a pegged core and *reports*
 //! it — it never acts on connections (a false positive during a heavy transfer
 //! must not kill healthy sessions).
@@ -46,7 +48,9 @@ pub fn init(app: AppHandle) {
 }
 
 /// Record one event: `category` is a short slug ("channel", "probe",
-/// "reconnect", "recycle", "cpu"), `detail` the human line.
+/// "reconnect", "recycle", "cpu", "pty" — terminal birth size, "resize" —
+/// PTY resizes with the frontend fit path that sent them), `detail` the
+/// human line.
 pub fn event(category: &str, detail: impl AsRef<str>) {
     let buf = EVENTS.get_or_init(|| Mutex::new(VecDeque::with_capacity(CAPACITY)));
     let mut buf = buf.lock_safe();

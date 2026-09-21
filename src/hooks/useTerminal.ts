@@ -189,6 +189,14 @@ export function useTerminal(
       // it would resize the PTY to ~1 row and ConPTY would reflow the whole
       // buffer into it, wiping the scrollback.
       if (host.clientWidth < 40 || host.clientHeight < 40) return;
+      // Attach the GPU renderer BEFORE the first visible paint: every show
+      // path (mount, active flip, reparent) runs through here synchronously,
+      // while the IntersectionObserver's async callback lands a frame too
+      // late — a re-shown terminal painted its first frames on the fallback
+      // DOM renderer, the "font flashes bigger then snaps" blink. No-op when
+      // already attached; the observer still owns detach-on-hide.
+      clearTimeout(webglLinger);
+      attachWebgl();
       // Preserve bottom-follow: a fit whose row count changes can unpin the
       // viewport a few lines; over an always-on day those drifts accumulate
       // into "my terminal is scrolled up". If the user was at the bottom
@@ -202,6 +210,21 @@ export function useTerminal(
         return; /* container not measured yet */
       }
       if (atBottom) term.scrollToBottom();
+      // Re-align the DOM scrollbar with the buffer's real position. While
+      // the terminal sat display:none'd the browser clamped its scroller to
+      // scrollTop 0 ("top"); xterm's internal position survived, so the view
+      // LOOKS right — until the first wheel tick re-syncs against the stale
+      // 0 and jumps to the top of scrollback, once per re-show (the
+      // display:none flavor of xterm.js#6172). scrollToBottom above can't
+      // help: already-at-bottom internally is a no-op that never touches the
+      // DOM element.
+      const vp = host.querySelector<HTMLElement>(".xterm-viewport");
+      if (vp) {
+        const b = term.buffer.active;
+        vp.scrollTop = atBottom
+          ? vp.scrollHeight
+          : (vp.scrollHeight * b.viewportY) / (b.length || 1);
+      }
     };
     safeFitRef.current = safeFit;
     // Re-themed (and refit on font changes) live when settings.json changes.

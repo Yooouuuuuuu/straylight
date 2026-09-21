@@ -11,6 +11,24 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.14.5] - 2026-09-21
+
+### Fixed
+
+Two glitches that 0.14.4's quiet switching uncovered (the old resize churn
+had been masking both):
+
+- **First scroll after returning to a terminal no longer jumps to the top.**
+  A hidden terminal's scrollbar element gets clamped to "top" by the browser
+  while its real position survives — the view looked right, but the first
+  wheel tick re-synced against the stale scrollbar and leapt to the start of
+  scrollback, once per re-show. The scrollbar is now re-aligned with the real
+  position at the moment a terminal is shown.
+- **No more one-frame "font grows then snaps back" flash on switch-back.**
+  A terminal hidden over 5 s releases its GPU renderer; on return, its first
+  frames drew on the fallback renderer before the GPU one re-attached. The
+  re-attach now happens before the first visible paint.
+
 ## [0.14.4] - 2026-09-21
 
 ### Fixed
