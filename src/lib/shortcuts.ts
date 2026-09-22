@@ -13,6 +13,7 @@ export type ShortcutAction =
   | "searchInFiles"
   | "appRefresh"
   | "markdownPreview"
+  | "diagramPreview"
   | "commandPalette"
   | "zoomIn"
   | "zoomOut"
@@ -68,6 +69,10 @@ export const SHORTCUTS: Shortcut[] = [
   // Not in the terminal passthrough list — a shell keeps its own Ctrl+F.
   { id: "editor.find", action: "findInFile", key: "f", ctrl: true, description: "Find in the current file", label: "Ctrl+F" },
   { id: "file.markdownPreview", action: "markdownPreview", key: "v", ctrl: true, shift: true, description: "Open the Markdown preview for the current file", label: "Ctrl+Shift+V" },
+  // The dedicated diagram-preview chord (Ctrl+Shift+V also works — one
+  // preview key for every renderable file). Alt+D is the PlantUML/VS Code
+  // ecosystem's muscle memory for "preview diagram".
+  { id: "file.diagramPreview", action: "diagramPreview", key: "d", alt: true, description: "Open the diagram preview for the current file", label: "Alt+D" },
   { id: "app.commandPalette", action: "commandPalette", key: "p", ctrl: true, shift: true, description: "Show all commands", label: "Ctrl+Shift+P" },
   // Replaces the WebView page reload: refresh explorer + repos + open files.
   { id: "app.refreshAll", action: "appRefresh", key: "F5", description: "Refresh everything (explorer, repos, open files)", label: "F5" },

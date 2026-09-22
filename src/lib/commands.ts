@@ -5,9 +5,12 @@
  *  Commands deliberately NOT here: Monaco's own editor commands (Ctrl+D,
  *  Ctrl+/, Ctrl+G… — the editor is VS Code's, those stay its), and per-repo VCS
  *  operations (the repo card is the better surface). */
+import { getTabContent } from "./activeEditor";
 import { refreshApp } from "./appRefresh";
+import { applyDraftContent } from "./editorModels";
 import { copyPath } from "./fileOps";
-import { diagDump, sshReconnect } from "./ipc";
+import { dirname } from "./format";
+import { diagDump, formatDiagram, sshReconnect } from "./ipc";
 import { openFileByPath } from "./openFile";
 import { saveActiveFile } from "./saveFile";
 import {
@@ -105,6 +108,38 @@ function openMarkdownPreview(): void {
   }
 }
 
+/** Format the active diagram file with the host's own formatter (`d2 fmt`),
+ *  applied as ONE undoable edit — Ctrl+Z walks straight back. Never a save. */
+function formatDiagramFile(): void {
+  const s = app();
+  const active = s.tabs.find((t) => t.id === s.activeTabId);
+  const diagram =
+    active && (!active.kind || active.kind === "file")
+      ? diagramForFile(active.name)
+      : null;
+  if (!active || !diagram) {
+    s.pushNotice("warn", "Format needs an open diagram file (.d2).");
+    return;
+  }
+  const content = getTabContent(active.id) ?? active.content;
+  void formatDiagram(active.connId, diagram.tool, dirname(active.path), content)
+    .then((r) => {
+      if (r.missing) {
+        s.pushNotice(
+          "warn",
+          `${diagram.tool} isn't installed on this host — the formatter is the tool's.`,
+        );
+      } else if (r.error) {
+        s.pushNotice("error", `Format failed: ${r.error.split("\n")[0]}`);
+      } else if (r.formatted !== null && r.formatted !== content) {
+        if (!applyDraftContent(active.id, r.formatted)) {
+          s.pushNotice("warn", "Open the file in an editor first.");
+        }
+      }
+    })
+    .catch((e) => s.pushNotice("error", `Format failed: ${String(e)}`));
+}
+
 /** Every command, in display order. Computed fresh so `run` reads live state. */
 export function allCommands(): Command[] {
   return [
@@ -174,6 +209,10 @@ export function allCommands(): Command[] {
     },
     { id: "explorer.refreshTrees", title: "Explorer: Refresh Trees", run: () => { app().refreshLocal(); app().refreshRemote(); app().refreshWsl(); } },
     { id: "file.markdownPreview", title: "File: Markdown Preview", run: openMarkdownPreview },
+    // Same open logic — the dedicated id exists for the Alt+D binding and a
+    // findable palette name.
+    { id: "file.diagramPreview", title: "File: Preview Diagram", run: openMarkdownPreview },
+    { id: "file.formatDiagram", title: "File: Format D2 File", run: formatDiagramFile },
     { id: "file.quickOpen", title: "File: Quick Open", run: () => app().setFinderOpen(true) },
     { id: "file.save", title: "File: Save", run: () => saveActiveFile() },
     {

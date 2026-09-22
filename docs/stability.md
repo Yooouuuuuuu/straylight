@@ -64,6 +64,11 @@ anything below are breaking changes.
 - **VCS semantics.** Straylight runs **your real `git` / `jj` on the host that
   owns the repo** — hooks, config, identity, signing behave exactly as in your
   terminal. There is no re-implementation to drift.
+- **Diagram rendering runs your own tools.** The D2 preview compiles with
+  the **host's own `d2`** (found wherever your login shell would find it) —
+  nothing bundled, no render servers, and the source never leaves the host
+  that owns the file. Copy-image / PNG export rasterize inside the app.
+  ([diagrams.md](diagrams.md))
 - **`~/.ssh/config` reading.** Standard OpenSSH host definitions (Host,
   HostName, User, Port, IdentityFile, ProxyJump first hop).
 - **Search-in-files is literal** (fixed-string, case-sensitive), not regex.

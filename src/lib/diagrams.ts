@@ -42,6 +42,40 @@ export function diagramForTool(tool: string | undefined): DiagramLang | null {
   return DIAGRAM_LANGS.find((d) => d.tool === tool) ?? null;
 }
 
+/** Rasterize an SVG string to a PNG blob at `scale`× its intrinsic size —
+ *  fully client-side (d2 embeds its fonts as data URIs inside the SVG, so
+ *  the canvas draw is faithful and untainted). Used for Copy image and
+ *  Export PNG; sidesteps d2's own PNG export, which needs a headless
+ *  Chromium on the host. */
+export async function svgToPngBlob(svg: string, scale = 2): Promise<Blob> {
+  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  try {
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("the SVG could not be decoded"));
+      img.src = url;
+    });
+    const w = img.naturalWidth;
+    const h = img.naturalHeight;
+    if (!w || !h) throw new Error("the SVG has no intrinsic size");
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(w * scale);
+    canvas.height = Math.round(h * scale);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("no 2d canvas");
+    ctx.scale(scale, scale);
+    ctx.drawImage(img, 0, 0);
+    const blob = await new Promise<Blob | null>((r) =>
+      canvas.toBlob(r, "image/png"),
+    );
+    if (!blob) throw new Error("PNG encoding failed");
+    return blob;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 /** D2 syntax highlighting (Monarch). Highlighting only — semantics stay with
  *  the host's real compiler, matching the no-LSP stance. */
 const D2_MONARCH: monaco.languages.IMonarchLanguage = {

@@ -33,6 +33,7 @@ published — maintainer material, not user docs.)
 | [wsl-connection.md](wsl-connection.md) | Treating a WSL distro as a localhost SSH host (provision `sshd`, skip 9P), and the 1 + 3 WSL model. |
 | [connections.md](connections.md) | The four SSH lane kinds per host (main / data / session / transfer), the doubt-is-not-death supervision doctrine, and the pipelined transfer engine. |
 | [transfers.md](transfers.md) | Cross-connection file copies: the docked two-pane tool and the streaming, cancel-safe engine. |
+| [diagrams.md](diagrams.md) | The D2 preview: rendered by the **host's own binary** over one-shot stdin→SVG (the git/jj doctrine applied to diagram languages), pan/zoom canvas, client-side exports. |
 
 ### Working material
 
@@ -45,6 +46,17 @@ notes. Not design docs; not shipped.
 
 Brief, dated notes on the load-bearing decisions and the places the approach
 **changed** — the archaeology the design docs deliberately omit. Newest first.
+
+- **2026-09 · Diagram languages, host-rendered** ([diagrams.md](diagrams.md),
+  0.15–0.16) — D2 preview added on the git/jj doctrine: the **host's own
+  `d2` binary** renders over one-shot stdin→SVG pipes, probed per connection
+  like jj. Rejected along the way: bundling D2's official WASM (~57 MB
+  unpacked vs the ~8.5 MB installer — the feature landed at ~7 KB instead),
+  render servers and playground-URL sharing (source must never route through
+  a third-party domain), and per-app theme/layout settings (D2 reads them
+  from the file's own `vars: d2-config` — mirror the tool). PNG export and
+  Copy-image rasterize **client-side**, sidestepping d2's headless-Chromium
+  PNG path entirely.
 
 - **2026-07 · The connection redesign** ([connections.md](connections.md),
   0.9.15+) — the original model was ONE SSH connection per host, multiplexing

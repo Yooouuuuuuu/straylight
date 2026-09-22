@@ -335,23 +335,55 @@ export function fsReadBase64(connId: string, path: string): Promise<string> {
 
 /** One diagram render (diagram.rs). When the tool ran, exactly one of
  *  `svg`/`error` is set; `missing` = not installed on that host (the UI
- *  shows the install hint, never an error). */
+ *  shows the install hint, never an error). `animated` = the SVG is the
+ *  multi-board animated form (offer the root toggle; export stills from
+ *  the root board). */
 export interface DiagramRender {
   svg: string | null;
   error: string | null;
   missing: boolean;
+  animated: boolean;
 }
 
 /** Render diagram `source` with `tool` (backend allowlist: "d2") on the
  *  host behind `connId`, cwd `dir` (the file's directory — relative imports
- *  resolve against it). The live buffer goes over stdin; SVG comes back. */
+ *  resolve against it). The live buffer goes over stdin; SVG comes back.
+ *  `rootOnly` renders just a multi-board file's root board. */
 export function renderDiagram(
   connId: string,
   tool: string,
   dir: string,
   source: string,
+  rootOnly = false,
 ): Promise<DiagramRender> {
-  return invoke("render_diagram", { connId, tool, dir, source });
+  return invoke("render_diagram", { connId, tool, dir, source, rootOnly });
+}
+
+/** `d2 fmt` result — same shape rules as a render. */
+export interface DiagramFormat {
+  formatted: string | null;
+  error: string | null;
+  missing: boolean;
+}
+
+/** Canonically format diagram `source` with the host's own formatter. */
+export function formatDiagram(
+  connId: string,
+  tool: string,
+  dir: string,
+  source: string,
+): Promise<DiagramFormat> {
+  return invoke("format_diagram", { connId, tool, dir, source });
+}
+
+/** Write raw bytes (base64) to `path` — binary exports (diagram PNGs).
+ *  Unconditional overwrite, like the CLI whose artifact it is. */
+export function fsWriteBase64(
+  connId: string,
+  path: string,
+  data: string,
+): Promise<void> {
+  return invoke("fs_write_base64", { connId, path, data });
 }
 
 export function fsStat(connId: string, path: string): Promise<FileStat> {

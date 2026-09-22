@@ -11,6 +11,29 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-09-22
+
+### Added
+
+- **The diagram preview grew up.**
+  - **Pan & zoom.** The wheel zooms toward the cursor, dragging pans,
+    double-click (or the Fit button) fits the window, and the toolbar shows
+    the zoom level. The view persists per tab.
+  - **Copy image.** Toolbar button or right-click → the diagram lands on the
+    clipboard as a PNG, rasterized inside the app — paste it straight into
+    chat, issues, or docs.
+  - **Export SVG / PNG.** Saved beside the source (`foo.d2` → `foo.svg` /
+    `foo.png`), local or remote. PNG rasterizes client-side, so hosts never
+    need d2's headless-browser PNG stack.
+  - **Root-board toggle** for multi-board files — flip between the animated
+    set and just the root board.
+  - **Clickable errors.** The compile-error strip's `line:col` locations
+    jump the editor to the exact spot.
+- **Alt+D opens the diagram preview** — the diagram-tool muscle memory;
+  Ctrl+Shift+V keeps working for Markdown and diagrams alike.
+- **File: Format D2 File** — runs the host's own `d2 fmt` and applies the
+  result as one undoable edit (Ctrl+Z walks straight back; never a save).
+
 ## [0.15.1] - 2026-09-21
 
 ### Fixed

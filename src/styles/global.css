@@ -1679,30 +1679,83 @@
 }
 
 /* Diagram preview (D2, …): SVG rendered by the HOST's own binary
-   (diagram.rs). Natural size, centered; big diagrams scroll, never squash. */
+   (diagram.rs). Toolbar + pan/zoom canvas (wheel zooms toward the cursor,
+   drag pans, double-click fits). */
 .diagram-preview {
   position: absolute;
   inset: 0;
   z-index: 1;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--bg-primary);
 }
 
-.diagram-preview__body {
-  padding: var(--space-6);
-  min-width: fit-content;
+.diagram-preview__toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex: none;
 }
 
-.diagram-preview__body svg {
-  display: block;
-  margin: 0 auto;
+.diagram-preview__tool {
+  font-size: 11px;
+  padding: 2px 8px;
+  color: var(--fg-primary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
 }
 
-/* Compile-error strip: pinned over the last GOOD render, which stays up. */
-.diagram-preview__error {
-  position: sticky;
+.diagram-preview__tool:hover {
+  background: var(--bg-tertiary);
+}
+
+.diagram-preview__tool--on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.diagram-preview__spacer {
+  flex: 1;
+}
+
+.diagram-preview__busy {
+  opacity: 0.6;
+  font-size: 12px;
+}
+
+.diagram-preview__canvas {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+
+.diagram-preview__canvas:active {
+  cursor: grabbing;
+}
+
+.diagram-preview__stage {
+  position: absolute;
   top: 0;
-  z-index: 1;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.diagram-preview__stage svg {
+  display: block;
+}
+
+/* Compile-error strip: sits over the last GOOD render, which stays up. */
+.diagram-preview__error {
+  flex: none;
   padding: var(--space-2) var(--space-4);
   background: var(--bg-secondary);
   color: var(--warning);
@@ -1711,6 +1764,17 @@
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+/* A clickable `-:line:col` inside the error strip — jumps the editor. */
+.diagram-preview__errloc {
+  color: var(--accent);
+  text-decoration: underline;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
 }
 
 /* Missing-tool / empty-state card. */

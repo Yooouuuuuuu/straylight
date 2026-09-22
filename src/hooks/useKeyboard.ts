@@ -261,6 +261,23 @@ export function useKeyboard() {
           }
           break;
         }
+        case "diagramPreview": {
+          const active = store.tabs.find((t) => t.id === store.activeTabId);
+          if (!inTerminal && active && (!active.kind || active.kind === "file")) {
+            const diagram = diagramForFile(active.name);
+            if (diagram) {
+              store.openDiagramTab({
+                connId: active.connId,
+                path: active.path,
+                name: `${active.name} (preview)`,
+                content: active.content,
+                tool: diagram.tool,
+              });
+              event.preventDefault();
+            }
+          }
+          break;
+        }
         case "nextTab":
           if (store.tabs.length > 1) {
             store.cycleTab(1);

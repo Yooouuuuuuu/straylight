@@ -25,15 +25,18 @@ pub struct DiagramRender {
     pub svg: Option<String>,
     pub error: Option<String>,
     pub missing: bool,
+    /// The SVG is the multi-board ANIMATED form (frontend: offer the
+    /// root-only toggle, and rasterize exports from the root board).
+    pub animated: bool,
 }
 
 fn missing() -> DiagramRender {
-    DiagramRender { svg: None, error: None, missing: true }
+    DiagramRender { svg: None, error: None, missing: true, animated: false }
 }
 
-fn outcome(out: CmdOutput) -> DiagramRender {
+fn outcome(out: CmdOutput, animated: bool) -> DiagramRender {
     if out.code == 0 && !out.stdout.is_empty() {
-        DiagramRender { svg: Some(out.stdout), error: None, missing: false }
+        DiagramRender { svg: Some(out.stdout), error: None, missing: false, animated }
     } else {
         let err = out.stderr.trim();
         DiagramRender {
@@ -44,6 +47,7 @@ fn outcome(out: CmdOutput) -> DiagramRender {
                 err.to_string()
             }),
             missing: false,
+            animated: false,
         }
     }
 }
@@ -98,10 +102,73 @@ fn pick_tool_path(stdout: &str, tool: &str) -> Option<String> {
         .map(String::from)
 }
 
+/// Where a tool call runs: an SSH host with the probed binary, or locally
+/// (where PATH does the probing at spawn time).
+enum ToolTarget {
+    Ssh { conn: Arc<Connection>, path: String },
+    Local,
+}
+
+/// Resolve the host + binary for `conn_id`. `Ok(None)` = SSH host without
+/// the tool (the friendly missing state). Probes ride the data lane; a found
+/// path is cached, a MISS deliberately isn't — installing the tool
+/// mid-session is picked up by the very next call.
+async fn resolve_tool(
+    state: &AppState,
+    conn_id: &str,
+    tool: &str,
+    probe: &str,
+) -> Result<Option<ToolTarget>, String> {
+    let conn = {
+        let sessions = state.sessions.lock().await;
+        match sessions.get(conn_id) {
+            Some(Session::Ssh(conn)) => conn.clone(),
+            Some(Session::Local) => return Ok(Some(ToolTarget::Local)),
+            None => return Err(format!("session '{conn_id}' is not open")),
+        }
+    };
+    // Chunky SVG output must not congest the interactive terminals.
+    let conn = match state.app.get() {
+        Some(app) => conn.data_lane(app).await,
+        None => conn,
+    };
+    let key = format!("{conn_id}:{tool}");
+    let cached = state.tool_paths.lock().await.get(&key).cloned();
+    let path = match cached {
+        Some(p) => Some(p),
+        None => {
+            let out = exec_ssh(&conn, probe).await?;
+            let found = pick_tool_path(&out.stdout, tool);
+            if let Some(ref p) = found {
+                state.tool_paths.lock().await.insert(key, p.clone());
+            }
+            found
+        }
+    };
+    Ok(path.map(|path| ToolTarget::Ssh { conn, path }))
+}
+
+/// One SSH tool invocation: cd into `dir`, run `bin` + `args` with `input`
+/// on stdin.
+async fn run_ssh_tool(
+    conn: &Connection,
+    dir: &str,
+    bin: &str,
+    args: &[&str],
+    input: &str,
+) -> Result<CmdOutput, String> {
+    let mut argv: Vec<&str> = vec![bin];
+    argv.extend_from_slice(args);
+    let quoted: Vec<String> = argv.iter().map(|a| shell_quote(a)).collect();
+    let command = format!("cd {} && LC_ALL=C {}", shell_quote(dir), quoted.join(" "));
+    exec_ssh_stdin(conn, &command, input.as_bytes()).await
+}
+
 /// Render `source` with `tool` on the host behind `conn_id`, cwd `dir` (the
 /// source file's directory — imports resolve against it). The live editor
 /// buffer streams in over stdin: no temp files on the host, no repo
-/// pollution, unsaved edits render.
+/// pollution, unsaved edits render. `root_only` renders just the root board
+/// of a multi-board file (`--target ''`) instead of the animated set.
 #[tauri::command]
 pub async fn render_diagram(
     state: State<'_, AppState>,
@@ -109,60 +176,21 @@ pub async fn render_diagram(
     tool: String,
     dir: String,
     source: String,
+    root_only: bool,
 ) -> Result<DiagramRender, String> {
-    let Some((probe, args)) = tool_spec(&tool) else {
+    let Some((probe, base_args)) = tool_spec(&tool) else {
         return Err(format!("unknown diagram tool '{tool}'"));
     };
-
-    enum Target {
-        Ssh(Arc<Connection>),
-        Local,
+    let mut args: Vec<&str> = Vec::new();
+    if root_only && tool == "d2" {
+        args.extend_from_slice(&["--target", ""]);
     }
-    let target = {
-        let sessions = state.sessions.lock().await;
-        match sessions.get(&conn_id) {
-            Some(Session::Ssh(conn)) => Target::Ssh(conn.clone()),
-            Some(Session::Local) => Target::Local,
-            None => return Err(format!("session '{conn_id}' is not open")),
-        }
-    };
+    args.extend_from_slice(base_args);
 
-    match target {
-        Target::Ssh(conn) => {
-            // Renders ride the data lane like every exec — chunky SVG output
-            // must not congest the interactive terminals.
-            let conn = match state.app.get() {
-                Some(app) => conn.data_lane(app).await,
-                None => conn,
-            };
-            // Cached probe. A MISS is deliberately not cached: installing the
-            // tool mid-session is picked up by the very next render, instead
-            // of staying "missing" until reconnect.
-            let key = format!("{conn_id}:{tool}");
-            let cached = state.tool_paths.lock().await.get(&key).cloned();
-            let path = match cached {
-                Some(p) => Some(p),
-                None => {
-                    let out = exec_ssh(&conn, probe).await?;
-                    let found = pick_tool_path(&out.stdout, &tool);
-                    if let Some(ref p) = found {
-                        state.tool_paths.lock().await.insert(key, p.clone());
-                    }
-                    found
-                }
-            };
-            let Some(path) = path else {
-                return Ok(missing());
-            };
-            let mut argv: Vec<&str> = vec![path.as_str()];
-            argv.extend_from_slice(args);
-            let quoted: Vec<String> = argv.iter().map(|a| shell_quote(a)).collect();
-            let command = format!(
-                "cd {} && LC_ALL=C {}",
-                shell_quote(&dir),
-                quoted.join(" ")
-            );
-            let out = exec_ssh_stdin(&conn, &command, source.as_bytes()).await?;
+    match resolve_tool(&state, &conn_id, &tool, probe).await? {
+        None => Ok(missing()),
+        Some(ToolTarget::Ssh { conn, path }) => {
+            let out = run_ssh_tool(&conn, &dir, &path, &args, &source).await?;
             if tool == "d2" && is_multiboard_refusal(&out) {
                 // One-shot temp-file round trip (see ANIMATE_INTERVAL_MS):
                 // mktemp's template can't carry an extension, and d2 infers
@@ -176,26 +204,86 @@ pub async fn render_diagram(
                     ms = ANIMATE_INTERVAL_MS,
                 );
                 let out = exec_ssh_stdin(&conn, &animate, source.as_bytes()).await?;
-                return Ok(outcome(out));
+                return Ok(outcome(out, true));
             }
-            Ok(outcome(out))
+            Ok(outcome(out, false))
         }
-        Target::Local => {
+        Some(ToolTarget::Local) => {
             // PATH does the probing locally (winget/scoop/choco all put the
             // binary there); a spawn-not-found IS the missing signal.
             let mut argv: Vec<&str> = vec![tool.as_str()];
-            argv.extend_from_slice(args);
+            argv.extend_from_slice(&args);
             match run_local_stdin(&dir, &argv, source.as_bytes()).await {
                 Ok(out) => {
                     if tool == "d2" && is_multiboard_refusal(&out) {
                         return render_local_animated(&tool, &dir, &source).await;
                     }
-                    Ok(outcome(out))
+                    Ok(outcome(out, false))
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(missing()),
                 Err(e) => Err(format!("could not run {tool}: {e}")),
             }
         }
+    }
+}
+
+/// The formatter's answer: same shape rules as a render — when the tool ran,
+/// exactly one of `formatted`/`error` is set.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagramFormat {
+    pub formatted: Option<String>,
+    pub error: Option<String>,
+    pub missing: bool,
+}
+
+/// `d2 fmt -`: source on stdin → canonically formatted source on stdout.
+/// The editor applies the result as ONE undoable edit — never a save.
+#[tauri::command]
+pub async fn format_diagram(
+    state: State<'_, AppState>,
+    conn_id: String,
+    tool: String,
+    dir: String,
+    source: String,
+) -> Result<DiagramFormat, String> {
+    let Some((probe, _)) = tool_spec(&tool) else {
+        return Err(format!("unknown diagram tool '{tool}'"));
+    };
+    // `fmt -` is d2's shape; revisit when a second tool lands in the table.
+    let args: &[&str] = &["fmt", "-"];
+    let out = match resolve_tool(&state, &conn_id, &tool, probe).await? {
+        None => {
+            return Ok(DiagramFormat { formatted: None, error: None, missing: true });
+        }
+        Some(ToolTarget::Ssh { conn, path }) => {
+            run_ssh_tool(&conn, &dir, &path, args, &source).await?
+        }
+        Some(ToolTarget::Local) => {
+            let mut argv: Vec<&str> = vec![tool.as_str()];
+            argv.extend_from_slice(args);
+            match run_local_stdin(&dir, &argv, source.as_bytes()).await {
+                Ok(out) => out,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    return Ok(DiagramFormat { formatted: None, error: None, missing: true });
+                }
+                Err(e) => return Err(format!("could not run {tool}: {e}")),
+            }
+        }
+    };
+    if out.code == 0 && !out.stdout.is_empty() {
+        Ok(DiagramFormat { formatted: Some(out.stdout), error: None, missing: false })
+    } else {
+        let err = out.stderr.trim();
+        Ok(DiagramFormat {
+            formatted: None,
+            error: Some(if err.is_empty() {
+                format!("formatter exited with code {}", out.code)
+            } else {
+                err.to_string()
+            }),
+            missing: false,
+        })
     }
 }
 
@@ -268,18 +356,25 @@ async fn render_local_animated(
     ];
     let render = match run_local_stdin(dir, &argv, source.as_bytes()).await {
         Ok(out) if out.code == 0 => match tokio::fs::read_to_string(&tmp).await {
-            Ok(svg) => DiagramRender { svg: Some(svg), error: None, missing: false },
+            Ok(svg) => DiagramRender {
+                svg: Some(svg),
+                error: None,
+                missing: false,
+                animated: true,
+            },
             Err(e) => DiagramRender {
                 svg: None,
                 error: Some(format!("could not read the render output: {e}")),
                 missing: false,
+                animated: false,
             },
         },
-        Ok(out) => outcome(out),
+        Ok(out) => outcome(out, false),
         Err(e) => DiagramRender {
             svg: None,
             error: Some(format!("could not run {tool}: {e}")),
             missing: false,
+            animated: false,
         },
     };
     let _ = tokio::fs::remove_file(&tmp).await;

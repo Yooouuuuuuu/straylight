@@ -126,6 +126,23 @@ export function editorAtNode(
   return null;
 }
 
+/** Jump the editor showing `tabId` to `line:column` (a diagram compile
+ *  error's location) and focus it. False if the tab has no live editor. */
+export function revealPosition(
+  tabId: string,
+  lineNumber: number,
+  column: number,
+): boolean {
+  const model = models.get(tabId);
+  const editor = model ? editorShowing(model) : null;
+  if (!editor || !model) return false;
+  const line = Math.max(1, Math.min(lineNumber, model.getLineCount()));
+  editor.setPosition({ lineNumber: line, column: Math.max(1, column) });
+  editor.revealLineInCenterIfOutsideViewport(line);
+  editor.focus();
+  return true;
+}
+
 /** Focus the editor showing `tabId` and open Monaco's find widget (Ctrl+F —
  *  works from anywhere, e.g. with focus still in the explorer after a
  *  single-click preview). False if the tab has no live editor. */

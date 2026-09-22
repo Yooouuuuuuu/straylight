@@ -366,6 +366,31 @@ pub async fn fs_write_file(
         .await
 }
 
+/// Write raw bytes (base64 over IPC) to `path` — binary exports (diagram
+/// PNGs). Unconditional overwrite, like the CLI tools whose artifacts these
+/// are: exports are regenerable files the user explicitly asked to (re)write.
+#[tauri::command]
+pub async fn fs_write_base64(
+    state: State<'_, AppState>,
+    conn_id: String,
+    path: String,
+    data: String,
+) -> Result<(), String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data.as_bytes())
+        .map_err(|e| format!("bad base64 payload: {e}"))?;
+    let transport = state.transport(&conn_id).await?;
+    let mut w = transport.open_write(&path).await?;
+    w.write_all(&bytes)
+        .await
+        .map_err(|e| format!("write failed: {e}"))?;
+    w.shutdown()
+        .await
+        .map_err(|e| format!("close failed: {e}"))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn fs_rename(
     state: State<'_, AppState>,
