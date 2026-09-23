@@ -42,13 +42,66 @@ export function diagramForTool(tool: string | undefined): DiagramLang | null {
   return DIAGRAM_LANGS.find((d) => d.tool === tool) ?? null;
 }
 
-/** Rasterize an SVG string to a PNG blob at `scale`× its intrinsic size —
- *  fully client-side (d2 embeds its fonts as data URIs inside the SVG, so
- *  the canvas draw is faithful and untainted). Used for Copy image and
- *  Export PNG; sidesteps d2's own PNG export, which needs a headless
- *  Chromium on the host. */
-export async function svgToPngBlob(svg: string, scale = 2): Promise<Blob> {
-  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+/** A renderer's SVG with its size pinned to concrete pixels. */
+export interface SizedSvg {
+  svg: string;
+  w: number;
+  h: number;
+}
+
+/** Pin the root `<svg>`'s width/height to concrete pixels (from its own
+ *  numbers, its viewBox, or a nested inner svg's). d2 builds vary here —
+ *  a percentage or missing dimension collapses to nothing inside the
+ *  preview's content-sized pan/zoom stage, and makes `Image` rasterization
+ *  fall back to the 300×150 SVG default (the "exported PNG is cut" bug).
+ *  Exports of the .svg FILE stay the tool's raw output — this normalized
+ *  form is for display and rasterizing only. */
+export function normalizeSvg(raw: string): SizedSvg | null {
+  const doc = new DOMParser().parseFromString(raw, "image/svg+xml");
+  const root = doc.documentElement;
+  if (!root || root.tagName.toLowerCase() !== "svg") return null;
+  const px = (v: string | null) =>
+    v !== null && /^\d+(\.\d+)?(px)?$/.test(v.trim()) ? parseFloat(v) : NaN;
+  const fromViewBox = (el: Element): { w: number; h: number } | null => {
+    const vb = (el.getAttribute("viewBox") ?? "").trim().split(/[\s,]+/).map(Number);
+    return vb.length === 4 && vb[2] > 0 && vb[3] > 0
+      ? { w: vb[2], h: vb[3] }
+      : null;
+  };
+  let w = px(root.getAttribute("width"));
+  let h = px(root.getAttribute("height"));
+  if (!(w > 0 && h > 0)) {
+    const vb = fromViewBox(root);
+    if (vb) ({ w, h } = vb);
+  }
+  if (!(w > 0 && h > 0)) {
+    // Some builds nest the sized svg one level down.
+    const inner = root.querySelector("svg");
+    if (inner) {
+      w = px(inner.getAttribute("width"));
+      h = px(inner.getAttribute("height"));
+      if (!(w > 0 && h > 0)) {
+        const vb = fromViewBox(inner);
+        if (vb) ({ w, h } = vb);
+      }
+    }
+  }
+  if (!(w > 0 && h > 0)) return null;
+  root.setAttribute("width", String(w));
+  root.setAttribute("height", String(h));
+  return { svg: new XMLSerializer().serializeToString(root), w, h };
+}
+
+/** Rasterize a size-pinned SVG to a PNG blob at `scale`× — fully
+ *  client-side (d2 embeds its fonts as data URIs inside the SVG, so the
+ *  canvas draw is faithful and untainted). Used for Copy image and Export
+ *  PNG; sidesteps d2's own PNG export, which needs a headless Chromium on
+ *  the host. The destination rectangle is passed explicitly so the draw is
+ *  full-size even if the browser mis-derives the image's natural size. */
+export async function svgToPngBlob(sized: SizedSvg, scale = 2): Promise<Blob> {
+  const url = URL.createObjectURL(
+    new Blob([sized.svg], { type: "image/svg+xml" }),
+  );
   try {
     const img = new Image();
     await new Promise<void>((resolve, reject) => {
@@ -56,16 +109,12 @@ export async function svgToPngBlob(svg: string, scale = 2): Promise<Blob> {
       img.onerror = () => reject(new Error("the SVG could not be decoded"));
       img.src = url;
     });
-    const w = img.naturalWidth;
-    const h = img.naturalHeight;
-    if (!w || !h) throw new Error("the SVG has no intrinsic size");
     const canvas = document.createElement("canvas");
-    canvas.width = Math.round(w * scale);
-    canvas.height = Math.round(h * scale);
+    canvas.width = Math.round(sized.w * scale);
+    canvas.height = Math.round(sized.h * scale);
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("no 2d canvas");
-    ctx.scale(scale, scale);
-    ctx.drawImage(img, 0, 0);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     const blob = await new Promise<Blob | null>((r) =>
       canvas.toBlob(r, "image/png"),
     );

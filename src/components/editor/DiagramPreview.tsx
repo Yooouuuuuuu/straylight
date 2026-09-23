@@ -14,7 +14,12 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import DOMPurify from "dompurify";
 
 import { getTabContent } from "../../lib/activeEditor";
-import { diagramForTool, svgToPngBlob } from "../../lib/diagrams";
+import {
+  diagramForTool,
+  normalizeSvg,
+  svgToPngBlob,
+  type SizedSvg,
+} from "../../lib/diagrams";
 import { revealPosition } from "../../lib/editorModels";
 import { basename, dirname } from "../../lib/format";
 import { fsWriteBase64, fsWriteFile, renderDiagram } from "../../lib/ipc";
@@ -77,7 +82,11 @@ export function DiagramPreview({ tab }: { tab: EditorTab }) {
     ? (getTabContent(source.id) ?? source.content)
     : tab.content;
 
-  const [svg, setSvg] = useState<string | null>(null);
+  const [svg, setSvg] = useState<string | null>(null); // the tool's RAW output (what Export SVG writes)
+  // Size-pinned copy for display + raster: d2's root svg carries only a
+  // viewBox (no width/height — they live on a NESTED svg), which collapses
+  // in the content-sized stage and breaks Image rasterization.
+  const [sized, setSized] = useState<SizedSvg | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(true);
@@ -123,6 +132,7 @@ export function DiagramPreview({ tab }: { tab: EditorTab }) {
           setMissing(r.missing);
           if (r.svg !== null) {
             setSvg(r.svg);
+            setSized(normalizeSvg(r.svg));
             setAnimated(r.animated);
             setError(null);
           } else if (r.error !== null) {
@@ -150,21 +160,9 @@ export function DiagramPreview({ tab }: { tab: EditorTab }) {
     return () => clearTimeout(timer);
   }, [text, tab.connId, tab.path, lang, rootOnly]);
 
-  /** The rendered SVG's intrinsic size, off the live element. */
-  const svgSize = useCallback((): { w: number; h: number } | null => {
-    const el = stageRef.current?.querySelector("svg");
-    if (!el) return null;
-    const w = parseFloat(el.getAttribute("width") ?? "");
-    const h = parseFloat(el.getAttribute("height") ?? "");
-    if (w > 0 && h > 0) return { w, h };
-    const vb = (el.getAttribute("viewBox") ?? "").split(/\s+/).map(Number);
-    if (vb.length === 4 && vb[2] > 0 && vb[3] > 0) return { w: vb[2], h: vb[3] };
-    return null;
-  }, []);
-
   const fit = useCallback(() => {
     const canvas = canvasRef.current;
-    const size = svgSize();
+    const size = sized;
     if (!canvas || !size) return;
     const pad = 24;
     const scale = Math.min(
@@ -178,15 +176,15 @@ export function DiagramPreview({ tab }: { tab: EditorTab }) {
       x: (canvas.clientWidth - size.w * s) / 2,
       y: (canvas.clientHeight - size.h * s) / 2,
     });
-  }, [svgSize]);
+  }, [sized]);
 
   // First successful render (with no restored view): fit to the window.
   useLayoutEffect(() => {
-    if (svg !== null && !fitted.current) {
+    if (sized !== null && !fitted.current) {
       fitted.current = true;
       fit();
     }
-  }, [svg, fit]);
+  }, [sized, fit]);
 
   // Wheel zoom toward the cursor. Attached manually: React's onWheel is
   // passive, and preventDefault must win or the page rubber-bands.
@@ -230,11 +228,11 @@ export function DiagramPreview({ tab }: { tab: EditorTab }) {
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
   };
 
-  /** A still SVG for raster outputs: the current render, or — when it's the
-   *  animated multi-board form — a fresh root-board render (a PNG can't
-   *  animate; the root board is the file's main view). */
-  const getStillSvg = useCallback(async (): Promise<string> => {
-    if (svg !== null && !animated) return svg;
+  /** A still, size-pinned SVG for raster outputs: the current render, or —
+   *  when it's the animated multi-board form — a fresh root-board render (a
+   *  PNG can't animate; the root board is the file's main view). */
+  const getStillSvg = useCallback(async (): Promise<SizedSvg> => {
+    if (sized !== null && !animated) return sized;
     if (!lang) throw new Error("unknown diagram type");
     const r = await renderDiagram(
       tab.connId,
@@ -244,8 +242,10 @@ export function DiagramPreview({ tab }: { tab: EditorTab }) {
       true,
     );
     if (r.svg === null) throw new Error(r.error ?? "render failed");
-    return r.svg;
-  }, [svg, animated, lang, tab.connId, tab.path, text]);
+    const s = normalizeSvg(r.svg);
+    if (!s) throw new Error("the SVG carries no usable size");
+    return s;
+  }, [sized, animated, lang, tab.connId, tab.path, text]);
 
   const copyImage = useCallback(async () => {
     try {
@@ -417,7 +417,7 @@ export function DiagramPreview({ tab }: { tab: EditorTab }) {
                   transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
                 }}
                 dangerouslySetInnerHTML={{
-                  __html: DOMPurify.sanitize(svg, {
+                  __html: DOMPurify.sanitize(sized?.svg ?? svg, {
                     USE_PROFILES: { svg: true, svgFilters: true },
                   }),
                 }}

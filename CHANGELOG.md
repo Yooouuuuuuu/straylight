@@ -11,6 +11,19 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-09-23
+
+### Fixed
+
+- **The diagram was invisible in 0.16.0's new preview, and PNG/Copy-image
+  came out cropped.** d2's SVG root declares no width/height — only a
+  viewBox (the concrete size sits on a *nested* svg). The old flowing
+  layout stretched it to the pane by accident; the new content-sized
+  pan/zoom stage collapsed it to the 300×150 SVG default, and the same
+  missing size made rasterization crop. The root's size is now pinned from
+  its viewBox before display and rasterizing — exported `.svg` files remain
+  the tool's untouched output.
+
 ## [0.16.0] - 2026-09-22
 
 ### Added
