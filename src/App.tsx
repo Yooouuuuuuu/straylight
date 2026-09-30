@@ -19,6 +19,7 @@ import {
   getWorkspacePopped,
   localConnect,
   onConnsSnapshot,
+  diagNote,
   onDiagAlert,
   onOpenPath,
   onPortForwardError,
@@ -764,6 +765,47 @@ export default function App() {
     );
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  // Renderer starvation counter: the backend's CPU tripwire can't see the UI
+  // thread (a separate process), yet a starved UI thread is what let the
+  // WebView's own Ctrl+Shift+P print accelerator leak past our handler
+  // (2026-09-30). Long tasks (>50 ms, per the Performance API) are aggregated
+  // for 30 s and written to the diag ring only when the window was notably
+  // busy — one line per busy half-minute, never per task.
+  useEffect(() => {
+    if (typeof PerformanceObserver === "undefined") return;
+    let count = 0;
+    let total = 0;
+    let longest = 0;
+    let observer: PerformanceObserver | null = null;
+    try {
+      observer = new PerformanceObserver((list) => {
+        for (const e of list.getEntries()) {
+          count += 1;
+          total += e.duration;
+          if (e.duration > longest) longest = e.duration;
+        }
+      });
+      observer.observe({ entryTypes: ["longtask"] });
+    } catch {
+      return; // no longtask support in this webview — fine
+    }
+    const timer = window.setInterval(() => {
+      if (total >= 3_000) {
+        void diagNote(
+          "renderer",
+          `UI thread busy: ${count} long tasks, ${Math.round(total)} ms of the last 30 s, longest ${Math.round(longest)} ms`,
+        ).catch(() => {});
+      }
+      count = 0;
+      total = 0;
+      longest = 0;
+    }, 30_000);
+    return () => {
+      observer?.disconnect();
+      window.clearInterval(timer);
     };
   }, []);
 

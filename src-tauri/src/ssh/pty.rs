@@ -51,6 +51,7 @@ const FLUSH_MS: u64 = 8;
 /// view mount) we broadcast, so the very first chunks are never lost.
 fn emit_pty_output(app: &AppHandle, pty_id: &str, data: Vec<u8>) {
     use base64::Engine as _;
+    crate::diag::note_pty(data.len());
     let payload = PtyOutput {
         pty_id: pty_id.to_string(),
         data: base64::engine::general_purpose::STANDARD.encode(&data),

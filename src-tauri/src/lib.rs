@@ -694,6 +694,7 @@ pub fn run() {
             vcs::vcs_commit,
             vcs::vcs_log,
             diag::diag_dump,
+            diag::diag_note,
             diagram::render_diagram,
             diagram::format_diagram,
             transport::fs_write_base64,

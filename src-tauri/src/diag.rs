@@ -11,7 +11,7 @@
 //! must not kill healthy sessions).
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use tauri::{AppHandle, Emitter, Manager};
@@ -21,6 +21,69 @@ use crate::LockSafe;
 /// Ring capacity: ~2000 events ≈ hours of normal churn, a few hundred KB worst
 /// case. Old events fall off the front.
 const CAPACITY: usize = 2000;
+
+/// Workload counters, drained by the CPU monitor every sample: what the
+/// backend was DOING during a hot window, so a hot sample is self-describing
+/// (incident 2026-09-30: a 130 %-of-a-core streak whose cause — 5 s VCS
+/// polls over huge ignored trees + relists of 5k-entry pinned folders — had
+/// to be inferred from channel churn; the counters name it outright).
+struct Workload {
+    sftp_lists: AtomicU64,
+    sftp_entries: AtomicU64,
+    vcs_status: AtomicU64,
+    vcs_entries: AtomicU64,
+    execs: AtomicU64,
+    pty_bytes: AtomicU64,
+    pty_events: AtomicU64,
+}
+
+static WORK: Workload = Workload {
+    sftp_lists: AtomicU64::new(0),
+    sftp_entries: AtomicU64::new(0),
+    vcs_status: AtomicU64::new(0),
+    vcs_entries: AtomicU64::new(0),
+    execs: AtomicU64::new(0),
+    pty_bytes: AtomicU64::new(0),
+    pty_events: AtomicU64::new(0),
+};
+
+/// One SFTP directory listing of `entries` entries.
+pub fn note_sftp_list(entries: usize) {
+    WORK.sftp_lists.fetch_add(1, Ordering::Relaxed);
+    WORK.sftp_entries.fetch_add(entries as u64, Ordering::Relaxed);
+}
+
+/// One VCS status result carrying `entries` change records.
+pub fn note_vcs_status(entries: usize) {
+    WORK.vcs_status.fetch_add(1, Ordering::Relaxed);
+    WORK.vcs_entries.fetch_add(entries as u64, Ordering::Relaxed);
+}
+
+/// One host command run (exec channel or local process).
+pub fn note_exec() {
+    WORK.execs.fetch_add(1, Ordering::Relaxed);
+}
+
+/// One PTY output event of `bytes` bytes emitted to the webview.
+pub fn note_pty(bytes: usize) {
+    WORK.pty_events.fetch_add(1, Ordering::Relaxed);
+    WORK.pty_bytes.fetch_add(bytes as u64, Ordering::Relaxed);
+}
+
+/// Drain the counters into one human line (the last sample window).
+fn drain_workload() -> String {
+    let take = |a: &AtomicU64| a.swap(0, Ordering::Relaxed);
+    format!(
+        "{} sftp lists ({} entries), {} vcs status ({} entries), {} execs, pty {} KB / {} events",
+        take(&WORK.sftp_lists),
+        take(&WORK.sftp_entries),
+        take(&WORK.vcs_status),
+        take(&WORK.vcs_entries),
+        take(&WORK.execs),
+        take(&WORK.pty_bytes) / 1024,
+        take(&WORK.pty_events),
+    )
+}
 
 struct Event {
     at_millis: u64,
@@ -48,9 +111,10 @@ pub fn init(app: AppHandle) {
 }
 
 /// Record one event: `category` is a short slug ("channel", "probe",
-/// "reconnect", "recycle", "cpu", "pty" — terminal birth size, "resize" —
-/// PTY resizes with the frontend fit path that sent them), `detail` the
-/// human line.
+/// "reconnect", "recycle", "cpu" — hot samples carry that window's workload
+/// counters, "pty" — terminal birth size, "resize" — PTY resizes with the
+/// frontend fit path that sent them, "renderer" — the window's own UI-thread
+/// long-task totals via `diag_note`), `detail` the human line.
 pub fn event(category: &str, detail: impl AsRef<str>) {
     let buf = EVENTS.get_or_init(|| Mutex::new(VecDeque::with_capacity(CAPACITY)));
     let mut buf = buf.lock_safe();
@@ -75,6 +139,13 @@ pub fn alert(level: &str, message: impl AsRef<str>) {
             serde_json::json!({ "level": level, "message": message }),
         );
     }
+}
+
+/// A note from the frontend into the ring (the renderer's long-task counter
+/// — "was the UI thread starved?" — lives on the other side of the IPC).
+#[tauri::command]
+pub fn diag_note(category: String, detail: String) {
+    event(&category, detail);
 }
 
 /// Write the ring buffer to `logs/diag-<timestamp>.txt` in the app's log dir
@@ -144,6 +215,9 @@ fn spawn_cpu_monitor(app: AppHandle) {
             };
             // Fraction of ONE core used over the window.
             let used = (now.saturating_sub(prev)) as f64 / (SAMPLE_SECS as f64 * 10_000_000.0);
+            // Drain the workload counters EVERY sample so each window's line
+            // describes only that window; the text is kept only when hot.
+            let workload = drain_workload();
             if used < HOT_FRACTION {
                 hot_streak = 0;
                 continue;
@@ -155,7 +229,13 @@ fn spawn_cpu_monitor(app: AppHandle) {
                 continue;
             }
             hot_streak += 1;
-            event("cpu", format!("hot sample: {:.0}% of a core (streak {hot_streak})", used * 100.0));
+            event(
+                "cpu",
+                format!(
+                    "hot sample: {:.0}% of a core (streak {hot_streak}) — last {SAMPLE_SECS}s: {workload}",
+                    used * 100.0
+                ),
+            );
             if hot_streak >= HOT_SAMPLES && !ALERTED.swap(true, Ordering::SeqCst) {
                 alert(
                     "warn",

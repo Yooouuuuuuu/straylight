@@ -333,6 +333,13 @@ export function fsReadBase64(connId: string, path: string): Promise<string> {
   return invoke("fs_read_base64", { connId, path });
 }
 
+/** Write a note into the backend's diag ring buffer (shows up in
+ *  "Diagnostics: Save report"). The renderer's long-task counter uses it —
+ *  UI-thread starvation is invisible from the backend's side. */
+export function diagNote(category: string, detail: string): Promise<void> {
+  return invoke("diag_note", { category, detail });
+}
+
 /** One diagram render (diagram.rs). When the tool ran, exactly one of
  *  `svg`/`error` is set; `missing` = not installed on that host (the UI
  *  shows the install hint, never an error). `animated` = the SVG is the

@@ -1009,10 +1009,14 @@ pub async fn vcs_status(
     root: String,
     backend: String,
 ) -> Result<VcsStatus, String> {
-    match backend.as_str() {
+    let result = match backend.as_str() {
         "jj" => jj_status(&state, &conn_id, &root).await,
         _ => git_status(&state, &conn_id, &root).await,
+    };
+    if let Ok(ref s) = result {
+        crate::diag::note_vcs_status(s.changes.len());
     }
+    result
 }
 
 async fn git_status(state: &AppState, conn_id: &str, root: &str) -> Result<VcsStatus, String> {

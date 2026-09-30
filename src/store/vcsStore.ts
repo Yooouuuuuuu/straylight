@@ -479,30 +479,35 @@ export const useVcsStore = create<VcsState>()((set, get) => ({
       const status = await vcsStatus(connId, root, repo.backend);
       if (tokens.get(id) !== token) return; // superseded or cancelled
       refreshFailures.delete(id);
+      // "Checked" always advances; the stamp ("changed … ago", which the
+      // history also keys off) only when the result differs — a no-op poll
+      // must not reset the counter or refetch the history. An in-app
+      // save/file-op forces the stamp (we witnessed the change, even when the
+      // status SHAPE is identical — e.g. an already-M file re-saved).
+      const before = get().repos.find(
+        (r) => r.connKey === connKey && r.root === root,
+      );
+      const differs =
+        !before?.status ||
+        JSON.stringify(before.status) !== JSON.stringify(status);
+      const stamp = differs || !!opts?.forceStamp;
       set((s) => {
         const now = Date.now();
-        const repos = mapRepo(s.repos, connKey, root, (r) => {
-          // "Checked" always advances; the stamp ("changed … ago", which the
-          // history also keys off) only when the result differs — a no-op
-          // poll must not reset the counter or refetch the history. An
-          // in-app save/file-op forces the stamp (we witnessed the change,
-          // even when the status SHAPE is identical — e.g. an already-M
-          // file re-saved).
-          const differs =
-            !r.status || JSON.stringify(r.status) !== JSON.stringify(status);
-          const stamp = differs || !!opts?.forceStamp;
-          return {
-            ...r,
-            status: differs ? status : r.status,
-            activity: "idle" as const,
-            error: null,
-            lastChecked: now,
-            lastCheckFailed: false,
-            lastUpdated: stamp ? now : (r.lastUpdated ?? now),
-          };
-        });
-        persist(repos);
-        return { repos, decorations: buildDecorations(repos) };
+        const repos = mapRepo(s.repos, connKey, root, (r) => ({
+          ...r,
+          status: differs ? status : r.status,
+          activity: "idle" as const,
+          error: null,
+          lastChecked: now,
+          lastCheckFailed: false,
+          lastUpdated: stamp ? now : (r.lastUpdated ?? now),
+        }));
+        // Persist and rebuild decorations only when something actually
+        // changed: a no-op ◉ poll used to rewrite EVERY repo's full status to
+        // localStorage (a synchronous multi-MB write on the UI thread) and
+        // rebuild all decorations every 5 s (2026-09-30 CPU incident).
+        if (stamp) persist(repos);
+        return differs ? { repos, decorations: buildDecorations(repos) } : { repos };
       });
     } catch (e) {
       if (tokens.get(id) !== token) return;

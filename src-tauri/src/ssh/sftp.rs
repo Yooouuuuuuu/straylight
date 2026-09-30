@@ -110,6 +110,7 @@ impl SftpTransport {
         }
 
         sort_entries(&mut entries);
+        crate::diag::note_sftp_list(entries.len());
         // Attribution for the "big folder = whole-app lag" report: if this is
         // slow, the cost is the SFTP read (a whole-directory walk + a round-trip
         // per symlink) — not the frontend. Cheap; only logs the notable ones.

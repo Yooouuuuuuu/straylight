@@ -11,6 +11,35 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.16.3] - 2026-09-30
+
+### Fixed
+
+- **Pinning a huge folder no longer keeps the app busy.** A pinned root was
+  re-listed on *every* automatic refresh of its host — each time an agent's
+  output went idle, after file operations, on reconnect — with no size guard
+  and even while its section was collapsed; only its open subfolders were
+  guarded. A pinned 4,000-file dataset folder therefore streamed over SFTP
+  and re-rendered every few seconds for as long as an agent worked on that
+  host. The root now gets the same guard as its subfolders (a folder over
+  1,500 entries listed within the last 15 s is skipped on automatic
+  refreshes), and a refresh that arrives while the section is collapsed
+  waits until it's opened. Manual refresh (F5, ↻) still reloads everything.
+- **No-op ◉ polls are free.** Every 5-second monitor poll used to rewrite
+  every repo's full status to localStorage (a synchronous multi-megabyte
+  write on the UI thread) and rebuild all explorer decorations — even when
+  nothing had changed. Both now happen only when the status actually
+  differs.
+
+### Added
+
+- **Self-describing CPU diagnostics.** A hot-CPU sample in the diagnostics
+  report now carries what the backend did during that window — SFTP
+  listings (with entry counts), VCS status polls (with change counts),
+  commands run, terminal bytes and events — and the window records when its
+  own UI thread was starved (long-task totals per 30 s), so the next report
+  names the workload instead of hinting at it.
+
 ## [0.16.2] - 2026-09-30
 
 ### Fixed

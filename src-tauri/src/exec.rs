@@ -40,6 +40,7 @@ pub async fn run_command(
         Ssh(Arc<Connection>),
         Local,
     }
+    crate::diag::note_exec();
     // Resolve the target and drop the lock before the (possibly slow) command.
     let target = {
         let sessions = state.sessions.lock().await;

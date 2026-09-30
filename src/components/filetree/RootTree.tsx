@@ -329,21 +329,50 @@ export function RootTree({
     void loadDir(rootPath).then(() => markRefreshed(connId));
   }, [collapsed, rootPath, dirs, loadDir, markRefreshed, connId]);
 
-  useEffect(() => {
-    if (refreshToken === 0) return;
-    void loadDir(rootPath).then(() => markRefreshed(connId));
-    expanded.forEach((path) => {
-      // Auto-refresh (window focus) skips a LARGE folder listed in the last
-      // 15s. This protects the WIRE, not the renderer (light rows made drawing
-      // cheap): a 5000-entry SFTP listing is still ~2s of round trips however
-      // it's drawn. Manual refresh / re-expand always reloads.
+  // Re-list this root + its open dirs for a refresh token. A MANUAL refresh
+  // (F5, ↻ — the store stamps refreshForcedAt) always reloads everything;
+  // AUTOMATIC ones (an agent's output going idle, a file op, reconnect) get
+  // the large-folder guard: a folder over 1500 entries listed within the last
+  // 15 s is skipped. This protects the WIRE, not the renderer (light rows made
+  // drawing cheap): a 5000-entry SFTP listing is seconds of round trips
+  // however it's drawn. The guard now covers the ROOT too — it used to reload
+  // unconditionally while only its open subfolders were guarded, so a pinned
+  // 4k-entry dataset folder re-listed on every agent idle (2026-09-30).
+  const runRefresh = () => {
+    const forced = Date.now() - useAppStore.getState().refreshForcedAt < 500;
+    const freshAndLarge = (path: string) => {
       const count = dirs[path]?.entries?.length ?? 0;
       const at = loadedAt.current.get(path);
-      if (count > 1500 && at && Date.now() - at < 15_000) return;
+      return count > 1500 && at !== undefined && Date.now() - at < 15_000;
+    };
+    if (forced || !freshAndLarge(rootPath)) {
+      void loadDir(rootPath).then(() => markRefreshed(connId));
+    }
+    expanded.forEach((path) => {
+      if (!forced && freshAndLarge(path)) return;
       void loadDir(path);
     });
+  };
+  // A refresh that arrives while the section is COLLAPSED defers until it's
+  // opened — nothing is visible to refresh, and listing a big root for a
+  // closed section was pure cost. (A never-listed root needs no deferral: the
+  // lazy first-open load below covers it.)
+  const pendingRefresh = useRef(false);
+  useEffect(() => {
+    if (refreshToken === 0) return;
+    if (collapsed) {
+      if (dirs[rootPath]?.entries) pendingRefresh.current = true;
+      return;
+    }
+    runRefresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshToken]);
+  useEffect(() => {
+    if (collapsed || !pendingRefresh.current) return;
+    pendingRefresh.current = false;
+    runRefresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapsed]);
 
   const toggleDir = useCallback(
     (path: string) => {

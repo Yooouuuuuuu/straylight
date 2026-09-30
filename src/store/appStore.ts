@@ -870,6 +870,10 @@ interface AppState {
    *  (Remote 1/2/3), so this reassigns both place and identity color. */
   swapRemotes: (a: number, b: number) => void;
   toggleSection: (which: keyof SectionVisibility) => void;
+  /** Wall-clock stamp of the last MANUAL refresh (F5, ↻, palette). The trees
+   *  read it to tell a forced reload (always lists everything) from an
+   *  automatic one (agent idle, file op, reconnect — large folders guarded). */
+  refreshForcedAt: number;
   refreshLocal: () => void;
   /** Refresh one remote's trees, or all remotes when no id is given. */
   refreshRemote: (connId?: string) => void;
@@ -1375,6 +1379,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   sessionsPoppedOut: false,
   setSessionsPoppedOut: (on) => set({ sessionsPoppedOut: on }),
+  refreshForcedAt: 0,
 
   workspaceOpen: false,
   setWorkspaceOpen: (on) => set({ workspaceOpen: on }),
@@ -1637,28 +1642,35 @@ export const useAppStore = create<AppState>()((set, get) => ({
       }
       return { sections };
     }),
+  // The three MANUAL refreshes stamp refreshForcedAt; refreshConn (automatic)
+  // doesn't — the trees use the stamp to bypass the large-folder guard.
   refreshLocal: () =>
-    set((s) => ({ refreshTokenLocal: s.refreshTokenLocal + 1 })),
+    set((s) => ({
+      refreshTokenLocal: s.refreshTokenLocal + 1,
+      refreshForcedAt: Date.now(),
+    })),
   refreshRemote: (connId) =>
-    set((s) =>
-      remoteMirror(
+    set((s) => ({
+      ...remoteMirror(
         s.remotes.map((r) =>
           connId === undefined || r.conn.connId === connId
             ? { ...r, refreshToken: r.refreshToken + 1 }
             : r,
         ),
       ),
-    ),
+      refreshForcedAt: Date.now(),
+    })),
   refreshWsl: (connId) =>
-    set((s) =>
-      wslMirror(
+    set((s) => ({
+      ...wslMirror(
         s.wsls.map((w) =>
           connId === undefined || w.conn.connId === connId
             ? { ...w, refreshToken: w.refreshToken + 1 }
             : w,
         ),
       ),
-    ),
+      refreshForcedAt: Date.now(),
+    })),
   refreshConn: (connId) =>
     set((s) =>
       connId === s.localConnId
