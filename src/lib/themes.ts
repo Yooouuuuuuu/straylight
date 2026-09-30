@@ -199,10 +199,25 @@ export const TERMINAL_FONT_DEFAULTS = {
   size: 13,
 };
 
-/** The effective terminal font (settings `terminalFont` over defaults). */
+/** Fallback faces appended after the configured terminal family: CJK fonts
+ *  (Traditional Chinese first) and the system emoji/symbol fonts, so glyphs
+ *  the coding font lacks come from a face with correct full-width metrics
+ *  instead of a browser-picked fallback drawn squeezed. The configured
+ *  family stays first — xterm measures its cell size from the first font;
+ *  fallbacks only supply glyphs it lacks. A trailing generic `monospace` is
+ *  moved to the very end so the CJK faces are consulted before it. */
+const TERMINAL_FONT_FALLBACK =
+  '"Microsoft JhengHei", "Noto Sans CJK TC", "Microsoft YaHei", ' +
+  '"Segoe UI Emoji", "Segoe UI Symbol", monospace';
+
+/** The effective terminal font (settings `terminalFont` over defaults) — the
+ *  family is the full CSS stack: the configured face(s) + the fallbacks. */
 export function currentTermFont(): { family: string; size: number } {
+  const base = (terminalFontConfig.family ?? TERMINAL_FONT_DEFAULTS.family)
+    .trim()
+    .replace(/,\s*monospace\s*$/i, "");
   return {
-    family: terminalFontConfig.family ?? TERMINAL_FONT_DEFAULTS.family,
+    family: `${base}, ${TERMINAL_FONT_FALLBACK}`,
     size: terminalFontConfig.size ?? TERMINAL_FONT_DEFAULTS.size,
   };
 }

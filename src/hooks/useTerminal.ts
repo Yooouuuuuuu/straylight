@@ -7,6 +7,7 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 
 import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
+import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -166,6 +167,16 @@ export function useTerminal(
 
     const fit = new FitAddon();
     term.loadAddon(fit);
+    // Grapheme-cluster text measurement (Unicode 15), replacing xterm's
+    // default Unicode-6 width tables. Modern TUIs (Claude Code via
+    // string-width) count an emoji CLUSTER as 2 cells; the old tables counted
+    // codepoints as 1 (or 4-8 for joined sequences), so glyphs were drawn
+    // squeezed into too-narrow boxes and — worse — app and terminal disagreed
+    // on where lines wrap, throwing ink's cursor-up repaint arithmetic off by
+    // a line (the residual duplicated-frame replays). This is the measurement
+    // Windows Terminal's modern mode uses too. Activating the addon switches
+    // `term.unicode.activeVersion` to "15-graphemes" itself.
+    term.loadAddon(new UnicodeGraphemesAddon());
     // Serialize full state (buffer + scrollback + modes + cursor + alt-screen) so
     // a re-attaching view in another window can reconstruct a TUI exactly
     // (docs/dev/multi-window.md).

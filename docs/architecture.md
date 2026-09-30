@@ -49,7 +49,9 @@ sizes persist. Every UI color comes from CSS custom properties fed by
   `window-state` (persist window size/position); `updater` + `process` power
   the GitHub-Releases auto-update that ships with 0.10.
 - **Frontend:** React 18 + Vite + TypeScript, Zustand (two stores),
-  `monaco-editor`, `@xterm/xterm` (+fit, +webgl), `fuse.js` (fuzzy finder +
+  `monaco-editor`, `@xterm/xterm` (+fit, +webgl, +serialize,
+  +unicode-graphemes — grapheme-cluster widths, so emoji/CJK measure as
+  modern TUIs and Windows Terminal do), `fuse.js` (fuzzy finder +
   palette), `marked` + `dompurify` (Markdown preview), react-resizable-panels.
 - `~/.ssh/config` is parsed by **our own parser** (`ssh/config.rs`) — the
   russh-config crate can only resolve one named host, not enumerate every

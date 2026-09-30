@@ -11,6 +11,25 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-09-30
+
+### Fixed
+
+- **Squeezed, hard-to-read glyphs in terminals — and the last of the
+  duplicated-frame replays.** The terminal measured text with Unicode-6 width
+  tables while modern tools (Claude Code among them) measure by grapheme
+  cluster: an emoji they count as 2 cells was drawn into 1, joined emoji
+  sequences into 4–8, and — the deeper damage — the two sides disagreed on
+  where lines wrap, which threw a TUI's repaint arithmetic off by a line and
+  replayed frames into history. Terminals now measure by grapheme cluster
+  (the `unicode-graphemes` addon — the same model Windows Terminal's modern
+  mode uses). Selecting text was never wrong; the drawing was.
+- **CJK and emoji glyphs draw from proper fonts.** The terminal font stack
+  now falls back to Traditional-Chinese-capable faces (Microsoft JhengHei,
+  Noto Sans CJK TC) and the system emoji/symbol fonts, so characters the
+  coding font lacks render at true width instead of a browser-picked
+  substitute squeezed into the cell.
+
 ## [0.16.1] - 2026-09-23
 
 ### Fixed
