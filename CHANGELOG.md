@@ -11,6 +11,38 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.16.4] - 2026-11-11
+
+### Fixed
+
+- **Terminal stuck one row above the bottom after a tab switch.** 0.16.3's
+  scrollbar re-sync wrote the scroll position directly, and the terminal
+  reinterpreted it through fractional row math — sometimes landing one row
+  short with the thumb already at the bottom, so wheel-down did nothing until
+  a keypress. The re-sync now goes through the terminal's own scroll path.
+- **"Couldn't load usage" on a machine where Claude Code works fine.** The
+  usage probe pressed Enter on a fixed clock to clear Claude's trust prompt —
+  and current Claude Code puts the cursor on "No, exit", so that Enter quit
+  Claude; `/usage` then landed in the shell, whose localized error text
+  slipped past an English-only check into a misleading "log in" message. The
+  probe now reads the screen: it answers the trust dialog with an explicit
+  Yes, sends `/usage` when the prompt is ready, detects a vanished Claude by
+  the shell prompt returning (in any language), reports the real cause, and
+  leaves the terminal open on a timeout instead of destroying it.
+
+### Added
+
+- **Shift+Enter inserts a newline** in programs that use bracketed paste
+  (Claude Code, modern shells) instead of submitting — the same trick VS
+  Code's `/terminal-setup` installs. Elsewhere it stays a plain Enter.
+- **OSC 52 clipboard writes** — a remote program can now put text on your
+  clipboard. Claude Code's fullscreen mode copies mouse selections this way
+  over SSH; before, that copy silently did nothing.
+- **Local terminals set `CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT=1`**, Claude
+  Code's own fix for stale fragments its fullscreen renderer can leave on
+  ConPTY-backed terminals (which local Windows shells are). Remote shells
+  are untouched — their environment is yours.
+
 ## [0.16.3] - 2026-09-30
 
 ### Fixed

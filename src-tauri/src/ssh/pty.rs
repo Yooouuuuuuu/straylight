@@ -296,6 +296,13 @@ fn open_local_pty(
     if let Some(dirs) = directories::UserDirs::new() {
         cmd.cwd(dirs.home_dir());
     }
+    // Claude Code's fullscreen renderer sends incremental cell updates that
+    // ConPTY hosts (ours, locally) can coalesce wrongly, leaving fragments of
+    // earlier frames on screen; its own escape hatch is a full repaint per
+    // frame. Set for the shells WE spawn — a remote host's shell is the
+    // user's to configure.
+    #[cfg(windows)]
+    cmd.env("CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT", "1");
     let mut child = pair
         .slave
         .spawn_command(cmd)

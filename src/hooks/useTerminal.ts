@@ -5,6 +5,7 @@
  *  silently falls back to the DOM renderer otherwise. */
 import { useEffect, useLayoutEffect, useRef } from "react";
 
+import { ClipboardAddon } from "@xterm/addon-clipboard";
 import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
@@ -177,6 +178,11 @@ export function useTerminal(
     // Windows Terminal's modern mode uses too. Activating the addon switches
     // `term.unicode.activeVersion` to "15-graphemes" itself.
     term.loadAddon(new UnicodeGraphemesAddon());
+    // OSC 52: lets a remote program write the clipboard. Claude Code's
+    // fullscreen mode copies a mouse selection this way over SSH (locally it
+    // shells out to Set-Clipboard instead); without the addon that copy is a
+    // silent no-op. Writes only — the default provider never reads.
+    term.loadAddon(new ClipboardAddon());
     // Serialize full state (buffer + scrollback + modes + cursor + alt-screen) so
     // a re-attaching view in another window can reconstruct a TUI exactly
     // (docs/dev/multi-window.md).
@@ -221,20 +227,29 @@ export function useTerminal(
         return; /* container not measured yet */
       }
       if (atBottom) term.scrollToBottom();
-      // Re-align the DOM scrollbar with the buffer's real position. While
-      // the terminal sat display:none'd the browser clamped its scroller to
-      // scrollTop 0 ("top"); xterm's internal position survived, so the view
-      // LOOKS right — until the first wheel tick re-syncs against the stale
-      // 0 and jumps to the top of scrollback, once per re-show (the
-      // display:none flavor of xterm.js#6172). scrollToBottom above can't
-      // help: already-at-bottom internally is a no-op that never touches the
-      // DOM element.
-      const vp = host.querySelector<HTMLElement>(".xterm-viewport");
-      if (vp) {
-        const b = term.buffer.active;
-        vp.scrollTop = atBottom
-          ? vp.scrollHeight
-          : (vp.scrollHeight * b.viewportY) / (b.length || 1);
+      // Re-sync the DOM scrollbar THROUGH xterm's own scroll path. While the
+      // terminal sat display:none'd the browser clamped its scroller to 0;
+      // xterm's internal position survived, so the view looked right until
+      // the first wheel tick re-synced against the stale 0 and jumped to the
+      // top (0.14.5's bug, the display:none flavor of xterm.js#6172). 0.14.5
+      // wrote vp.scrollTop directly — but xterm REINTERPRETS DOM scroll
+      // events as round(scrollTop / rowHeight), and with a fractional row
+      // height (lineHeight 1.1) that could land one row above the bottom
+      // with isUserScrolling set, where the thumb already sat at max so
+      // wheel-down emitted nothing until a keypress (0.16.4's bug). A real
+      // ydisp change fires onScroll → syncScrollArea → xterm rewrites the
+      // scroller itself, ignore-flag and all: no reinterpretation, no
+      // rounding. scrollToBottom alone can't do it — scrollLines only fires
+      // on an actual change, and "already at the bottom" is no change.
+      const b = term.buffer.active;
+      if (b.baseY > 0) {
+        if (b.viewportY > 0) {
+          term.scrollLines(-1);
+          term.scrollLines(1); // back where it was; clears isUserScrolling at the bottom
+        } else {
+          term.scrollLines(1);
+          term.scrollLines(-1);
+        }
       }
     };
     safeFitRef.current = safeFit;
@@ -265,6 +280,26 @@ export function useTerminal(
       if (e.type === "keydown" && isPassthroughShortcut(e)) {
         // Suppress xterm's default for the combo (and don't send it to the
         // shell); the event still bubbles to the window handler, which acts.
+        e.preventDefault();
+        return false;
+      }
+      // Shift+Enter = newline, not submit. xterm.js can't speak the kitty
+      // keyboard protocol that lets Claude Code tell the two apart, so do what
+      // VS Code's /terminal-setup binding does: send a newline wrapped in
+      // bracketed-paste markers — the program treats it as pasted text and
+      // inserts a line break instead of submitting. Only while the program
+      // has bracketed paste on (Claude Code, modern shells); anywhere else
+      // Shift+Enter stays a plain Enter.
+      if (
+        e.type === "keydown" &&
+        e.key === "Enter" &&
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        term.modes.bracketedPasteMode &&
+        ptyId
+      ) {
+        void ptyWrite(ptyId, encoder.encode("\x1b[200~\n\x1b[201~"));
         e.preventDefault();
         return false;
       }

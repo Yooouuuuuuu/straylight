@@ -51,7 +51,8 @@ sizes persist. Every UI color comes from CSS custom properties fed by
 - **Frontend:** React 18 + Vite + TypeScript, Zustand (two stores),
   `monaco-editor`, `@xterm/xterm` (+fit, +webgl, +serialize,
   +unicode-graphemes — grapheme-cluster widths, so emoji/CJK measure as
-  modern TUIs and Windows Terminal do), `fuse.js` (fuzzy finder +
+  modern TUIs and Windows Terminal do; +clipboard — OSC 52 writes, which
+  Claude Code's fullscreen mode uses to copy selections over SSH), `fuse.js` (fuzzy finder +
   palette), `marked` + `dompurify` (Markdown preview), react-resizable-panels.
 - `~/.ssh/config` is parsed by **our own parser** (`ssh/config.rs`) — the
   russh-config crate can only resolve one named host, not enumerate every

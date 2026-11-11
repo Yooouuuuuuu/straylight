@@ -249,54 +249,143 @@ export function FocusView() {
     clearBell(id); // looking at it marks the completion READ
   };
 
-  const USAGE_READY_MS = 9000;
-  const REFRESH_READY_MS = 1500;
-
-  const verifyUsage = (id: string, connId: string) => {
-    const low = readTerminalText(id).toLowerCase();
-    // Failures: no claude, or the channel was refused (MaxSessions).
-    const failed =
-      /not recognized|command not found|no such file|failed to open terminal|session limit|maxsessions/.test(
-        low,
-      );
-    const hits = ["session", "week", "reset", "limit", "usage", "%"].filter(
-      (w) => low.includes(w),
-    ).length;
+  // ---- The usage probe: a closed-loop driver (2026-11-11) -----------------
+  // The old probe typed Enter on a fixed clock to clear the trust prompt —
+  // and Claude Code 2.1.285 puts the cursor on "No, exit" by default, so the
+  // blind Enter QUIT Claude, `/usage` landed in the shell, and the shell's
+  // localized error ("無法將 '/usage' 字詞辨識為 Cmdlet…") slipped past an
+  // English-only failure check into the generic "log in" message. The driver
+  // now READS the screen every half second and answers each state explicitly:
+  // the trust dialog gets a deliberate Yes (Down + Enter, whatever the
+  // default), a ready prompt gets `/usage`, the usage panel ends the probe,
+  // "Claude is gone" is detected by the SHELL PROMPT returning (language-
+  // proof — never by error text), and on the deadline the terminal stays
+  // OPEN so the user can see where it stopped.
+  const USAGE_DEADLINE_MS = 25_000;
+  const PROBE_POLL_MS = 500;
+  const probeTimers = useRef<Map<string, number>>(new Map());
+  useEffect(() => {
+    const timers = probeTimers.current;
+    return () => timers.forEach((t) => window.clearInterval(t));
+  }, []);
+  const stopProbe = (id: string) => {
+    const t = probeTimers.current.get(id);
+    if (t !== undefined) window.clearInterval(t);
+    probeTimers.current.delete(id);
     setLoadingProbe((cur) => (cur === id ? null : cur));
-    if (failed || hits < 2) {
-      closeTerminal(id);
-      setUsageFailed(hostName(connId));
-      pushNotice(
-        "warn",
-        `Couldn't load usage on ${hostName(connId)} — confirm Claude Code is set up for environment and logged in already before retry.`,
-      );
-    }
+  };
+  /** The usage panel is on screen: enough of its vocabulary in the buffer. */
+  const usageShown = (low: string) =>
+    ["session", "week", "reset", "limit", "usage", "%"].filter((w) => low.includes(w))
+      .length >= 3;
+  /** The last non-empty line is a shell prompt (pwsh `PS …>`, bash `$`, zsh
+   *  `%`, root `#`) — i.e. Claude isn't running. A bare `>` is excluded on
+   *  purpose: Claude's own input box line ends with one. */
+  const atShellPrompt = (text: string) => {
+    const last =
+      text
+        .split("\n")
+        .map((l) => l.trimEnd())
+        .filter((l) => l.trim())
+        .pop() ?? "";
+    return /^(PS .*>|.*[$%#])\s*$/.test(last);
+  };
+  const trustDialog = (low: string) =>
+    low.includes("trust this folder") && low.includes("enter to confirm");
+  const promptReady = (low: string) =>
+    low.includes("│ >") || low.includes("? for shortcuts") || low.includes("/ for commands");
+  const loginScreen = (low: string) =>
+    low.includes("select login method") || low.includes("log in with") || low.includes("sign in");
+
+  const driveProbe = (id: string, connId: string, mode: "fresh" | "refresh") => {
+    stopProbe(id);
+    setUsageFailed(null);
+    setLoadingProbe(id);
+    const started = Date.now();
+    let phase: "starting" | "trust-answered" | "usage-sent" =
+      mode === "refresh" ? "usage-sent" : "starting";
+    let sawClaude = mode === "refresh";
+    let lastAction = mode === "refresh" ? started : 0;
+    const fail = (why: string, opts?: { close?: boolean }) => {
+      stopProbe(id);
+      if (opts?.close) {
+        closeTerminal(id);
+        setUsageFailed(hostName(connId));
+      }
+      pushNotice("warn", `Couldn't load usage on ${hostName(connId)} — ${why}`);
+    };
+    const tick = () => {
+      const text = readTerminalText(id);
+      const low = text.toLowerCase();
+      const now = Date.now();
+      if (phase === "usage-sent" && usageShown(low)) {
+        stopProbe(id);
+        return;
+      }
+      if (loginScreen(low)) {
+        fail(
+          "Claude Code isn't logged in there. Run `claude` in a terminal on that host, log in, then retry.",
+        );
+        return;
+      }
+      if (trustDialog(low)) {
+        sawClaude = true;
+        if (now - lastAction > 3_000) {
+          // Choose "Yes, I trust this folder" explicitly: Down moves off the
+          // default (currently "No, exit"), Enter confirms.
+          sendTerminalInput(id, "\x1b[B");
+          window.setTimeout(() => sendTerminalInput(id, "\r"), 150);
+          lastAction = now;
+          phase = "trust-answered";
+        }
+        return;
+      }
+      if (promptReady(low)) {
+        sawClaude = true;
+        if (phase !== "usage-sent" || now - lastAction > 6_000) {
+          sendTerminalInput(id, "/usage\r");
+          lastAction = now;
+          phase = "usage-sent";
+        }
+        return;
+      }
+      if (sawClaude && atShellPrompt(text) && now - lastAction > 1_500) {
+        fail(
+          "Claude Code exited before /usage could run. The terminal is left open so you can see why.",
+        );
+        return;
+      }
+      if (!sawClaude && atShellPrompt(text) && now - started > 8_000) {
+        fail(
+          "the `claude` command didn't start there. Install Claude Code and make sure `claude` runs in that host's shell, then retry.",
+          { close: true },
+        );
+        return;
+      }
+      if (now - started > USAGE_DEADLINE_MS) {
+        fail(
+          "it didn't finish in time. The terminal is left open so you can see where it stopped.",
+        );
+      }
+    };
+    probeTimers.current.set(id, window.setInterval(tick, PROBE_POLL_MS));
   };
 
   const runProbe = (connId: string, existing: TerminalSession | undefined) => {
     setUsageFailed(null);
     if (existing) {
       setChatActive(existing.id);
-      setLoadingProbe(existing.id);
       sendTerminalInput(existing.id, "\x1b"); // Esc — dismiss the open panel
       window.setTimeout(() => sendTerminalInput(existing.id, "/usage\r"), 400);
-      window.setTimeout(() => verifyUsage(existing.id, connId), REFRESH_READY_MS);
+      driveProbe(existing.id, connId, "refresh");
       return;
     }
     const id = openTerminalInChat(connId, "usage", {
       locked: true,
       usageProbe: true,
-      scriptedInput: [
-        { text: "claude\r", delayMs: 600 },
-        { text: "\r", delayMs: 4000 }, // trust-folder ask, if any
-        { text: "\r", delayMs: 6000 }, // …and a spare for slow starts
-        { text: "/usage\r", delayMs: 7500 },
-      ],
+      scriptedInput: [{ text: "claude\r", delayMs: 600 }],
     });
-    if (id) {
-      setLoadingProbe(id);
-      window.setTimeout(() => verifyUsage(id, connId), USAGE_READY_MS);
-    }
+    if (id) driveProbe(id, connId, "fresh");
   };
 
   const onHostClick = (connId: string) => {
