@@ -11,6 +11,35 @@ history of design changes — lives in the docs: the decision ledger in
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-11
+
+### Changed
+
+- **Terminal engine upgraded to xterm.js 6.0** (from 5.5). What you'll
+  notice: programs that draw whole frames — Claude Code's fullscreen mode,
+  modern TUIs — now paint **one frame at a time** instead of mid-draw, with
+  no tearing or flicker (synchronized output, DEC mode 2026; a frame that is
+  never closed is released after a second, so a crashed program can't freeze
+  the view). The **scrollbar is now an overlay** that fades out when idle,
+  the same control VS Code uses, tinted from the terminal foreground. Every
+  addon (fit, WebGL, serialize, grapheme widths, OSC 52 clipboard) is the
+  matching 6.0 release.
+- **The scroll re-sync workaround is gone.** 6.0's viewport is no longer a
+  browser scroller, which was the root of both 0.14.5's "first wheel tick
+  jumps to the top" and 0.16.4's "stuck one row above the bottom": there is
+  nothing left to go stale while a terminal is hidden. A fit now does only
+  what it says — keep a bottom-pinned terminal at the bottom.
+
+### Added
+
+- **Claude Code's fullscreen mode is supported and documented** —
+  `/tui fullscreen` inside Claude Code (it remembers). The pieces, across
+  0.16.3–0.17.0: synchronized output (this release), grapheme-cluster widths
+  (0.16.3), OSC 52 copy over SSH, Shift+Enter newline and the ConPTY
+  full-repaint hint for local shells (0.16.4). What it needs from the
+  terminal, and what the local-shell path can and cannot carry, is written
+  up under "Agent TUIs" in [docs/architecture.md](docs/architecture.md).
+
 ## [0.16.4] - 2026-11-11
 
 ### Fixed

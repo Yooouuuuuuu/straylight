@@ -49,11 +49,12 @@ sizes persist. Every UI color comes from CSS custom properties fed by
   `window-state` (persist window size/position); `updater` + `process` power
   the GitHub-Releases auto-update that ships with 0.10.
 - **Frontend:** React 18 + Vite + TypeScript, Zustand (two stores),
-  `monaco-editor`, `@xterm/xterm` (+fit, +webgl, +serialize,
-  +unicode-graphemes — grapheme-cluster widths, so emoji/CJK measure as
-  modern TUIs and Windows Terminal do; +clipboard — OSC 52 writes, which
-  Claude Code's fullscreen mode uses to copy selections over SSH), `fuse.js` (fuzzy finder +
-  palette), `marked` + `dompurify` (Markdown preview), react-resizable-panels.
+  `monaco-editor`, `@xterm/xterm` 6 (synchronized output — DEC 2026 — built
+  in; +fit, +webgl, +serialize, +unicode-graphemes — grapheme-cluster widths,
+  so emoji/CJK measure as modern TUIs and Windows Terminal do; +clipboard —
+  OSC 52 writes, which Claude Code's fullscreen mode uses to copy selections
+  over SSH; see "Agent TUIs" below), `fuse.js` (fuzzy finder + palette),
+  `marked` + `dompurify` (Markdown preview), react-resizable-panels.
 - `~/.ssh/config` is parsed by **our own parser** (`ssh/config.rs`) — the
   russh-config crate can only resolve one named host, not enumerate every
   `Host` block.
@@ -194,6 +195,61 @@ inside an outlined tool frame. Polling only runs while a tool is open;
 intervals and per-tool visibility live under `panels` in settings.json.
 Terminals can pop out into editor tabs (⇱) and return on close without
 restarting the shell.
+
+### Agent TUIs (Claude Code fullscreen)
+
+Claude Code has two renderers: the default inline transcript (output scrolls
+into the terminal's own history) and **fullscreen** — `/tui fullscreen` inside
+a conversation, `/tui default` to go back; Claude saves the choice in its own
+`tui` setting, and `CLAUDE_CODE_NO_FLICKER=1 claude` starts a session in it.
+Fullscreen runs on the alternate screen and repaints whole frames like vim or
+htop, which asks a few specific things of the terminal. What provides each,
+and why it is needed:
+
+- **Synchronized output (DEC 2026)** — xterm.js 6.0 (0.17.0). Claude brackets
+  every frame in `?2026h … ?2026l` and xterm holds the paint until the frame
+  closes (a frame left open is released after 1 s, so a crashed program can't
+  freeze the view). Without it a streaming repaint tears.
+- **Grapheme-cluster widths** — `@xterm/addon-unicode-graphemes` (0.16.3).
+  Claude measures text with `string-width` (an emoji is 2 cells, a ZWJ family
+  is 2). The terminal has to agree, or wrap arithmetic diverges and a
+  cursor-up repaint lands a line off — the duplicated-frame replays. The font
+  fallback stack (JhengHei / Noto CJK / Segoe UI Emoji) supplies the glyphs;
+  the addon supplies the math.
+- **OSC 52 clipboard writes** — `@xterm/addon-clipboard` (0.16.4). In
+  fullscreen the mouse belongs to Claude, so a selection is its own, and it
+  copies by writing the clipboard *through the terminal*. Locally it shells
+  out to `Set-Clipboard` instead; over SSH OSC 52 is the only route. Writes
+  only — the terminal never answers a read.
+- **Shift+Enter = newline** (0.16.4). xterm.js doesn't speak the kitty
+  keyboard protocol, so Shift+Enter is indistinguishable from Enter; sending
+  `\n` inside bracketed-paste markers is what VS Code's `/terminal-setup`
+  installs, and it applies only while the program has bracketed paste on.
+- **The local path: ConPTY.** Local shells run under Windows' own pseudo
+  console (kernel32's; no sideloaded `conpty.dll`), which re-renders what
+  the program wrote rather than forwarding it — so whether the frame markers
+  reach xterm depends on the Windows build. The current ConPTY (the conhost
+  line Windows Terminal 1.23 ships) passes `?2026h/l` and OSC 52 through
+  untouched — verified 2026-11-11 on build 26200 by spawning pwsh under
+  `portable-pty` and reading the master side. Older builds drop what they
+  don't know, which is why local shells also get
+  `CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT=1` (0.16.4): Claude's own fallback for
+  ConPTY hosts, full repaints instead of diffs. Remote shells get neither —
+  SSH carries the raw stream, and their environment is theirs.
+- **Scrolling in fullscreen is Claude's**, not the terminal's: the alternate
+  screen has no scrollback, so the wheel scrolls Claude's transcript
+  (`CLAUDE_CODE_SCROLL_SPEED` tunes it). Leaving fullscreen restores the
+  shell's history.
+- **Surviving a pop-out.** A fullscreen session moves between windows intact:
+  the serialize addon captures the alternate screen and its modes, and the
+  terminal hook tracks cursor visibility itself, which the addon doesn't
+  (docs/dev/multi-window.md).
+
+Not promised: the kitty keyboard protocol (xterm.js has none), OSC 52 reads,
+and an inline transcript surviving a width change — text hard-wrapped at the
+width it was printed stays wrapped, which is why a PTY is never opened at
+xterm's default 80 columns (0.14.0) and every refit is gated on a real
+measurement.
 
 ### Host identity
 

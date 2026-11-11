@@ -226,31 +226,18 @@ export function useTerminal(
       } catch {
         return; /* container not measured yet */
       }
+      // Bottom-follow is all the re-sync a fit needs on xterm 6: scrollToBottom
+      // routes through scrollLines, which clears isUserScrolling whenever the
+      // target is the bottom — even for a zero-line move. (5.5 needed more:
+      // its viewport was a real DOM scroller that the browser clamped to 0
+      // while the terminal sat display:none'd, so the first wheel tick
+      // re-synced against a stale 0 and jumped to the top — xterm.js#6172,
+      // 0.14.5 — and the direct scrollTop write that patched it was
+      // reinterpreted through fractional row math and could strand the view
+      // one row short, 0.16.4. 6.0's viewport is VS Code's scrollable element
+      // with its own position model and no DOM scroll listener, so neither
+      // failure exists to work around.)
       if (atBottom) term.scrollToBottom();
-      // Re-sync the DOM scrollbar THROUGH xterm's own scroll path. While the
-      // terminal sat display:none'd the browser clamped its scroller to 0;
-      // xterm's internal position survived, so the view looked right until
-      // the first wheel tick re-synced against the stale 0 and jumped to the
-      // top (0.14.5's bug, the display:none flavor of xterm.js#6172). 0.14.5
-      // wrote vp.scrollTop directly — but xterm REINTERPRETS DOM scroll
-      // events as round(scrollTop / rowHeight), and with a fractional row
-      // height (lineHeight 1.1) that could land one row above the bottom
-      // with isUserScrolling set, where the thumb already sat at max so
-      // wheel-down emitted nothing until a keypress (0.16.4's bug). A real
-      // ydisp change fires onScroll → syncScrollArea → xterm rewrites the
-      // scroller itself, ignore-flag and all: no reinterpretation, no
-      // rounding. scrollToBottom alone can't do it — scrollLines only fires
-      // on an actual change, and "already at the bottom" is no change.
-      const b = term.buffer.active;
-      if (b.baseY > 0) {
-        if (b.viewportY > 0) {
-          term.scrollLines(-1);
-          term.scrollLines(1); // back where it was; clears isUserScrolling at the bottom
-        } else {
-          term.scrollLines(1);
-          term.scrollLines(-1);
-        }
-      }
     };
     safeFitRef.current = safeFit;
     // Re-themed (and refit on font changes) live when settings.json changes.

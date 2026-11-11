@@ -47,6 +47,18 @@ notes. Not design docs; not shipped.
 Brief, dated notes on the load-bearing decisions and the places the approach
 **changed** — the archaeology the design docs deliberately omit. Newest first.
 
+- **2026-11 · The terminal for fullscreen agents** ([architecture.md](architecture.md#agent-tuis-claude-code-fullscreen),
+  0.16.3–0.17.0) — three field reports (squeezed glyphs, replayed frames, a
+  terminal that wouldn't scroll) traced to the same place: the terminal and
+  the agent disagreeing about the screen. Resolved by **mirroring the tool**,
+  not compensating for it — grapheme-cluster widths so wrap arithmetic matches
+  Claude Code's own (0.16.3), and xterm.js 6.0 for synchronized output so a
+  frame paints whole (0.17.0). The scroll workarounds (0.14.5's scroller
+  rewrite, 0.16.4's nudge) were each patching the previous patch; 6.0's
+  viewport removed the browser scroller they fought, and both were deleted
+  rather than carried. Rejected: a Straylight-side frame buffer or repaint
+  heuristic in front of xterm (the terminal, not the app, owns rendering).
+
 - **2026-09 · Diagram languages, host-rendered** ([diagrams.md](diagrams.md),
   0.15–0.16) — D2 preview added on the git/jj doctrine: the **host's own
   `d2` binary** renders over one-shot stdin→SVG pipes, probed per connection
